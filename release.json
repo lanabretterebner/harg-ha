@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "version": "1.1.0",
+  "repository": "https://github.com/lanabretterebner/harg-ha",
+  "hacs_category": "plugin",
+  "hacs_resource": "/hacsfiles/harg-ha/hargassner-thermostat-popup.js",
+  "hacs_installation_verified": false,
+  "files": {
+    "CHANGELOG.md": "5a36307f4dec8f3b90429538ac57f5498114b97ffcf36f4201e087243bac6595",
+    "LICENSE": "f5eee63fb76b6585d82d7c3e7e7c5136331316c3256e72cb6bdf587f234d20de",
+    "README.md": "08ed2cc0b0d97f0230fc31dc73d878144580cfa369fcb255e19706777cd99b47",
+    "dist/hargassner-thermostat-popup.js": "a034faee8e466d623cc350c5e26d5e5dfe203ec387cbf9692a447fe41d36ef21",
+    "examples/thermostat-cards.yaml": "acd4523ecfee607b8c351367e2b3ccf6c56b211c355727df99dfe4e29a88d3f7",
+    "hacs.json": "d3819b8b384919ca912bbb9d989178acbd98c8c07cd899b35e9abafcef498fde",
+    "info.md": "ee327fbcc3bbc9d4989180838aabab1d39b36a30d52fb2dbadf14f35a2091050",
+    "package.json": "562877d0ad30104a8e0803b19061cc338f4291fa0f929c096d59611130260a00",
+    "tests/test-thermostat-popup.html": "52b717a6fdbbacbb879a9871aa5a31c97a79675c68fadba9eb684417fb824bf0",
+    "tests/test-thermostat-popup.js": "eac75080a00367e0ef7f2bed50925f9a4d6ff6946d0fbd6c5a691ab9ce763b2a",
+    "tools/validate.py": "c2bdfa5554443f59ea6d8f1b9f5f1eb06cbc7518059fcaeafca5636f2b2a1cff",
+    "validation.json": "90e5962a44024cc3104b62b6ce1ca15fe9bfdc9a4b812e6d32d503613ba021f4"
+  }
+}

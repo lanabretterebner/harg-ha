@@ -1,0 +1,56 @@
+# Optional native tiles; paste into a dashboard Manual card editor.
+# Verify actual registry IDs before use. Thermostat tiles open the popup.
+# The popup provides the single Modus menu; tiles add no preset selector.
+# Separate day/setback/correction numbers keep their own backend permissions.
+type: vertical-stack
+cards:
+- type: tile
+  entity: climate.heizkreis_1
+  name: Heizkreis 1
+  state_content:
+  - temperature
+  tap_action:
+    action: more-info
+- type: tile
+  entity: number.heizkreis_1_tagtemperatur
+  name: Heizkreis 1 · Tagestemperatur
+  features:
+  - type: numeric-input
+    style: buttons
+- type: tile
+  entity: number.heizkreis_1_absenktemperatur
+  name: Heizkreis 1 · Absenktemperatur
+  features:
+  - type: numeric-input
+    style: buttons
+- type: tile
+  entity: number.heizkreis_1_raumkorrektur
+  name: Heizkreis 1 · Raumkorrektur
+  features:
+  - type: numeric-input
+    style: buttons
+- type: tile
+  entity: climate.heizkreis_2
+  name: Heizkreis 2
+  state_content:
+  - temperature
+  tap_action:
+    action: more-info
+- type: tile
+  entity: number.heizkreis_2_tagtemperatur
+  name: Heizkreis 2 · Tagestemperatur
+  features:
+  - type: numeric-input
+    style: buttons
+- type: tile
+  entity: number.heizkreis_2_absenktemperatur
+  name: Heizkreis 2 · Absenktemperatur
+  features:
+  - type: numeric-input
+    style: buttons
+- type: tile
+  entity: number.heizkreis_2_raumkorrektur
+  name: Heizkreis 2 · Raumkorrektur
+  features:
+  - type: numeric-input
+    style: buttons

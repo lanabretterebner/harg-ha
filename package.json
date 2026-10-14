@@ -1,0 +1,9 @@
+{
+  "name": "harg-ha",
+  "version": "1.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check dist/hargassner-thermostat-popup.js"
+  }
+}

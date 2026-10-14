@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "version": "1.1.0",
+  "resource_sha256": "a034faee8e466d623cc350c5e26d5e5dfe203ec387cbf9692a447fe41d36ef21",
+  "home_assistant_reference": "https://raw.githubusercontent.com/home-assistant/frontend/20260930.3/src/dialogs/more-info/controls/more-info-climate.ts",
+  "source_browser_fixture": {
+    "engine": "Chromium",
+    "tests_passed": 46,
+    "resource_exact_copy": true,
+    "fixture_adjustment": "Only module import points to ../dist/ in this repository.",
+    "source_validation_sha256": "157bb80b14957a0f4272476114a27853eb9e54f0468f356adda34661f1d99090"
+  },
+  "independent_review_extra_cases_passed": 3,
+  "visible_mode_control": "Modus",
+  "choices": [
+    "Aus",
+    "Auto",
+    "Heizen",
+    "Absenken",
+    "1x Heizen",
+    "1x Absenken"
+  ],
+  "both_native_mode_selectors_replaced": true,
+  "automatic_commands": false,
+  "explicit_choice_uses_native_preset_handler": true,
+  "actual_home_assistant_instance_tested": false,
+  "hacs_installation_verified": false,
+  "limits": [
+    "Browser fixtures reproduce the native component contract; they do not establish compatibility with every HA frontend version.",
+    "Repository structure and syntax validation do not establish a completed hosted HACS installation."
+  ]
+}
