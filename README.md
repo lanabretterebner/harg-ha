@@ -1,12 +1,13 @@
 # Hargassner for Home Assistant
 
-Version1.2.0 includes the HA clients for an existing Hargassner local-control
-backend: one Modus menu with offline icons and heating-circuit status, the
-optional dashboard Ingress app, native tiles and an entity-naming reference.
+Version1.3.0 includes the HA clients for an existing Hargassner local-control
+backend: a discoverable thermostat dashboard card, the matching native popup,
+one-device page grouping, the optional dashboard Ingress app and reference examples.
 
 | Component | Installation | Result |
 | --- | --- | --- |
-| Thermostat popup | HACS, Dashboard category | One Modus menu, mode icons and Heizkreisstatus in native climate dialogs |
+| Thermostat card and popup | HACS, Dashboard category | Native target dial, one Modus menu, icons and Heizkreisstatus |
+| Existing device page | Same loaded HACS resource | Logical headings inside its native entity lists; one MQTT device stays intact |
 | Hargassner Dashboard | HA App store repositories | Existing dashboard through authenticated HA Ingress |
 | Tiles and naming reference | Copy examples after checking entity IDs | Status on everyday climate tiles and separate day/setback/correction controls |
 
@@ -26,7 +27,7 @@ MQTT/backend services. No live backend identity, configuration or token is inclu
    this URL as a **JavaScript module**:
 
    ```text
-   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.2.0
+   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.3.0
    ```
 
 3. Remove older manual resource URLs, fully reload each browser/Companion App,
@@ -41,7 +42,7 @@ loading before a dashboard is visited.
 
 For manual installation, copy `dist/hargassner-thermostat-popup.js` to
 `/config/www/hargassner-thermostat-popup.js` and use
-`/local/hargassner-thermostat-popup.js?v=1.2.0` instead. Remove that manual
+`/local/hargassner-thermostat-popup.js?v=1.3.0` instead. Remove that manual
 registration when switching to HACS.
 
 The single **Modus** menu offers **Aus · Auto · Heizen · Absenken · 1x Heizen ·
@@ -55,6 +56,41 @@ or invalid status says **Nicht verfügbar**. It does not replace HA's native
 HVAC state or assert that a pump runs. The backend must supply the schema,
 six presets and documented status attributes.
 [Entity/status contract](docs/ENTITY-CONTRACT.md).
+
+## Add thermostat cards through the visual editor
+
+After updating/loading the resource, open a dashboard, choose **Edit → Add card**
+and search for **Hargassner Thermostat**. Select the card, choose the matching
+climate entity in its visual editor and save. Repeat for the second circuit.
+No YAML is required. [Detailed card installation](docs/CARD-INSTALL.md).
+
+The card shows the same six-choice Modus menu/icons and read-only status as the
+popup. Its native dial is labeled **Zieltemperatur**; the separate **Ist** reading
+shows **Nicht verfügbar** when no measured room value exists. **Raumkorrektur**
+is shown independently. No reported temperature or mode is invented. Dial writes
+remain correction-only and backend-qualified.
+
+The [complete dashboard example](examples/hargassner-dashboard.json) supplies
+two custom thermostat stacks, separate base/correction controls and grouped
+readings. Its entity IDs are generic suggestions: check the actual HA registry,
+including collision suffixes, before importing a configuration.
+
+## Groups inside the existing device page
+
+The resource adds **Heizkreis1, Heizkreis2, Puffer, Kessel, Solar, Warmwasser,
+Pelletslager and Steuerung** headings inside the native Control/Sensor/etc
+entity lists of the matching existing Hargassner device. Original native rows,
+buttons and disabled-entity expansion remain. A group can occur in more than
+one native category card. No entity is moved to another HA device, renamed or
+republished, and no MQTT reload is required.
+
+Grouping uses immutable MQTT identity suffixes and the entity domain, so renamed
+entity IDs and numeric collision suffixes remain supported. Unknown matching
+entries stay visible. [Frontend group reference](examples/entity-ui-groups.json).
+Only selected/published entities appear; the90-entry reference does not enable
+additional entities. Unsupported device/layout contexts retain the native view.
+A fresh Settings page still needs the resource loaded; use the global loader
+above for loading before any dashboard is visited.
 
 ## Optional dashboard app
 
@@ -82,7 +118,8 @@ installation is required; installing the HACS popup alone does not install this 
 
 ## Native tiles and entity IDs
 
-Copy [thermostat-cards.yaml](examples/thermostat-cards.yaml) into a dashboard's
+The older optional native tiles remain available: copy
+[thermostat-cards.yaml](examples/thermostat-cards.yaml) into a dashboard's
 Manual card editor. Both climate tiles show target temperature and
 `Heizkreisstatus`; card and icon taps open the native dialog. Six number tiles
 keep day, setback and correction controls separate. No inline preset selector
@@ -96,8 +133,9 @@ entity. MQTT discovery, freshness and correction-only dial writes remain backend
 ## Compatibility and troubleshooting
 
 The popup contract was researched against HA frontend20260930.3. The preceding
-1.1.0 release was downloaded in HA2026.9.3/HACS2.0.5, with both matching native
-popups showing one Modus menu. Release-specific fixture checks are in
+1.2.0 release was downloaded in HA2026.9.3/HACS2.0.5, with both matching native
+popups showing one Modus menu, icons and status. Current1.3.0 card/device-page
+installation is accepted separately from this source package. Release-specific fixture checks are in
 [validation.json](validation.json). Unsupported layouts and unknown current
 presets retain native controls. Future HA DOM changes may require an update.
 
@@ -128,8 +166,9 @@ python3 -B -m unittest discover -s hargassner-dashboard -p 'test_*.py'
 ```
 
 Serve this repository locally and open `tests/test-thermostat-popup.html` for
-the browser fixture. Tests contact no live HA/controller. Structure, syntax and
+the popup/card fixture and `tests/test-device-groups.html` for scoped grouping.
+Tests contact no live HA/controller. Structure, syntax and
 loopback tests do not establish hosted installation or physical heating response.
-Publish a GitHub release tagged `v1.2.0` with the standalone JavaScript asset;
+Publish a GitHub release tagged `v1.3.0` with the standalone JavaScript asset;
 Supervisor builds the committed app source from the repository.
 [Third-party icon licenses](THIRD-PARTY-NOTICES.md).

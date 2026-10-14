@@ -72,6 +72,43 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(set(row), {"settings_selection_id", "canonical_name",
                                         "default_entity_id", "discovery_object_id"})
 
+    def test_device_groups_are_frontend_metadata_for_one_unchanged_device(self):
+        groups = load("examples/entity-ui-groups.json")
+        names = load("examples/entity-name-mapping.json")
+        self.assertEqual(len(groups["entities"]), 90)
+        self.assertEqual(set(groups["entities"]), {row["settings_selection_id"] for row in names})
+        self.assertEqual(len(groups["groups"]), 8)
+        for row in names:
+            value = groups["entities"][row["settings_selection_id"]]
+            self.assertEqual(set(value), {"default_entity_id", "group"})
+            self.assertEqual(value["default_entity_id"], row["default_entity_id"])
+            self.assertIn(value["group"], groups["groups"])
+        self.assertIn("no MQTT metadata or registry changes", groups["scope"])
+
+    def test_complete_dashboard_has_two_custom_cards_and_eight_sections(self):
+        dashboard = load("examples/hargassner-dashboard.json")
+        cards = dashboard["views"][0]["cards"]
+        self.assertEqual(len(cards), 8)
+        stacks = [card for card in cards if card["type"] == "vertical-stack"]
+        self.assertEqual(len(stacks), 2)
+        climates = [stack["cards"][0] for stack in stacks]
+        self.assertTrue(all(card["type"] == "custom:hargassner-thermostat-card" for card in climates))
+        self.assertEqual({card["entity"] for card in climates}, {"climate.heizkreis_1", "climate.heizkreis_2"})
+        allowed = {row["default_entity_id"] for row in load("examples/entity-name-mapping.json")}
+        def walk(value):
+            if isinstance(value, dict):
+                if "entity" in value:
+                    self.assertIn(value["entity"], allowed)
+                if value.get("type") == "entities":
+                    self.assertIs(value.get("show_header_toggle"), False)
+                for child in value.values():
+                    walk(child)
+            elif isinstance(value, list):
+                for child in value:
+                    walk(child)
+        walk(dashboard)
+        self.assertNotIn("sensor.aussentemperatur_2", json.dumps(dashboard))
+
 
 if __name__ == "__main__":
     unittest.main()

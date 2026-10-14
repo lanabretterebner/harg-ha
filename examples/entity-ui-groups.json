@@ -1,0 +1,376 @@
+{
+  "schema_version": 1,
+  "scope": "Frontend sections within one existing device; no MQTT metadata or registry changes",
+  "groups": {
+    "heizkreis_1": "Heizkreis 1",
+    "heizkreis_2": "Heizkreis 2",
+    "puffer": "Puffer",
+    "kessel": "Kessel",
+    "solar": "Solar",
+    "warmwasser": "Warmwasser",
+    "pelletslager": "Pelletslager",
+    "steuerung": "Steuerung"
+  },
+  "entities": {
+    "select:PR001": {
+      "default_entity_id": "select.kesselprogramm",
+      "group": "kessel"
+    },
+    "binary_sensor:BP1": {
+      "default_entity_id": "binary_sensor.boiler_1_pumpe",
+      "group": "warmwasser"
+    },
+    "binary_sensor:HKP1": {
+      "default_entity_id": "binary_sensor.heizkreis_1_pumpe",
+      "group": "heizkreis_1"
+    },
+    "binary_sensor:HKP2": {
+      "default_entity_id": "binary_sensor.heizkreis_2_pumpe",
+      "group": "heizkreis_2"
+    },
+    "binary_sensor:RLP_PuffP": {
+      "default_entity_id": "binary_sensor.ruecklauf_ladepumpe_ausgang",
+      "group": "kessel"
+    },
+    "button:PR040": {
+      "default_entity_id": "button.puffer_einmal_ladung_starten",
+      "group": "puffer"
+    },
+    "button:PR042": {
+      "default_entity_id": "button.boiler_1_einmal_ladung_starten",
+      "group": "warmwasser"
+    },
+    "climate:HC1": {
+      "default_entity_id": "climate.heizkreis_1",
+      "group": "heizkreis_1"
+    },
+    "climate:HC2": {
+      "default_entity_id": "climate.heizkreis_2",
+      "group": "heizkreis_2"
+    },
+    "number:11": {
+      "default_entity_id": "number.alle_heizkreise_aus_ueber_aussentemperatur",
+      "group": "steuerung"
+    },
+    "number:12": {
+      "default_entity_id": "number.alle_heizkreise_aus_bei_tagabsenkung",
+      "group": "steuerung"
+    },
+    "number:13": {
+      "default_entity_id": "number.alle_heizkreise_aus_bei_nachtabsenkung",
+      "group": "steuerung"
+    },
+    "number:2": {
+      "default_entity_id": "number.boiler_1_solltemperatur",
+      "group": "warmwasser"
+    },
+    "number:4": {
+      "default_entity_id": "number.heizkreis_1_tagtemperatur",
+      "group": "heizkreis_1"
+    },
+    "number:5": {
+      "default_entity_id": "number.heizkreis_1_absenktemperatur",
+      "group": "heizkreis_1"
+    },
+    "number:7": {
+      "default_entity_id": "number.heizkreis_2_tagtemperatur",
+      "group": "heizkreis_2"
+    },
+    "number:8": {
+      "default_entity_id": "number.heizkreis_2_absenktemperatur",
+      "group": "heizkreis_2"
+    },
+    "number:A12a": {
+      "default_entity_id": "number.heizkreis_2_steilheit_fbh",
+      "group": "heizkreis_2"
+    },
+    "number:A13a": {
+      "default_entity_id": "number.heizkreis_2_vorlauftemperatur_minimum_fbh",
+      "group": "heizkreis_2"
+    },
+    "number:A14a": {
+      "default_entity_id": "number.heizkreis_2_vorlauftemperatur_maximum_fbh",
+      "group": "heizkreis_2"
+    },
+    "number:A16d": {
+      "default_entity_id": "number.heizkreis_2_raumkorrektur",
+      "group": "heizkreis_2"
+    },
+    "number:A18a": {
+      "default_entity_id": "number.heizkreis_2_sommer_badheizen_puffer_mindesttemperatur",
+      "group": "heizkreis_2"
+    },
+    "number:A18c": {
+      "default_entity_id": "number.heizkreis_2_sommer_badheizen_vorlauf_soll",
+      "group": "heizkreis_2"
+    },
+    "number:A2": {
+      "default_entity_id": "number.heizkreis_1_steilheit",
+      "group": "heizkreis_1"
+    },
+    "number:A3": {
+      "default_entity_id": "number.heizkreis_1_vorlauftemperatur_minimum",
+      "group": "heizkreis_1"
+    },
+    "number:A4": {
+      "default_entity_id": "number.heizkreis_1_vorlauftemperatur_maximum",
+      "group": "heizkreis_1"
+    },
+    "number:A6d": {
+      "default_entity_id": "number.heizkreis_1_raumkorrektur",
+      "group": "heizkreis_1"
+    },
+    "number:A8a": {
+      "default_entity_id": "number.heizkreis_1_sommer_badheizen_puffer_mindesttemperatur",
+      "group": "heizkreis_1"
+    },
+    "number:A8c": {
+      "default_entity_id": "number.heizkreis_1_sommer_badheizen_vorlauf_soll",
+      "group": "heizkreis_1"
+    },
+    "number:B2": {
+      "default_entity_id": "number.boiler_1_boilertemperatur_schaltdifferenz",
+      "group": "warmwasser"
+    },
+    "number:B3": {
+      "default_entity_id": "number.boiler_1_boilertemperatur_minimum",
+      "group": "warmwasser"
+    },
+    "number:B9a": {
+      "default_entity_id": "number.boiler_1_energiesparmodus_nach_der_dauer",
+      "group": "warmwasser"
+    },
+    "number:B9b": {
+      "default_entity_id": "number.boiler_1_maximale_pumpenlaufzeit",
+      "group": "warmwasser"
+    },
+    "number:C4c": {
+      "default_entity_id": "number.zentralpuffer_mindesttemperatur_oben",
+      "group": "puffer"
+    },
+    "number:C5a": {
+      "default_entity_id": "number.pufferzwangsladung_aussentemperaturgrenze",
+      "group": "puffer"
+    },
+    "number:D40": {
+      "default_entity_id": "number.pelletvorrat_einstellen",
+      "group": "pelletslager"
+    },
+    "select:15": {
+      "default_entity_id": "select.urlaubsschaltung",
+      "group": "steuerung"
+    },
+    "select:15a": {
+      "default_entity_id": "select.heizkreis_1_urlaubsschaltung",
+      "group": "heizkreis_1"
+    },
+    "select:15b": {
+      "default_entity_id": "select.heizkreis_2_urlaubsschaltung",
+      "group": "heizkreis_2"
+    },
+    "select:A18": {
+      "default_entity_id": "select.heizkreis_2_sommer_badheizen",
+      "group": "heizkreis_2"
+    },
+    "select:A8": {
+      "default_entity_id": "select.heizkreis_1_sommer_badheizen",
+      "group": "heizkreis_1"
+    },
+    "select:B9": {
+      "default_entity_id": "select.boiler_1_energiesparmodus",
+      "group": "warmwasser"
+    },
+    "select:D80d": {
+      "default_entity_id": "select.zentralpuffer_solar_fremdwaermebetrieb_aktivieren",
+      "group": "puffer"
+    },
+    "sensor:Boilerstatus": {
+      "default_entity_id": "sensor.boilerstatus",
+      "group": "warmwasser"
+    },
+    "sensor:Brennerstatus": {
+      "default_entity_id": "sensor.kesselstatus",
+      "group": "kessel"
+    },
+    "sensor:DiffR3TDiff1": {
+      "default_entity_id": "sensor.solar_zieltemperatur",
+      "group": "solar"
+    },
+    "sensor:DiffR3TWq": {
+      "default_entity_id": "sensor.solar_quellentemperatur",
+      "group": "solar"
+    },
+    "sensor:Heizkreis_1_Status": {
+      "default_entity_id": "sensor.heizkreis_1_status",
+      "group": "heizkreis_1"
+    },
+    "sensor:Heizkreis_2_Status": {
+      "default_entity_id": "sensor.heizkreis_2_status",
+      "group": "heizkreis_2"
+    },
+    "sensor:Lagerstand": {
+      "default_entity_id": "sensor.lagerstand",
+      "group": "pelletslager"
+    },
+    "sensor:Leistung": {
+      "default_entity_id": "sensor.gemeldete_leistung",
+      "group": "kessel"
+    },
+    "sensor:O2": {
+      "default_entity_id": "sensor.restsauerstoff",
+      "group": "kessel"
+    },
+    "sensor:O2soll": {
+      "default_entity_id": "sensor.restsauerstoff_sollwert",
+      "group": "kessel"
+    },
+    "sensor:Puffer_Fuellgrad": {
+      "default_entity_id": "sensor.puffer_fuellgrad",
+      "group": "puffer"
+    },
+    "sensor:Puffer_Max_Anforderung": {
+      "default_entity_id": "sensor.puffer_hoechste_anforderung",
+      "group": "puffer"
+    },
+    "sensor:Puffer_Soll_Oben": {
+      "default_entity_id": "sensor.puffer_solltemperatur_oben",
+      "group": "puffer"
+    },
+    "sensor:Puffer_Soll_Unten": {
+      "default_entity_id": "sensor.puffer_solltemperatur_unten",
+      "group": "puffer"
+    },
+    "sensor:Pufferstatus": {
+      "default_entity_id": "sensor.pufferstatus",
+      "group": "puffer"
+    },
+    "sensor:Solar_Leistung": {
+      "default_entity_id": "sensor.solar_gemeldete_leistung",
+      "group": "solar"
+    },
+    "sensor:Solar_Pumpe1_Leistung": {
+      "default_entity_id": "sensor.solarpumpe_1_ansteuerung",
+      "group": "solar"
+    },
+    "sensor:Solar_Tagesenergie": {
+      "default_entity_id": "sensor.solar_tagesenergie",
+      "group": "solar"
+    },
+    "sensor:TA_Gem": {
+      "default_entity_id": "sensor.aussentemperatur_gemittelt",
+      "group": "steuerung"
+    },
+    "sensor:TB1": {
+      "default_entity_id": "sensor.boiler_1_boilertemperatur",
+      "group": "warmwasser"
+    },
+    "sensor:TK": {
+      "default_entity_id": "sensor.kesseltemperatur",
+      "group": "kessel"
+    },
+    "sensor:TKs": {
+      "default_entity_id": "sensor.kessel_solltemperatur",
+      "group": "kessel"
+    },
+    "sensor:TPo": {
+      "default_entity_id": "sensor.pufferfuehler_oben",
+      "group": "puffer"
+    },
+    "sensor:TPu": {
+      "default_entity_id": "sensor.pufferfuehler_unten",
+      "group": "puffer"
+    },
+    "sensor:TRA_1": {
+      "default_entity_id": "sensor.heizkreis_1_raumtemperatur",
+      "group": "heizkreis_1"
+    },
+    "sensor:TRG": {
+      "default_entity_id": "sensor.rauchgastemperatur",
+      "group": "kessel"
+    },
+    "sensor:TRL": {
+      "default_entity_id": "sensor.ruecklauftemperatur",
+      "group": "kessel"
+    },
+    "sensor:TRLsoll": {
+      "default_entity_id": "sensor.ruecklauf_solltemperatur",
+      "group": "kessel"
+    },
+    "sensor:TRs_1": {
+      "default_entity_id": "sensor.heizkreis_1_interner_regelsollwert",
+      "group": "heizkreis_1"
+    },
+    "sensor:TRs_2": {
+      "default_entity_id": "sensor.heizkreis_2_interner_regelsollwert",
+      "group": "heizkreis_2"
+    },
+    "sensor:TVL_1": {
+      "default_entity_id": "sensor.heizkreis_1_vorlauftemperatur",
+      "group": "heizkreis_1"
+    },
+    "sensor:TVL_2": {
+      "default_entity_id": "sensor.heizkreis_2_vorlauftemperatur",
+      "group": "heizkreis_2"
+    },
+    "sensor:TVLs_1": {
+      "default_entity_id": "sensor.heizkreis_1_vorlauf_solltemperatur",
+      "group": "heizkreis_1"
+    },
+    "sensor:TVLs_2": {
+      "default_entity_id": "sensor.heizkreis_2_vorlauf_solltemperatur",
+      "group": "heizkreis_2"
+    },
+    "sensor:Taus": {
+      "default_entity_id": "sensor.aussentemperatur",
+      "group": "steuerung"
+    },
+    "sensor:ZK": {
+      "default_entity_id": "sensor.kesselstatus_code",
+      "group": "kessel"
+    },
+    "text:16": {
+      "default_entity_id": "text.urlaubszeit_von",
+      "group": "steuerung"
+    },
+    "text:16a": {
+      "default_entity_id": "text.heizkreis_1_urlaubszeit_von",
+      "group": "heizkreis_1"
+    },
+    "text:16b": {
+      "default_entity_id": "text.heizkreis_2_urlaubszeit_von",
+      "group": "heizkreis_2"
+    },
+    "text:17": {
+      "default_entity_id": "text.urlaubszeit_bis",
+      "group": "steuerung"
+    },
+    "text:17a": {
+      "default_entity_id": "text.heizkreis_1_urlaubszeit_bis",
+      "group": "heizkreis_1"
+    },
+    "text:17b": {
+      "default_entity_id": "text.heizkreis_2_urlaubszeit_bis",
+      "group": "heizkreis_2"
+    },
+    "text:Z41": {
+      "default_entity_id": "text.name_heizkreis_1",
+      "group": "heizkreis_1"
+    },
+    "text:Z42": {
+      "default_entity_id": "text.name_heizkreis_2",
+      "group": "heizkreis_2"
+    },
+    "text:Z51": {
+      "default_entity_id": "text.name_boiler_1",
+      "group": "warmwasser"
+    },
+    "text:Z54a": {
+      "default_entity_id": "text.name_zentralpuffer",
+      "group": "puffer"
+    },
+    "text:Z59": {
+      "default_entity_id": "text.name_pwm_diffreg_kreis_1",
+      "group": "solar"
+    }
+  }
+}

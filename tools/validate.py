@@ -14,13 +14,21 @@ def validate():
     assert hacs == {"name": "Hargassner Thermostat Popup",
                     "filename": "hargassner-thermostat-popup.js"}
     assert package["name"] == "harg-ha"
-    assert package["version"] == release["version"] == "1.2.0"
+    assert package["version"] == release["version"] == "1.3.0"
     assert package["type"] == "module"
     script = ROOT / "dist" / hacs["filename"]
     text = script.read_text()
-    assert 'const VERSION = "1.2.0";' in text
+    assert 'const VERSION = "1.3.0";' in text
     assert 'const LABEL = "Modus";' in text
     assert "configured_room_setpoint_v1" in text
+    assert "hargassner-thermostat-card" in text
+    assert "customCards" in text
+    assert "_renderEntities" in text
+    assert not re.search(r'import\s*(?:\(|[\s\S]*?from\s*)[\"\']\.', text)
+    for name in ("test-thermostat-popup.js", "test-thermostat-card.js", "test-device-groups.js"):
+        fixture = (ROOT / "tests" / name).read_text()
+        assert "../dist/hargassner-thermostat-popup.js" in fixture
+    assert (ROOT / "tests/device-group-fixture-data.js").is_file()
     assert set(path.name for path in (ROOT / "dist").iterdir()) == {hacs["filename"]}
     for name, expected in release["files"].items():
         path = PurePosixPath(name)

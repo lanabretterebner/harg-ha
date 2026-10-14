@@ -360,12 +360,12 @@ await test("separate native menu parents retain the native layout", async () => 
   const p = mount(); await settle(); const wrapper=document.createElement("div");
   p.shadowRoot.append(wrapper); wrapper.append(p.preset); await settle(); native(p);
 });
-await test("older installed resource is stopped before version 1.2.0 starts", async () => {
+await test("older installed resource is stopped before version 1.3.0 starts", async () => {
   controller.stop(); let stopped=0;
   const prior={version:"1.1.0",running:true,stop(){stopped++;this.running=false;}};
   window[Symbol.for("hargassner.thermostat.popup.v1")]=prior;
   controller=installHargassnerThermostatPopup(window); await controller.ready;
-  equal(stopped,1); equal(controller.version,"1.2.0");
+  equal(stopped,1); equal(controller.version,"1.3.0");
   const p=mount(); await settle(); patched(p);
 });
 
@@ -373,3 +373,7 @@ controller.stop(); window.fetch = nativeFetch;
 window.popupTestResults = { passed: results.every(result => result.passed), tests: results.length, results,
   scope: "Actual browser Custom Elements, shadow DOM and MutationObserver; synthetic HA native handlers record service payloads; no HA connection or real services." };
 document.querySelector("#results").textContent = JSON.stringify(window.popupTestResults, null, 2);
+
+await import("./test-thermostat-card.js");
+window.hargassnerFrontendTests = { type: "hargassner-frontend-tests", version: "1.3.0", popup: window.popupTestResults, card: window.cardTestResults };
+if (window.parent !== window) window.parent.postMessage(window.hargassnerFrontendTests, "*");

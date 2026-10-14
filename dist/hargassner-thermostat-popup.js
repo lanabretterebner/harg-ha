@@ -1,10 +1,10 @@
-/* Hargassner thermostat popup, v1.2.0.
+/* Hargassner thermostat popup and dashboard card, v1.3.0.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. No data fetch, temperature command or mode guess.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 const SCHEMA = "configured_room_setpoint_v1";
 const PRESETS = Object.freeze(["Aus", "Auto", "Heizen", "Absenken", "1x Heizen", "1x Absenken"]);
 // Original SVG paths from @mdi/js 7.4.47, icon data Apache-2.0.
@@ -269,4 +269,461 @@ export function installHargassnerThermostatPopup(environment = window) {
   return controller;
 }
 
-if (typeof window !== "undefined") installHargassnerThermostatPopup(window);
+function scopedClimate(state) {
+  return typeof state?.entity_id === "string" && state.entity_id.startsWith("climate.") &&
+    state.attributes?.hargassner_control_schema === SCHEMA;
+}
+function operatingState(state, connected = true) {
+  const a = state?.attributes, label = a?.["Heizkreisstatus"], code = a?.["Heizkreisstatus-Code"];
+  return connected && !["unknown", "unavailable"].includes(state?.state) &&
+    a?.["Heizkreisstatus verfügbar"] === true && Number.isSafeInteger(code) &&
+    typeof label === "string" && label.trim() && label.length <= 160 ? label : "Nicht verfügbar";
+}
+function validTarget(state) {
+  const a = state?.attributes;
+  return scopedClimate(state) && ["auto", "heat"].includes(state.state) &&
+    sameValues(a.hvac_modes, HVAC) &&
+    a["Zieltemperatur verfügbar"] === true &&
+    [a.temperature, a.min_temp, a.max_temp, a.target_temp_step].every(Number.isFinite) &&
+    a.target_temp_step > 0 && a.max_temp > a.min_temp &&
+    a.temperature >= a.min_temp && a.temperature <= a.max_temp;
+}
+
+export function installHargassnerThermostatCard(environment = window) {
+  const { customElements, document, HTMLElement } = environment;
+  if (!customElements || !document || !HTMLElement) return;
+  const cardType = "hargassner-thermostat-card";
+  if (!customElements.get(cardType)) {
+    class HargassnerThermostatCard extends HTMLElement {
+      constructor() {
+        super(); this.attachShadow({ mode: "open" }); this._generation = 0;
+      }
+      static getStubConfig(hass, entities = [], fallback = []) {
+        const ids = [...entities, ...fallback, ...Object.keys(hass?.states || {})];
+        return { entity: ids.find(id => scopedClimate(hass?.states?.[id])) || "" };
+      }
+      static getConfigForm() {
+        return { schema: [
+          { name: "entity", required: true, selector: { entity: { domain: "climate" } } },
+          { name: "name", selector: { text: {} } },
+        ], computeLabel: field => field.name === "entity" ? "Heizkreis" : "Name",
+        computeHelper: field => field.name === "entity" ? "Hargassner-Heizkreis auswählen." : undefined };
+      }
+      setConfig(config) {
+        if (typeof config?.entity !== "string" || !/^climate\.[a-z0-9_]+$/.test(config.entity))
+          throw new Error("Bitte eine Heizkreis-Klimaentität auswählen.");
+        if (config.name !== undefined && typeof config.name !== "string") throw new Error("Name muss Text sein.");
+        this._dispose(); this._config = { entity: config.entity, name: config.name }; this._render();
+      }
+      set hass(value) { this._hass = value; this._render(); }
+      get hass() { return this._hass; }
+      getCardSize() { return 11; }
+      getGridOptions() { return { columns: 12, rows: 9, min_columns: 6, min_rows: 9 }; }
+      connectedCallback() { this._render(); }
+      disconnectedCallback() { this._dispose(); }
+      _cancelNative(force = false) {
+        if (!force && !this._native && (!this._pending || !this._wantTarget)) return;
+        this._generation++; this._cancelWait?.(); this._cancelWait = null;
+        this._pending = false; this._native?.remove(); this._native = null;
+      }
+      _dispose() {
+        this._cancelNative(true);
+        if (this._binding) this._binding.menu.removeEventListener("wa-select", this._binding.handler);
+        this._binding = null; this._ui = null; this._failed = false; this._busy = false;
+        this.shadowRoot.replaceChildren();
+      }
+      _connectedHA() { return this._hass?.connected !== false && this._hass?.connection?.connected !== false; }
+      _build() {
+        const style = document.createElement("style");
+        style.textContent = `:host{display:block;height:100%}ha-card{height:100%;box-sizing:border-box;overflow:hidden}
+          h3{font-size:var(--ha-font-size-l,20px);font-weight:500;margin:16px 16px 0;text-align:center;overflow-wrap:anywhere}
+          .native{--ha-card-border-width:0;--ha-card-box-shadow:none;--ha-card-border-radius:0;--ha-card-background:transparent;display:block;height:320px}
+          .placeholder{text-align:center;padding:28px 16px;color:var(--secondary-text-color)}
+          .footer{padding:8px 16px 16px;display:grid;gap:12px;text-align:center}
+          .readings{display:grid;gap:4px;font-size:var(--ha-font-size-s,12px);color:var(--secondary-text-color)}
+          .status-label{font-size:var(--ha-font-size-s,12px);color:var(--secondary-text-color)}
+          .status{overflow-wrap:anywhere}.error{color:var(--error-color)}[hidden]{display:none!important}
+          button{font:inherit;color:var(--primary-color);background:none;border:1px solid var(--divider-color);border-radius:8px;padding:8px;cursor:pointer}`;
+        const card = document.createElement("ha-card"), title = document.createElement("h3");
+        const nativeHost = document.createElement("div"), placeholder = document.createElement("div");
+        placeholder.className = "placeholder";
+        const retry = document.createElement("button"); retry.textContent = "Erneut versuchen";
+        retry.addEventListener("click", () => { this._failed = false; this._render(); });
+        const footer = document.createElement("div"); footer.className = "footer";
+        const readings = document.createElement("div"); readings.className = "readings";
+        const current = document.createElement("div"), correction = document.createElement("div");
+        readings.append(current, correction);
+        const menuHost = document.createElement("div"), status = document.createElement("div");
+        status.className = "status"; status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
+        const statusLabel = document.createElement("div"), statusValue = document.createElement("div");
+        statusLabel.className = "status-label"; statusLabel.textContent = "Heizkreisstatus";
+        status.append(statusLabel, statusValue);
+        const error = document.createElement("div"); error.className = "error"; error.setAttribute("role", "alert");
+        footer.append(readings, menuHost, status, error); card.append(title, nativeHost, placeholder, retry, footer);
+        this.shadowRoot.append(style, card);
+        this._ui = { card, title, nativeHost, placeholder, retry, footer, current, correction, menuHost, statusValue, error };
+      }
+      _format(value, allowString = false, unit = this._hass?.config?.unit_system?.temperature || "°C") {
+        if (allowString && typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value)) value = Number(value);
+        if (!Number.isFinite(value)) return "Nicht verfügbar";
+        const language = this._hass?.locale?.language || "de";
+        let text; try { text = new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(value); }
+        catch { text = String(value); }
+        return `${text} ${unit}`;
+      }
+      _render() {
+        if (!this.isConnected || !this._config || !this._hass) return;
+        if (!this._ui) this._build();
+        const ui = this._ui, state = this._hass.states?.[this._config.entity];
+        const scoped = scopedClimate(state), connected = this._connectedHA();
+        ui.title.textContent = this._config.name || state?.attributes?.friendly_name || this._config.entity;
+        ui.footer.hidden = !scoped;
+        ui.retry.hidden = !this._failed || !scoped;
+        if (!scoped) {
+          this._cancelNative(true); ui.placeholder.hidden = false;
+          ui.placeholder.textContent = !state || ["unknown", "unavailable"].includes(state.state)
+            ? "Heizkreis nicht verfügbar." : "Diese Entität ist kein unterstützter Hargassner-Heizkreis.";
+          if (this._binding) {
+            this._binding.menu.removeEventListener("wa-select", this._binding.handler);
+            this._binding.menu.remove(); this._binding = null;
+          }
+          return;
+        }
+        const available = connected && !["unknown", "unavailable"].includes(state.state);
+        ui.current.textContent = `Ist-Temperatur: ${this._format(available ? state.attributes.current_temperature : null)}`;
+        ui.correction.textContent = `Raumkorrektur: ${this._format(available ? state.attributes.Raumkorrektur : null, true, "°C")}`;
+        ui.statusValue.textContent = operatingState(state, connected);
+        if (customElements.get("ha-control-select-menu")) this._renderMenu(state);
+        if (!connected || !validTarget(state)) {
+          this._cancelNative(); ui.placeholder.hidden = false;
+          ui.placeholder.textContent = "Zieltemperatur nicht verfügbar.";
+          // Load the native menu even when a target is currently unqualified.
+          if (!this._failed && !customElements.get("ha-control-select-menu")) this._load(false);
+          return;
+        }
+        if (this._native) { this._native.hass = this._hass; ui.placeholder.hidden = true; }
+        else {
+          ui.placeholder.hidden = false;
+          ui.placeholder.textContent = this._failed ? "Thermostat derzeit nicht verfügbar." : "Thermostat wird geladen …";
+          if (!this._failed) this._load(true);
+        }
+      }
+      _renderMenu(state) {
+        if (!this._binding) {
+          const menu = document.createElement("ha-control-select-menu");
+          menu.label = "Modus"; menu.options = PRESETS.map(value => ({ value, label: value, iconPath: ICON_PATHS[MODE_ICONS[value]] }));
+          const binding = { menu, entity: this._config.entity };
+          binding.handler = event => this._selectMode(event, binding);
+          menu.addEventListener("wa-select", binding.handler); this._binding = binding;
+          this._ui.menuHost.replaceChildren(menu);
+        }
+        const context = eligible({ stateObj: state }), menu = this._binding.menu;
+        menu.value = context ? state.attributes.preset_mode : undefined;
+        menu.disabled = this._busy || !this._connectedHA() || !context || !HVAC.includes(state.state);
+      }
+      async _selectMode(event, binding) {
+        event.stopPropagation();
+        const value = event.detail?.item?.value, state = this._hass?.states?.[this._config?.entity];
+        if (!this.isConnected || this._binding !== binding || event.currentTarget !== binding.menu ||
+            !binding.menu.isConnected || binding.menu.disabled || binding.entity !== this._config?.entity || this._busy ||
+            !this._connectedHA() || !eligible({ stateObj: state }) || !HVAC.includes(state.state) ||
+            !PRESETS.includes(value) || value === state.attributes.preset_mode) return;
+        this._busy = true; this._ui.error.textContent = ""; this._render();
+        try {
+          await this._hass.callService("climate", "set_preset_mode", { entity_id: binding.entity, preset_mode: value });
+        } catch {
+          if (this._binding === binding && this._ui) this._ui.error.textContent = "Modus konnte nicht geändert werden.";
+        } finally {
+          if (this._binding === binding) { this._busy = false; this._render(); }
+        }
+      }
+      _withTimeout(promise) {
+        return new Promise((resolve, reject) => {
+          const timer = environment.setTimeout(() => reject(new Error("dependency_timeout")), 8000);
+          const cancel = () => { environment.clearTimeout(timer); reject(new Error("cancelled")); };
+          this._cancelWait = cancel;
+          Promise.resolve(promise).then(resolve, reject).finally(() => {
+            environment.clearTimeout(timer); if (this._cancelWait === cancel) this._cancelWait = null;
+          });
+        });
+      }
+      async _load(wantTarget) {
+        if (this._pending) return;
+        this._pending = true; this._wantTarget = wantTarget;
+        const generation = this._generation, entity = this._config.entity;
+        const current = () => this.isConnected && this._generation === generation && this._config.entity === entity;
+        try {
+          if (typeof environment.loadCardHelpers !== "function") throw new Error("helpers_unavailable");
+          const helpers = await this._withTimeout(environment.loadCardHelpers());
+          if (!current()) return;
+          await this._withTimeout(customElements.whenDefined("ha-control-select-menu"));
+          if (!current()) return;
+          const state = this._hass.states?.[entity];
+          if (wantTarget && this._connectedHA() && validTarget(state)) {
+            const native = helpers.createCardElement({ type: "thermostat", entity, name: "Zieltemperatur", show_current_as_primary: false, features: [] });
+            if (native?.localName !== "hui-thermostat-card") throw new Error("native_card_unavailable");
+            native.className = "native"; native.hass = this._hass; this._native = native;
+            this._ui.nativeHost.replaceChildren(native);
+          }
+          this._pending = false; this._render();
+        } catch {
+          if (current()) { this._pending = false; this._failed = true; this._render(); }
+        }
+      }
+    }
+    customElements.define(cardType, HargassnerThermostatCard);
+  }
+  environment.customCards = environment.customCards || [];
+  if (!environment.customCards.some(card => card.type === cardType)) environment.customCards.push({
+    type: cardType, name: "Hargassner Thermostat", preview: true,
+    description: "Heizkreis mit Zieltemperatur, sechs Betriebsarten und Heizkreisstatus.",
+    documentationURL: "https://github.com/lanabretterebner/harg-ha",
+    getEntitySuggestion: (hass, entity) => scopedClimate(hass?.states?.[entity])
+      ? { config: { type: `custom:${cardType}`, entity } } : null,
+  });
+  return customElements.get(cardType);
+}
+
+if (typeof window !== "undefined") {
+  installHargassnerThermostatPopup(window);
+  installHargassnerThermostatCard(window);
+}
+
+/* Logical sections inside the existing Hargassner HA device page.
+ * Pinned native contract: frontend20260930.3 ha-device-entities-card.
+ * No discovery, entity/device registry, data fetch or service changes.
+ */
+const DEVICE_GROUP_VERSION = "1.3.0";
+const DEVICE_GROUP_KEY = Symbol.for("hargassner.device.groups.v1");
+const DEVICE_GROUP_LABELS = Object.freeze({
+  "heizkreis_1": "Heizkreis 1",
+  "heizkreis_2": "Heizkreis 2",
+  "puffer": "Puffer",
+  "kessel": "Kessel",
+  "solar": "Solar",
+  "warmwasser": "Warmwasser",
+  "pelletslager": "Pelletslager",
+  "steuerung": "Steuerung"
+});
+const DEVICE_ENTITY_GROUPS = Object.freeze({
+  "select.kesselprogramm": "kessel",
+  "binary_sensor.boiler_1_pumpe": "warmwasser",
+  "binary_sensor.heizkreis_1_pumpe": "heizkreis_1",
+  "binary_sensor.heizkreis_2_pumpe": "heizkreis_2",
+  "binary_sensor.ruecklauf_ladepumpe_ausgang": "kessel",
+  "button.puffer_einmal_ladung_starten": "puffer",
+  "button.boiler_1_einmal_ladung_starten": "warmwasser",
+  "climate.heizkreis_1": "heizkreis_1",
+  "climate.heizkreis_2": "heizkreis_2",
+  "number.alle_heizkreise_aus_ueber_aussentemperatur": "steuerung",
+  "number.alle_heizkreise_aus_bei_tagabsenkung": "steuerung",
+  "number.alle_heizkreise_aus_bei_nachtabsenkung": "steuerung",
+  "number.boiler_1_solltemperatur": "warmwasser",
+  "number.heizkreis_1_tagtemperatur": "heizkreis_1",
+  "number.heizkreis_1_absenktemperatur": "heizkreis_1",
+  "number.heizkreis_2_tagtemperatur": "heizkreis_2",
+  "number.heizkreis_2_absenktemperatur": "heizkreis_2",
+  "number.heizkreis_2_steilheit_fbh": "heizkreis_2",
+  "number.heizkreis_2_vorlauftemperatur_minimum_fbh": "heizkreis_2",
+  "number.heizkreis_2_vorlauftemperatur_maximum_fbh": "heizkreis_2",
+  "number.heizkreis_2_raumkorrektur": "heizkreis_2",
+  "number.heizkreis_2_sommer_badheizen_puffer_mindesttemperatur": "heizkreis_2",
+  "number.heizkreis_2_sommer_badheizen_vorlauf_soll": "heizkreis_2",
+  "number.heizkreis_1_steilheit": "heizkreis_1",
+  "number.heizkreis_1_vorlauftemperatur_minimum": "heizkreis_1",
+  "number.heizkreis_1_vorlauftemperatur_maximum": "heizkreis_1",
+  "number.heizkreis_1_raumkorrektur": "heizkreis_1",
+  "number.heizkreis_1_sommer_badheizen_puffer_mindesttemperatur": "heizkreis_1",
+  "number.heizkreis_1_sommer_badheizen_vorlauf_soll": "heizkreis_1",
+  "number.boiler_1_boilertemperatur_schaltdifferenz": "warmwasser",
+  "number.boiler_1_boilertemperatur_minimum": "warmwasser",
+  "number.boiler_1_energiesparmodus_nach_der_dauer": "warmwasser",
+  "number.boiler_1_maximale_pumpenlaufzeit": "warmwasser",
+  "number.zentralpuffer_mindesttemperatur_oben": "puffer",
+  "number.pufferzwangsladung_aussentemperaturgrenze": "puffer",
+  "number.pelletvorrat_einstellen": "pelletslager",
+  "select.urlaubsschaltung": "steuerung",
+  "select.heizkreis_1_urlaubsschaltung": "heizkreis_1",
+  "select.heizkreis_2_urlaubsschaltung": "heizkreis_2",
+  "select.heizkreis_2_sommer_badheizen": "heizkreis_2",
+  "select.heizkreis_1_sommer_badheizen": "heizkreis_1",
+  "select.boiler_1_energiesparmodus": "warmwasser",
+  "select.zentralpuffer_solar_fremdwaermebetrieb_aktivieren": "puffer",
+  "sensor.boilerstatus": "warmwasser",
+  "sensor.kesselstatus": "kessel",
+  "sensor.solar_zieltemperatur": "solar",
+  "sensor.solar_quellentemperatur": "solar",
+  "sensor.heizkreis_1_status": "heizkreis_1",
+  "sensor.heizkreis_2_status": "heizkreis_2",
+  "sensor.lagerstand": "pelletslager",
+  "sensor.gemeldete_leistung": "kessel",
+  "sensor.restsauerstoff": "kessel",
+  "sensor.restsauerstoff_sollwert": "kessel",
+  "sensor.puffer_fuellgrad": "puffer",
+  "sensor.puffer_hoechste_anforderung": "puffer",
+  "sensor.puffer_solltemperatur_oben": "puffer",
+  "sensor.puffer_solltemperatur_unten": "puffer",
+  "sensor.pufferstatus": "puffer",
+  "sensor.solar_gemeldete_leistung": "solar",
+  "sensor.solarpumpe_1_ansteuerung": "solar",
+  "sensor.solar_tagesenergie": "solar",
+  "sensor.aussentemperatur_gemittelt": "steuerung",
+  "sensor.boiler_1_boilertemperatur": "warmwasser",
+  "sensor.kesseltemperatur": "kessel",
+  "sensor.kessel_solltemperatur": "kessel",
+  "sensor.pufferfuehler_oben": "puffer",
+  "sensor.pufferfuehler_unten": "puffer",
+  "sensor.heizkreis_1_raumtemperatur": "heizkreis_1",
+  "sensor.rauchgastemperatur": "kessel",
+  "sensor.ruecklauftemperatur": "kessel",
+  "sensor.ruecklauf_solltemperatur": "kessel",
+  "sensor.heizkreis_1_interner_regelsollwert": "heizkreis_1",
+  "sensor.heizkreis_2_interner_regelsollwert": "heizkreis_2",
+  "sensor.heizkreis_1_vorlauftemperatur": "heizkreis_1",
+  "sensor.heizkreis_2_vorlauftemperatur": "heizkreis_2",
+  "sensor.heizkreis_1_vorlauf_solltemperatur": "heizkreis_1",
+  "sensor.heizkreis_2_vorlauf_solltemperatur": "heizkreis_2",
+  "sensor.aussentemperatur": "steuerung",
+  "sensor.kesselstatus_code": "kessel",
+  "text.urlaubszeit_von": "steuerung",
+  "text.heizkreis_1_urlaubszeit_von": "heizkreis_1",
+  "text.heizkreis_2_urlaubszeit_von": "heizkreis_2",
+  "text.urlaubszeit_bis": "steuerung",
+  "text.heizkreis_1_urlaubszeit_bis": "heizkreis_1",
+  "text.heizkreis_2_urlaubszeit_bis": "heizkreis_2",
+  "text.name_heizkreis_1": "heizkreis_1",
+  "text.name_heizkreis_2": "heizkreis_2",
+  "text.name_boiler_1": "warmwasser",
+  "text.name_zentralpuffer": "puffer",
+  "text.name_pwm_diffreg_kreis_1": "solar"
+});
+const DEVICE_ENTITY_SUFFIXES = Object.entries(DEVICE_ENTITY_GROUPS).map(([id, group]) => {
+  const [domain, slug] = id.split(".");
+  return { domain, suffix: `_${domain}_${slug}`, group };
+});
+
+export function installHargassnerDeviceGroups(environment = window) {
+  const prior = environment[DEVICE_GROUP_KEY];
+  if (prior?.running && prior.version === DEVICE_GROUP_VERSION) return prior;
+  if (prior?.running) prior.stop();
+  const { document, customElements, MutationObserver } = environment;
+  if (!document || !customElements || !MutationObserver) return null;
+  let running = true, prototype, originalDescriptor, original, wrapped;
+  const tracked = new Map();
+
+  function forget(host) {
+    tracked.get(host)?.disconnect();
+    tracked.delete(host);
+  }
+  function parent(node) { return node?.parentNode || node?.host || null; }
+  function page(host, deviceId) {
+    let node = host;
+    for (let depth = 0; node && depth < 64; depth++, node = parent(node)) {
+      if (node.localName === "ha-config-device-page") return node.deviceId === deviceId;
+    }
+    return false;
+  }
+  function scoped(host, entries) {
+    if (!host.isConnected || host.localName !== "ha-device-entities-card" ||
+        !Array.isArray(host.entities) || !host.entities.length || host.entities.length > 512 ||
+        !Array.isArray(entries) || entries.some(entry => !host.entities.includes(entry))) return false;
+    const deviceId = host.entities[0]?.device_id;
+    const device = host.hass?.devices?.[deviceId];
+    return typeof deviceId === "string" && page(host, deviceId) &&
+      device?.manufacturer === "Hargassner" && device.model === "Nano-PK" &&
+      Array.isArray(device.identifiers) && device.identifiers.some(value =>
+        Array.isArray(value) && value[0] === "mqtt" && typeof value[1] === "string" && value[1].startsWith("hargassner_")) &&
+      host.entities.every(entry => entry && entry.device_id === deviceId && entry.platform === "mqtt" &&
+        typeof entry.entity_id === "string" && typeof entry.unique_id === "string" && entry.unique_id.startsWith("hargassner_"));
+  }
+  function group(entry) {
+    const domain = entry.entity_id.split(".")[0];
+    const matches = DEVICE_ENTITY_SUFFIXES.filter(value => value.domain === domain && entry.unique_id.endsWith(value.suffix));
+    return matches.length === 1 ? matches[0].group : "steuerung";
+  }
+  function track(host) {
+    let observer = tracked.get(host);
+    if (!observer) {
+      observer = new MutationObserver(() => {
+        if (!host.isConnected) forget(host);
+      });
+      tracked.set(host, observer);
+    } else observer.disconnect();
+    // Watch direct ancestor child lists only, including shadow boundaries.
+    // No observer watches all document descendants or moves native row nodes.
+    let node = host;
+    for (let depth = 0; node && depth < 64; depth++, node = parent(node)) {
+      if (node.parentNode) observer.observe(node.parentNode, { childList: true });
+    }
+  }
+  function update(host) {
+    if (host.isConnected && typeof host.requestUpdate === "function") host.requestUpdate();
+  }
+  function scanOnce() {
+    const roots = [document];
+    let elements = 0, rootCount = 0;
+    while (roots.length && rootCount++ < 128 && elements < 12000) {
+      const root = roots.pop();
+      for (const node of root.querySelectorAll("*")) {
+        if (++elements > 12000) break;
+        if (node.localName === "ha-device-entities-card") update(node);
+        if (node.shadowRoot) roots.push(node.shadowRoot);
+      }
+    }
+  }
+  const controller = {
+    version: DEVICE_GROUP_VERSION,
+    get running() { return running; },
+    status: () => ({ running, activeCards: tracked.size }),
+    stop() {
+      if (!running) return;
+      running = false;
+      if (prototype && prototype._renderEntities === wrapped) {
+        if (originalDescriptor) Object.defineProperty(prototype, "_renderEntities", originalDescriptor);
+        else delete prototype._renderEntities;
+      }
+      for (const host of [...tracked.keys()]) { forget(host); update(host); }
+      environment.removeEventListener("pagehide", controller.stop);
+    },
+    ready: null,
+  };
+  environment[DEVICE_GROUP_KEY] = controller;
+  environment.hargassnerDeviceGroups = controller;
+  environment.addEventListener("pagehide", controller.stop);
+  controller.ready = customElements.whenDefined("ha-device-entities-card").then(() => {
+    if (!running) return;
+    prototype = customElements.get("ha-device-entities-card")?.prototype;
+    original = prototype?._renderEntities;
+    if (typeof original !== "function" || original.length !== 1 ||
+        typeof prototype._renderEntity !== "function" || typeof prototype._renderUnavailableEntity !== "function") return;
+    originalDescriptor = Object.getOwnPropertyDescriptor(prototype, "_renderEntities");
+    wrapped = function (entries) {
+      if (!running || !scoped(this, entries)) {
+        forget(this);
+        return original.call(this, entries);
+      }
+      if (!entries.length) return original.call(this, entries);
+      const groups = new Map(Object.keys(DEVICE_GROUP_LABELS).map(key => [key, []]));
+      for (const entry of entries) groups.get(group(entry)).push(entry);
+      track(this);
+      const output = [];
+      for (const [key, members] of groups) {
+        if (!members.length) continue;
+        const heading = document.createElement("div");
+        heading.dataset.hargassnerDeviceGroup = key;
+        heading.setAttribute("role", "heading"); heading.setAttribute("aria-level", "3");
+        heading.style.cssText = "font-weight:500;color:var(--secondary-text-color);padding:16px 8px 8px;";
+        heading.textContent = DEVICE_GROUP_LABELS[key];
+        output.push(heading, original.call(this, members));
+      }
+      return output;
+    };
+    try {
+      Object.defineProperty(prototype, "_renderEntities", { configurable: true, writable: true, value: wrapped });
+      scanOnce();
+    } catch { controller.stop(); }
+  });
+  return controller;
+}
+
+if (typeof window !== "undefined") installHargassnerDeviceGroups(window);

@@ -39,3 +39,8 @@ older names or suffixes. The mapping is documentation, not HA configuration to
 import, and does not select additional entities. Verify actual IDs before copying
 tiles or updating automations. The optional whole-boiler program selector is
 separate from each climate's six operating modes and its permissions.
+
+The custom `custom:hargassner-thermostat-card` uses the same contract without
+changing HA's `off`/`heat`/`auto` domain state. Its displayed target, measured room
+temperature and correction are separate values. Frontend device-page grouping
+also leaves one existing MQTT device and all registry/discovery identities intact.

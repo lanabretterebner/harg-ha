@@ -1,0 +1,228 @@
+{
+  "title": "Hargassner",
+  "views": [
+    {
+      "title": "Heizung",
+      "path": "heizung",
+      "icon": "mdi:radiator",
+      "cards": [
+        {
+          "type": "vertical-stack",
+          "cards": [
+            {
+              "type": "custom:hargassner-thermostat-card",
+              "entity": "climate.heizkreis_1",
+              "name": "Heizkreis 1"
+            },
+            {
+              "type": "entities",
+              "title": "Heizkreis 1 · Einstellungen und Messwerte",
+              "show_header_toggle": false,
+              "entities": [
+                {
+                  "entity": "number.heizkreis_1_tagtemperatur",
+                  "name": "Tagestemperatur"
+                },
+                {
+                  "entity": "number.heizkreis_1_absenktemperatur",
+                  "name": "Absenktemperatur"
+                },
+                {
+                  "entity": "number.heizkreis_1_raumkorrektur",
+                  "name": "Raumkorrektur"
+                },
+                {
+                  "entity": "binary_sensor.heizkreis_1_pumpe",
+                  "name": "Pumpe"
+                },
+                {
+                  "entity": "sensor.heizkreis_1_vorlauftemperatur",
+                  "name": "Vorlauftemperatur"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "vertical-stack",
+          "cards": [
+            {
+              "type": "custom:hargassner-thermostat-card",
+              "entity": "climate.heizkreis_2",
+              "name": "Heizkreis 2"
+            },
+            {
+              "type": "entities",
+              "title": "Heizkreis 2 · Einstellungen und Messwerte",
+              "show_header_toggle": false,
+              "entities": [
+                {
+                  "entity": "number.heizkreis_2_tagtemperatur",
+                  "name": "Tagestemperatur"
+                },
+                {
+                  "entity": "number.heizkreis_2_absenktemperatur",
+                  "name": "Absenktemperatur"
+                },
+                {
+                  "entity": "number.heizkreis_2_raumkorrektur",
+                  "name": "Raumkorrektur"
+                },
+                {
+                  "entity": "binary_sensor.heizkreis_2_pumpe",
+                  "name": "Pumpe"
+                },
+                {
+                  "entity": "sensor.heizkreis_2_vorlauftemperatur",
+                  "name": "Vorlauftemperatur"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "entities",
+          "title": "Puffer",
+          "show_header_toggle": false,
+          "entities": [
+            {
+              "entity": "sensor.pufferstatus",
+              "name": "Status"
+            },
+            {
+              "entity": "sensor.puffer_fuellgrad",
+              "name": "Füllgrad"
+            },
+            {
+              "entity": "sensor.pufferfuehler_oben",
+              "name": "Temperatur oben"
+            },
+            {
+              "entity": "sensor.pufferfuehler_unten",
+              "name": "Temperatur unten"
+            },
+            {
+              "entity": "button.puffer_einmal_ladung_starten",
+              "name": "Einmal laden"
+            }
+          ]
+        },
+        {
+          "type": "entities",
+          "title": "Kessel",
+          "show_header_toggle": false,
+          "entities": [
+            {
+              "entity": "sensor.kesselstatus",
+              "name": "Status"
+            },
+            {
+              "entity": "sensor.kesseltemperatur",
+              "name": "Temperatur"
+            },
+            {
+              "entity": "sensor.gemeldete_leistung",
+              "name": "Leistung"
+            },
+            {
+              "entity": "sensor.rauchgastemperatur",
+              "name": "Rauchgastemperatur"
+            },
+            {
+              "entity": "sensor.ruecklauftemperatur",
+              "name": "Rücklauftemperatur"
+            },
+            {
+              "entity": "binary_sensor.ruecklauf_ladepumpe_ausgang",
+              "name": "Rücklauf-/Ladepumpe"
+            },
+            {
+              "entity": "select.kesselprogramm",
+              "name": "Programm"
+            }
+          ]
+        },
+        {
+          "type": "entities",
+          "title": "Warmwasser",
+          "show_header_toggle": false,
+          "entities": [
+            {
+              "entity": "sensor.boilerstatus",
+              "name": "Status"
+            },
+            {
+              "entity": "sensor.boiler_1_boilertemperatur",
+              "name": "Temperatur"
+            },
+            {
+              "entity": "number.boiler_1_solltemperatur",
+              "name": "Solltemperatur"
+            },
+            {
+              "entity": "binary_sensor.boiler_1_pumpe",
+              "name": "Pumpe"
+            },
+            {
+              "entity": "button.boiler_1_einmal_ladung_starten",
+              "name": "Einmal laden"
+            }
+          ]
+        },
+        {
+          "type": "entities",
+          "title": "Solar",
+          "show_header_toggle": false,
+          "entities": [
+            {
+              "entity": "sensor.solar_quellentemperatur",
+              "name": "Quellentemperatur"
+            },
+            {
+              "entity": "sensor.solar_zieltemperatur",
+              "name": "Zieltemperatur"
+            },
+            {
+              "entity": "sensor.solarpumpe_1_ansteuerung",
+              "name": "Pumpenansteuerung"
+            },
+            {
+              "entity": "sensor.solar_gemeldete_leistung",
+              "name": "Leistung"
+            },
+            {
+              "entity": "sensor.solar_tagesenergie",
+              "name": "Tagesenergie"
+            }
+          ]
+        },
+        {
+          "type": "entities",
+          "title": "Pelletslager",
+          "show_header_toggle": false,
+          "entities": [
+            {
+              "entity": "sensor.lagerstand",
+              "name": "Lagerstand"
+            }
+          ]
+        },
+        {
+          "type": "entities",
+          "title": "Steuerung",
+          "show_header_toggle": false,
+          "entities": [
+            {
+              "entity": "sensor.aussentemperatur",
+              "name": "Außentemperatur"
+            },
+            {
+              "entity": "sensor.aussentemperatur_gemittelt",
+              "name": "Außentemperatur gemittelt"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

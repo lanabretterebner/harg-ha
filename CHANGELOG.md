@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.3.0
+
+Add a discoverable Hargassner Thermostat dashboard card with native visual
+configuration, target dial, separate measured room/correction, the same six-mode
+menu/icons and status. Add logical headings inside the existing device page
+while retaining native rows/actions and one unchanged MQTT device. Include a
+full grouped dashboard example and dedicated UI installation instructions.
+
 ## 1.2.0
 
 Add offline native mode icons and a read-only Heizkreisstatus line to the

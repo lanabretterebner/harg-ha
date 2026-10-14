@@ -1,9 +1,9 @@
 # Hargassner Home Assistant clients
 
-One native Modus selector with six choices, offline mode icons and read-only
-Heizkreisstatus. Includes the optional authenticated dashboard Ingress app,
-status-aware native tile examples and entity-naming reference.
+Discoverable Hargassner Thermostat cards and matching native popup with one
+Modus menu, offline icons and Heizkreisstatus. Logical groups appear inside the
+existing MQTT device page; entity IDs/device associations are unchanged.
 
-Add this repository separately to HACS for the browser module and to the
-Supervisor App store for the dashboard app. Neither installs the existing MQTT
-or controller backend. See README.md for prerequisites and both installation paths.
+Install the resource through HACS and add cards with HA's visual card picker.
+This repository also contains the optional Supervisor dashboard Ingress app,
+installed independently through the App store. See README.md for both paths.
