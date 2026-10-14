@@ -14,11 +14,11 @@ def validate():
     assert hacs == {"name": "Hargassner Thermostat Popup",
                     "filename": "hargassner-thermostat-popup.js"}
     assert package["name"] == "harg-ha"
-    assert package["version"] == release["version"] == "1.1.0"
+    assert package["version"] == release["version"] == "1.2.0"
     assert package["type"] == "module"
     script = ROOT / "dist" / hacs["filename"]
     text = script.read_text()
-    assert 'const VERSION = "1.1.0";' in text
+    assert 'const VERSION = "1.2.0";' in text
     assert 'const LABEL = "Modus";' in text
     assert "configured_room_setpoint_v1" in text
     assert set(path.name for path in (ROOT / "dist").iterdir()) == {hacs["filename"]}
@@ -34,7 +34,11 @@ def validate():
               if path.is_file() and ".git" not in path.parts and "__pycache__" not in path.parts}
     assert actual == set(release["files"]) | {"release.json"}
     assert release["hacs_installation_verified"] is False
-    print(f"Plugin structure and {len(release['files'])} pinned files verified; hosted HACS checks remain pending.")
+    assert release["supervisor_app_installation_verified"] is False
+    assert (ROOT / "repository.yaml").is_file()
+    assert (ROOT / "hargassner-dashboard/config.yaml").is_file()
+    assert (ROOT / "licenses/Apache-2.0.txt").is_file()
+    print(f"Plugin structure and {len(release['files'])} pinned files verified; release-specific hosted installation checks are recorded separately.")
 
 
 if __name__ == "__main__":

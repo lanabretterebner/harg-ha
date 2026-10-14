@@ -1,7 +1,10 @@
-# Optional native tiles; paste into a dashboard Manual card editor.
-# Verify actual registry IDs before use. Thermostat tiles open the popup.
-# The popup provides the single Modus menu; tiles add no preset selector.
-# Separate day/setback/correction numbers keep their own backend permissions.
+# Native HA tiles; paste into Dashboard > Edit > Add card > Manual.
+# Auto1=day,2/3/4=setback both circuits;9 remains phase-ambiguous.
+# Verify actual registry IDs and any HA suffixes before using these examples.
+# HACS/manual popup1.2.0 supplies one Modus menu, mode icons and status.
+# Requires backend Heizkreisstatus attributes; verify actual registry IDs.
+# Native tile state_content supports an entity attribute; no extra state sensor.
+# Dial changes correction only; separate day/setback numbers edit the bases.
 type: vertical-stack
 cards:
 - type: tile
@@ -9,7 +12,10 @@ cards:
   name: Heizkreis 1
   state_content:
   - temperature
+  - Heizkreisstatus
   tap_action:
+    action: more-info
+  icon_tap_action:
     action: more-info
 - type: tile
   entity: number.heizkreis_1_tagtemperatur
@@ -34,7 +40,10 @@ cards:
   name: Heizkreis 2
   state_content:
   - temperature
+  - Heizkreisstatus
   tap_action:
+    action: more-info
+  icon_tap_action:
     action: more-info
 - type: tile
   entity: number.heizkreis_2_tagtemperatur

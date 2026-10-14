@@ -1,0 +1,5 @@
+# Merge into the existing frontend section; preserve other entries.
+# Check configuration, restart HA, and fully reload browser/app frontends.
+frontend:
+  extra_module_url:
+    - /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.2.0

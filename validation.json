@@ -1,16 +1,16 @@
 {
-  "schema_version": 1,
-  "version": "1.1.0",
-  "resource_sha256": "a034faee8e466d623cc350c5e26d5e5dfe203ec387cbf9692a447fe41d36ef21",
+  "schema_version": 2,
+  "version": "1.2.0",
+  "resource_sha256": "864a36916ddd9ffad376e7814125e8ffafc22d60ac7a06faffd613f5443be7cb",
   "home_assistant_reference": "https://raw.githubusercontent.com/home-assistant/frontend/20260930.3/src/dialogs/more-info/controls/more-info-climate.ts",
   "source_browser_fixture": {
-    "engine": "Chromium",
-    "tests_passed": 46,
+    "engine": "Native collaborative Chromium",
+    "tests_passed": 59,
     "resource_exact_copy": true,
     "fixture_adjustment": "Only module import points to ../dist/ in this repository.",
-    "source_validation_sha256": "157bb80b14957a0f4272476114a27853eb9e54f0468f356adda34661f1d99090"
+    "source_validation_sha256": "c208b155d1fd697b7c5f6f72ed4a8d8f1ea0498c60ef59dcb913d3beacceda6c",
+    "independent_source_reviewed": true
   },
-  "independent_review_extra_cases_passed": 3,
   "visible_mode_control": "Modus",
   "choices": [
     "Aus",
@@ -23,10 +23,42 @@
   "both_native_mode_selectors_replaced": true,
   "automatic_commands": false,
   "explicit_choice_uses_native_preset_handler": true,
+  "status_attributes": [
+    "Heizkreisstatus",
+    "Heizkreisstatus-Code",
+    "Heizkreisstatus verfügbar"
+  ],
+  "status_fallback": "Nicht verfügbar",
+  "status_independent_of_preset": true,
+  "offline_icon_paths": {
+    "source": "@mdi/js7.4.47",
+    "source_sha256": "0edde73c83c07bc4d8675e96aba3a853a1fc8fa2b251e3f5f6dede4d0332ab3f",
+    "all_five_paths_exact": true,
+    "runtime_downloads": false,
+    "license": "Apache-2.0"
+  },
+  "supervisor_app": {
+    "version": "1.2.0",
+    "proxy_runtime_unchanged_from_local_0_1_0": true,
+    "loopback_https_tests_passed": 16,
+    "package_metadata_tests_passed": 5,
+    "base_image_index_verified": true,
+    "base_image_record": "validation/base-image.json",
+    "container_build_performed": false,
+    "actual_installation_verified": false
+  },
   "actual_home_assistant_instance_tested": false,
   "hacs_installation_verified": false,
+  "previous_release_installation": {
+    "version": "1.1.0",
+    "home_assistant": "2026.9.3",
+    "hacs": "2.0.5",
+    "download_resource_and_both_native_single_modus_verified": true,
+    "new_version_installation_not_implied": true
+  },
   "limits": [
-    "Browser fixtures reproduce the native component contract; they do not establish compatibility with every HA frontend version.",
-    "Repository structure and syntax validation do not establish a completed hosted HACS installation."
+    "Native browser fixtures use synthetic HA entities and record service payloads; no live heating actions.",
+    "Current release hosted HACS installation and actual status/icon rendering are separate from this packaging checkpoint.",
+    "App source and loopback tests do not establish a container build or commissioned HA ingress session."
   ]
 }

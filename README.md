@@ -1,110 +1,135 @@
-# Hargassner Thermostat Popup
+# Hargassner for Home Assistant
 
-Version1.1.0 gives a matching Home Assistant thermostat popup one visible
-**Modus** selector with six choices:
+Version1.2.0 includes the HA clients for an existing Hargassner local-control
+backend: one Modus menu with offline icons and heating-circuit status, the
+optional dashboard Ingress app, native tiles and an entity-naming reference.
 
-**Aus · Auto · Heizen · Absenken · 1x Heizen · 1x Absenken**
+| Component | Installation | Result |
+| --- | --- | --- |
+| Thermostat popup | HACS, Dashboard category | One Modus menu, mode icons and Heizkreisstatus in native climate dialogs |
+| Hargassner Dashboard | HA App store repositories | Existing dashboard through authenticated HA Ingress |
+| Tiles and naming reference | Copy examples after checking entity IDs | Status on everyday climate tiles and separate day/setback/correction controls |
 
-It replaces both native HVAC and preset selectors in that popup. Selecting a
-choice invokes the existing manufacturer preset action. Temperature controls
-keep their native behavior. The MQTT backend still represents the six choices
-as presets; no second preset selector is shown by this resource.
+Use [this public repository](https://github.com/lanabretterebner/harg-ha) in
+both stores independently. HACS downloads the browser module; Supervisor
+builds the included app. Installing either does not install the other or the
+MQTT/backend services. No live backend identity, configuration or token is included.
 
-This is a **HACS Dashboard plugin**, a frontend JavaScript module. The
-Hargassner MQTT adapter and its discovered entities are separate prerequisites.
-A Supervisor app/add-on packages a service; HACS downloads this browser module.
-The optional dashboard/ingress app is separate from both.
+## Thermostat popup through HACS
 
-Actual HACS download and installation in the owner's Home Assistant remain
-unverified. The resource has isolated browser fixture coverage.
-
-## Install with HACS
-
-Repository: [lanabretterebner/harg-ha](https://github.com/lanabretterebner/harg-ha).
-A local ZIP is a transfer copy; add the public repository URL to HACS.
-
-1. Open **HACS → three dots → Custom repositories**. Enter the public GitHub
-   repository URL and select **Dashboard**. Add it and download this plugin.
-2. Open **Settings → Dashboards → three dots → Resources**. In storage mode,
-   HACS can create its module resource automatically. Check for exactly one
-   entry for this plugin; preserve a HACS-generated `?hacstag=…` suffix.
-   If absent, add this URL as a **JavaScript module**:
+1. In **HACS → three dots → Custom repositories**, add this public repository
+   with category **Dashboard**. Open it, choose **Download**, select the release
+   and confirm. Adding a custom repository alone does not install its JavaScript;
+   verify that HACS shows an installed version.
+2. Check **Settings → Dashboards → three dots → Resources** for one module
+   registration. Preserve a HACS-generated `?hacstag=…` suffix. If absent, add
+   this URL as a **JavaScript module**:
 
    ```text
-   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.1.0
+   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.2.0
    ```
 
-3. Remove the older manually registered popup resource or its
-   `frontend.extra_module_url` entry, if present. Fully reload each browser or
-   Companion App frontend, open a dashboard, then open the thermostat popup.
+3. Remove older manual resource URLs, fully reload each browser/Companion App,
+   open a dashboard, then open the matching climate dialog.
 
-For YAML-managed dashboard resources, add the same URL with `type: module` to
-the existing resource list. For loading outside dashboards as well, use that
-URL once in the existing `frontend.extra_module_url` list, check configuration
-and restart Home Assistant. Avoid duplicate loading methods.
-[Global module configuration](https://www.home-assistant.io/integrations/frontend/#loading-extra-javascript).
+For dialogs opened directly from Settings before a dashboard, merge
+[frontend-global.yaml](examples/frontend-global.yaml) into the existing
+`frontend.extra_module_url` list. Preserve other entries, check HA configuration,
+restart HA and reload frontends. A dashboard resource alone does not guarantee
+loading before a dashboard is visited.
+[HA global modules](https://www.home-assistant.io/integrations/frontend/#loading-extra-javascript).
 
-HACS stores dashboard resources under `www/community/` and serves them through
-`/hacsfiles/`. Resource registration is separate from importing dashboard cards.
-[HACS dashboard resources](https://www.hacs.xyz/docs/use/repositories/type/dashboard/),
-[custom repositories](https://www.hacs.xyz/docs/faq/custom_repositories/).
+For manual installation, copy `dist/hargassner-thermostat-popup.js` to
+`/config/www/hargassner-thermostat-popup.js` and use
+`/local/hargassner-thermostat-popup.js?v=1.2.0` instead. Remove that manual
+registration when switching to HACS.
 
-## Backend contract and check
+The single **Modus** menu offers **Aus · Auto · Heizen · Absenken · 1x Heizen ·
+1x Absenken**. Power, calendar/clock, sun, moon and timed-heating icons render
+from embedded original SVG paths without runtime downloads. The `1x` labels
+remain explicit. A user choice invokes HA's existing preset handler; loading,
+opening or refreshing sends no command. Native temperature controls remain.
 
-The climate entity must already expose:
+**Heizkreisstatus** appears separately below the controls. Missing, unqualified
+or invalid status says **Nicht verfügbar**. It does not replace HA's native
+HVAC state or assert that a pump runs. The backend must supply the schema,
+six presets and documented status attributes.
+[Entity/status contract](docs/ENTITY-CONTRACT.md).
 
-```yaml
-hargassner_control_schema: configured_room_setpoint_v1
-hvac_modes: [off, heat, auto]
-preset_modes: [Aus, Auto, Heizen, Absenken, 1x Heizen, 1x Absenken]
+## Optional dashboard app
+
+In **Settings → Apps → App store → three dots → Repositories**, add:
+
+```text
+https://github.com/lanabretterebner/harg-ha
 ```
 
-The backend may additionally list HA's synthetic `none` preset. Do not add the
-schema marker to unrelated entities. The module recognizes the marker and
-mode values rather than fixed entity IDs. Unknown current presets or a changed
-native popup structure retain the normal native controls.
+Install **Hargassner Dashboard**. Supervisor builds the source for `amd64` or
+`aarch64`; no prebuilt app image is required. The verified official base image
+index is pinned by digest. The app exposes no host ports and requests no HA API,
+Supervisor API, Docker or host privileges.
 
-Open each matching climate popup. It should show one **Modus** selector, all six
-choices and the native temperature controls, with no visible native HVAC or
-preset selector. An explicit choice sends only that preset action. Loading,
-opening, refreshing and restoring the popup send no command.
+The existing backend must allow the app's source IP and HA browser origin and
+provide a private ingress token. Set the app's HTTPS `upstream_url` and
+`ingress_token` locally, start it and choose **Open Web UI** or **Show in sidebar**.
+The ordinary dashboard URL keeps its password login. The app creates no second
+controller/manufacturer connection.
+[Complete app instructions](hargassner-dashboard/DOCS.md).
 
-The configured-room-setpoint backend displays the active configured base plus
-room correction and writes only the correction from the thermostat dial.
-This frontend module does not choose a day/setback phase or grant permission.
+Actual container build, app installation and a live Ingress session remain
+unverified by this packaging checkpoint. Home Assistant OS or a Supervisor
+installation is required; installing the HACS popup alone does not install this app.
 
-[Optional native tiles](examples/thermostat-cards.yaml) open this popup and keep
-separate day, setback and correction number controls. Verify their eight
-suggested entity IDs against the actual Home Assistant registry before use.
-Paste the YAML into a dashboard's Manual card editor. HACS does not import it.
+## Native tiles and entity IDs
 
-## Compatibility and removal
+Copy [thermostat-cards.yaml](examples/thermostat-cards.yaml) into a dashboard's
+Manual card editor. Both climate tiles show target temperature and
+`Heizkreisstatus`; card and icon taps open the native dialog. Six number tiles
+keep day, setback and correction controls separate. No inline preset selector
+is added. HACS does not import card YAML.
 
-The native popup contract was inspected against Home Assistant
-frontend20260930.3. Isolated browser fixtures exercise the module; actual HACS
-download and the owner's HA frontend/registry remain unverified. Future HA DOM
-changes may require an update; unsupported structures retain native controls.
+Check all eight IDs first. The [90-entry naming reference](examples/entity-name-mapping.json)
+lists suggested IDs; existing registry names and suffixes can differ. It is
+documentation, not HA configuration to import or an instruction to select every
+entity. MQTT discovery, freshness and correction-only dial writes remain backend duties.
 
-Remove the module/resource registration and uninstall it through HACS, then
-reload the frontend. To restore native controls temporarily in the current
-browser tab, run `window.hargassnerThermostatPopup?.stop()` in its console.
+## Compatibility and troubleshooting
 
-## Publish and validate
+The popup contract was researched against HA frontend20260930.3. The preceding
+1.1.0 release was downloaded in HA2026.9.3/HACS2.0.5, with both matching native
+popups showing one Modus menu. Release-specific fixture checks are in
+[validation.json](validation.json). Unsupported layouts and unknown current
+presets retain native controls. Future HA DOM changes may require an update.
 
-The `hacs.json` filename override selects
-`dist/hargassner-thermostat-popup.js` in the `harg-ha` repository. Set a GitHub
-description and topics such as `home-assistant`, `hacs`,
-`dashboard` and `hargassner`, with issues enabled. Commit all files, run the
-included checks, and publish a GitHub **release** tagged `v1.1.0`, attaching the
-standalone JavaScript file. A tag alone is not a versioned GitHub release.
-Until a release exists HACS can use the default branch. The repository ZIP is
-for transfer/publication; `zip_release` is intentionally absent from `hacs.json`.
-[HACS repository requirements](https://www.hacs.xyz/docs/publish/start/),
-[Dashboard plugin structure](https://www.hacs.xyz/docs/publish/plugin/).
+If both native menus remain, verify the installed HACS version and that its
+exact registered module URL returns HTTP200. A404 means the file is not being
+served; clearing cache cannot supply it. A current preset of `none` also retains
+native menus intentionally; correct backend state delivery instead of fabricating a mode.
 
-Run `python3 tools/validate.py` and `npm run check`. For the isolated browser
-fixture, serve this repository with `python3 -m http.server 5186 --bind 127.0.0.1`
-and open `/tests/test-thermostat-popup.html`. A maintainer can additionally run
-the [official HACS action](https://github.com/hacs/action) with category `plugin`
-after publication. Hosted GitHub metadata and actual HACS installation cannot
-be validated from this local packaging checkpoint.
+Uninstall the popup through HACS, remove its registrations, apply any global
+configuration change and reload. `window.hargassnerThermostatPopup?.stop()`
+restores native controls temporarily in the current tab. Remove the dashboard
+app independently through its App store entry.
+
+## Validation and publication
+
+The HACS filename override selects `dist/hargassner-thermostat-popup.js`.
+Root `repository.yaml` independently exposes the dashboard app to Supervisor.
+The transfer ZIP is not a HACS `zip_release` archive.
+[HACS structure](https://www.hacs.xyz/docs/publish/plugin/),
+[HA app repositories](https://developers.home-assistant.io/docs/apps/repository/).
+
+Run `python3 tools/validate.py` and `npm run check`. Install the development-only
+`tools/requirements.txt`, then run `python3 tools/test_package.py`. The app
+loopback suite uses Python/OpenSSL and synthetic temporary HTTPS endpoints:
+
+```sh
+python3 -B -m unittest discover -s hargassner-dashboard -p 'test_*.py'
+```
+
+Serve this repository locally and open `tests/test-thermostat-popup.html` for
+the browser fixture. Tests contact no live HA/controller. Structure, syntax and
+loopback tests do not establish hosted installation or physical heating response.
+Publish a GitHub release tagged `v1.2.0` with the standalone JavaScript asset;
+Supervisor builds the committed app source from the repository.
+[Third-party icon licenses](THIRD-PARTY-NOTICES.md).

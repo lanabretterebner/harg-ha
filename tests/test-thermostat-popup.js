@@ -80,6 +80,10 @@ function mount(value = state(), reverse = false) {
   fixtures.append(popup); return popup;
 }
 function modus(popup) { return popup.shadowRoot.querySelector('[data-hargassner-modus]'); }
+function operatingStatus(popup) { return popup.shadowRoot.querySelector('[data-hargassner-operating-state]'); }
+function reportedStatus(label = "Tag/Nacht Abschaltung", code = 4, available = true) {
+  return { "Heizkreisstatus": label, "Heizkreisstatus-Code": code, "Heizkreisstatus verfügbar": available };
+}
 function select(menu, value) {
   menu.dispatchEvent(new CustomEvent("wa-select", { detail: { item: { value } }, bubbles: true, composed: true }));
 }
@@ -109,6 +113,102 @@ async function test(name, run) {
 await test("one Modus selector replaces both native menus without changing state", async () => {
   const value = state(), before = JSON.stringify(value), p = mount(value); await settle(); patched(p);
   equal(p.hvac.value, "auto"); equal(p.preset.value, "Auto"); equal(JSON.stringify(value), before);
+});
+await test("all six options expose embedded native icon paths and preserve native options and exact mode values", async () => {
+  const p = mount(); await settle();
+  const menu = modus(p), original = JSON.stringify([p.hvac.options, p.preset.options]);
+  equal(menu.options, [
+    { value: "Aus", label: "Aus", iconPath: "M16.56,5.44L15.11,6.89C16.84,7.94 18,9.83 18,12A6,6 0 0,1 12,18A6,6 0 0,1 6,12C6,9.83 7.16,7.94 8.88,6.88L7.44,5.44C5.36,6.88 4,9.28 4,12A8,8 0 0,0 12,20A8,8 0 0,0 20,12C20,9.28 18.64,6.88 16.56,5.44M13,3H11V13H13" },
+    { value: "Auto", label: "Auto", iconPath: "M15,13H16.5V15.82L18.94,17.23L18.19,18.53L15,16.69V13M19,8H5V19H9.67C9.24,18.09 9,17.07 9,16A7,7 0 0,1 16,9C17.07,9 18.09,9.24 19,9.67V8M5,21C3.89,21 3,20.1 3,19V5C3,3.89 3.89,3 5,3H6V1H8V3H16V1H18V3H19A2,2 0 0,1 21,5V11.1C22.24,12.36 23,14.09 23,16A7,7 0 0,1 16,23C14.09,23 12.36,22.24 11.1,21H5M16,11.15A4.85,4.85 0 0,0 11.15,16C11.15,18.68 13.32,20.85 16,20.85A4.85,4.85 0 0,0 20.85,16C20.85,13.32 18.68,11.15 16,11.15Z" },
+    { value: "Heizen", label: "Heizen", iconPath: "M12,7A5,5 0 0,1 17,12A5,5 0 0,1 12,17A5,5 0 0,1 7,12A5,5 0 0,1 12,7M12,9A3,3 0 0,0 9,12A3,3 0 0,0 12,15A3,3 0 0,0 15,12A3,3 0 0,0 12,9M12,2L14.39,5.42C13.65,5.15 12.84,5 12,5C11.16,5 10.35,5.15 9.61,5.42L12,2M3.34,7L7.5,6.65C6.9,7.16 6.36,7.78 5.94,8.5C5.5,9.24 5.25,10 5.11,10.79L3.34,7M3.36,17L5.12,13.23C5.26,14 5.53,14.78 5.95,15.5C6.37,16.24 6.91,16.86 7.5,17.37L3.36,17M20.65,7L18.88,10.79C18.74,10 18.47,9.23 18.05,8.5C17.63,7.78 17.1,7.15 16.5,6.64L20.65,7M20.64,17L16.5,17.36C17.09,16.85 17.62,16.22 18.04,15.5C18.46,14.77 18.73,14 18.87,13.21L20.64,17M12,22L9.59,18.56C10.33,18.83 11.14,19 12,19C12.82,19 13.63,18.83 14.37,18.56L12,22Z" },
+    { value: "Absenken", label: "Absenken", iconPath: "M17.75,4.09L15.22,6.03L16.13,9.09L13.5,7.28L10.87,9.09L11.78,6.03L9.25,4.09L12.44,4L13.5,1L14.56,4L17.75,4.09M21.25,11L19.61,12.25L20.2,14.23L18.5,13.06L16.8,14.23L17.39,12.25L15.75,11L17.81,10.95L18.5,9L19.19,10.95L21.25,11M18.97,15.95C19.8,15.87 20.69,17.05 20.16,17.8C19.84,18.25 19.5,18.67 19.08,19.07C15.17,23 8.84,23 4.94,19.07C1.03,15.17 1.03,8.83 4.94,4.93C5.34,4.53 5.76,4.17 6.21,3.85C6.96,3.32 8.14,4.21 8.06,5.04C7.79,7.9 8.75,10.87 10.95,13.06C13.14,15.26 16.1,16.22 18.97,15.95M17.33,17.97C14.5,17.81 11.7,16.64 9.53,14.5C7.36,12.31 6.2,9.5 6.04,6.68C3.23,9.82 3.34,14.64 6.35,17.66C9.37,20.67 14.19,20.78 17.33,17.97Z" },
+    { value: "1x Heizen", label: "1x Heizen", iconPath: "M18.1 9.3L19.6 6L15.5 5.6C16.1 6.1 16.6 6.7 17 7.5C17.3 8.1 17.5 8.6 17.7 9.2C17.2 9.1 16.6 9 16 9H15.6C14.8 7.2 13.1 6 11 6C8.2 6 6 8.2 6 11C6 13.1 7.2 14.8 9 15.6V16C9 19.9 12.1 23 16 23S23 19.9 23 16C23 12.9 20.9 10.2 18.1 9.3M16 21C13.2 21 11 18.8 11 16S13.2 11 16 11 21 13.2 21 16 18.8 21 16 21M16.5 16.2L19.4 17.9L18.6 19.1L15 17V12H16.5V16.2M11 4C10.2 4 9.4 4.2 8.6 4.4L11 1L13.4 4.4C12.6 4.2 11.8 4 11 4M4.9 14.5C5.3 15.2 5.9 15.9 6.5 16.4L2.4 16L4.2 12.2C4.3 13 4.5 13.8 4.9 14.5M4.1 9.8L2.3 6L6.5 5.7C5.9 6.2 5.4 6.8 4.9 7.5C4.5 8.2 4.2 9 4.1 9.8Z" },
+    { value: "1x Absenken", label: "1x Absenken", iconPath: "M17.75,4.09L15.22,6.03L16.13,9.09L13.5,7.28L10.87,9.09L11.78,6.03L9.25,4.09L12.44,4L13.5,1L14.56,4L17.75,4.09M21.25,11L19.61,12.25L20.2,14.23L18.5,13.06L16.8,14.23L17.39,12.25L15.75,11L17.81,10.95L18.5,9L19.19,10.95L21.25,11M18.97,15.95C19.8,15.87 20.69,17.05 20.16,17.8C19.84,18.25 19.5,18.67 19.08,19.07C15.17,23 8.84,23 4.94,19.07C1.03,15.17 1.03,8.83 4.94,4.93C5.34,4.53 5.76,4.17 6.21,3.85C6.96,3.32 8.14,4.21 8.06,5.04C7.79,7.9 8.75,10.87 10.95,13.06C13.14,15.26 16.1,16.22 18.97,15.95M17.33,17.97C14.5,17.81 11.7,16.64 9.53,14.5C7.36,12.31 6.2,9.5 6.04,6.68C3.23,9.82 3.34,14.64 6.35,17.66C9.37,20.67 14.19,20.78 17.33,17.97Z" },
+  ]);
+  for (const value of PRESETS) {
+    p.stateObj = state({}, { preset_mode: value }); p.render(); await settle();
+    equal(modus(p).value, value);
+    equal(modus(p).options.find(option => option.value === value).iconPath,
+      menu.options.find(option => option.value === value).iconPath);
+  }
+  equal(JSON.stringify([p.hvac.options, p.preset.options]), original);
+});
+await test("operating status uses the reported label independently of Auto and temperature", async () => {
+  const value = state({}, { ...reportedStatus(), temperature: 19 }), before = JSON.stringify(value);
+  const p = mount(value); await settle(); patched(p);
+  const node = operatingStatus(p);
+  equal(node.textContent, "HeizkreisstatusTag/Nacht Abschaltung"); equal(node.title, "Code 4");
+  equal(node.getAttribute("role"), "status"); equal(node.getAttribute("aria-live"), "polite");
+  equal(node.previousElementSibling.localName, "ha-more-info-control-select-container");
+  equal(node.dataset.available, "true"); equal(JSON.stringify(value), before);
+});
+await test("stale reported status clears its former label and code", async () => {
+  const p = mount(state({}, reportedStatus())); await settle();
+  p.stateObj = state({}, reportedStatus("Tag/Nacht Abschaltung", 4, false)); p.render(); await settle();
+  equal(operatingStatus(p).textContent, "HeizkreisstatusNicht verfügbar");
+  equal(operatingStatus(p).title, ""); equal(operatingStatus(p).dataset.available, "false"); patched(p);
+});
+await test("missing and malformed status fields never invent an operating state", async () => {
+  const p = mount(); await settle();
+  equal(operatingStatus(p).textContent, "HeizkreisstatusNicht verfügbar");
+  for (const attributes of [reportedStatus("", 4), reportedStatus("Heizbetrieb", "1"),
+    reportedStatus("Heizbetrieb", 1, "true"), reportedStatus(null, 1), reportedStatus("x".repeat(161), 1)]) {
+    p.stateObj = state({}, attributes); p.render(); await settle();
+    equal(operatingStatus(p).textContent, "HeizkreisstatusNicht verfügbar"); equal(operatingStatus(p).title, "");
+  }
+});
+await test("fresh unknown numeric status remains explicitly unknown", async () => {
+  const p = mount(state({}, reportedStatus("Code 99 (unbekannt)", 99))); await settle();
+  equal(operatingStatus(p).textContent, "HeizkreisstatusCode 99 (unbekannt)");
+  equal(operatingStatus(p).title, "Code 99"); equal(operatingStatus(p).dataset.available, "true");
+});
+await test("unavailable or unknown entity state overrides apparently fresh status", async () => {
+  const p = mount(state({}, reportedStatus())); await settle();
+  for (const unavailable of ["unavailable", "unknown"]) {
+    p.stateObj = state({ state: unavailable }, reportedStatus()); p.render(); await settle();
+    equal(operatingStatus(p).textContent, "HeizkreisstatusNicht verfügbar");
+    equal(operatingStatus(p).title, "");
+  }
+});
+await test("status text renders as text and cannot inject markup", async () => {
+  const label = '<img src=x onerror="throw 1">';
+  const p = mount(state({}, reportedStatus(label))); await settle();
+  equal(operatingStatus(p).querySelector("img"), null);
+  equal(operatingStatus(p).querySelector('[data-hargassner-operating-state-value]').textContent, label);
+});
+await test("status updates without selecting a new mode or duplicating nodes", async () => {
+  const p = mount(state({}, reportedStatus())); await settle();
+  p.stateObj = state({}, reportedStatus("Heizbetrieb", 1)); p.render(); await settle(); patched(p);
+  equal(operatingStatus(p).textContent, "HeizkreisstatusHeizbetrieb"); equal(modus(p).value, "Auto");
+  equal(p.shadowRoot.querySelectorAll('[data-hargassner-operating-state]').length, 1);
+  const count = updates; await settle(); equal(updates, count); assert(count < 40); equal(serviceRequests, []);
+});
+await test("unknown preset leaves native menus while independently displaying reported status", async () => {
+  const p = mount(state({}, { ...reportedStatus(), preset_mode: "none" })); await settle(); native(p);
+  equal(operatingStatus(p).textContent, "HeizkreisstatusTag/Nacht Abschaltung");
+});
+await test("entity reuse and schema removal cannot retain another circuit status", async () => {
+  const p = mount(state({}, reportedStatus())); await settle(); const old = operatingStatus(p);
+  p.stateObj = state({ entity_id: "climate.synthetic_second" }, reportedStatus("Heizbetrieb", 1)); p.render(); await settle();
+  assert(!old.isConnected); equal(operatingStatus(p).textContent, "HeizkreisstatusHeizbetrieb");
+  p.stateObj = state({ entity_id: "climate.unrelated" }, { hargassner_control_schema: undefined }); p.render(); await settle();
+  equal(operatingStatus(p), null); equal(controller.status().statusPopups, 0); native(p);
+});
+await test("replacement native container relocates status and ambiguous layout removes it", async () => {
+  const p = mount(state({}, reportedStatus())); await settle(); const old = operatingStatus(p);
+  p.render(true); await settle(); assert(!old.isConnected); equal(operatingStatus(p).textContent, "HeizkreisstatusTag/Nacht Abschaltung");
+  p.shadowRoot.append(document.createElement("ha-more-info-control-select-container")); await settle();
+  equal(operatingStatus(p), null); equal(controller.status().statusPopups, 0);
+});
+await test("status observer cleans up when a nested popup is removed", async () => {
+  const shell = document.createElement("div"); shell.attachShadow({ mode: "open" }); fixtures.append(shell);
+  const p = document.createElement("more-info-climate"); p.stateObj = state({}, reportedStatus()); shell.shadowRoot.append(p);
+  await settle(); assert(operatingStatus(p)); shell.remove(); await settle();
+  equal(operatingStatus(p), null); equal(controller.status().statusPopups, 0);
+});
+await test("stop removes operating status and restores both native menus", async () => {
+  const p = mount(state({}, reportedStatus())); await settle(); controller.stop(); await settle();
+  equal(operatingStatus(p), null); equal(controller.status().statusPopups, 0); native(p);
 });
 await test("matches exact option values despite reversed order and translated labels", async () => {
   const p = mount(state(), true); await settle(); patched(p);
@@ -260,12 +360,12 @@ await test("separate native menu parents retain the native layout", async () => 
   const p = mount(); await settle(); const wrapper=document.createElement("div");
   p.shadowRoot.append(wrapper); wrapper.append(p.preset); await settle(); native(p);
 });
-await test("older installed resource is stopped before version 1.1.0 starts", async () => {
+await test("older installed resource is stopped before version 1.2.0 starts", async () => {
   controller.stop(); let stopped=0;
-  const prior={version:"1.0.0",running:true,stop(){stopped++;this.running=false;}};
+  const prior={version:"1.1.0",running:true,stop(){stopped++;this.running=false;}};
   window[Symbol.for("hargassner.thermostat.popup.v1")]=prior;
   controller=installHargassnerThermostatPopup(window); await controller.ready;
-  equal(stopped,1); equal(controller.version,"1.1.0");
+  equal(stopped,1); equal(controller.version,"1.2.0");
   const p=mount(); await settle(); patched(p);
 });
 

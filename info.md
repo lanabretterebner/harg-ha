@@ -1,10 +1,9 @@
-# Hargassner Thermostat Popup
+# Hargassner Home Assistant clients
 
-One visible Modus selector with Aus, Auto, Heizen, Absenken, 1x Heizen and
-1x Absenken in matching native climate popups. Requires separately configured
-MQTT climate entities with the configured_room_setpoint_v1 schema marker.
+One native Modus selector with six choices, offline mode icons and read-only
+Heizkreisstatus. Includes the optional authenticated dashboard Ingress app,
+status-aware native tile examples and entity-naming reference.
 
-Install as a HACS Dashboard module. See README.md for resource registration,
-optional native tiles, compatibility and removal. The module replaces the two
-native mode menus; an explicit choice invokes Home Assistant's existing preset
-action. It does not create entities or install the MQTT adapter.
+Add this repository separately to HACS for the browser module and to the
+Supervisor App store for the dashboard app. Neither installs the existing MQTT
+or controller backend. See README.md for prerequisites and both installation paths.

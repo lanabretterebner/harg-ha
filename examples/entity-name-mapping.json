@@ -1,0 +1,542 @@
+[
+  {
+    "settings_selection_id": "binary_sensor:BP1",
+    "canonical_name": "Boiler 1 Pumpe",
+    "default_entity_id": "binary_sensor.boiler_1_pumpe",
+    "discovery_object_id": "boiler_1_pumpe"
+  },
+  {
+    "settings_selection_id": "binary_sensor:HKP1",
+    "canonical_name": "Heizkreis 1 Pumpe",
+    "default_entity_id": "binary_sensor.heizkreis_1_pumpe",
+    "discovery_object_id": "heizkreis_1_pumpe"
+  },
+  {
+    "settings_selection_id": "binary_sensor:HKP2",
+    "canonical_name": "Heizkreis 2 Pumpe",
+    "default_entity_id": "binary_sensor.heizkreis_2_pumpe",
+    "discovery_object_id": "heizkreis_2_pumpe"
+  },
+  {
+    "settings_selection_id": "binary_sensor:RLP_PuffP",
+    "canonical_name": "Rücklauf-/Ladepumpe (Ausgang)",
+    "default_entity_id": "binary_sensor.ruecklauf_ladepumpe_ausgang",
+    "discovery_object_id": "ruecklauf_ladepumpe_ausgang"
+  },
+  {
+    "settings_selection_id": "button:PR040",
+    "canonical_name": "Puffer Einmal-Ladung starten",
+    "default_entity_id": "button.puffer_einmal_ladung_starten",
+    "discovery_object_id": "puffer_einmal_ladung_starten"
+  },
+  {
+    "settings_selection_id": "button:PR042",
+    "canonical_name": "Boiler 1 Einmal-Ladung starten",
+    "default_entity_id": "button.boiler_1_einmal_ladung_starten",
+    "discovery_object_id": "boiler_1_einmal_ladung_starten"
+  },
+  {
+    "settings_selection_id": "climate:HC1",
+    "canonical_name": "Heizkreis 1",
+    "default_entity_id": "climate.heizkreis_1",
+    "discovery_object_id": "heizkreis_1"
+  },
+  {
+    "settings_selection_id": "climate:HC2",
+    "canonical_name": "Heizkreis 2",
+    "default_entity_id": "climate.heizkreis_2",
+    "discovery_object_id": "heizkreis_2"
+  },
+  {
+    "settings_selection_id": "number:11",
+    "canonical_name": "Alle Heizkreise Aus über Außentemperatur",
+    "default_entity_id": "number.alle_heizkreise_aus_ueber_aussentemperatur",
+    "discovery_object_id": "alle_heizkreise_aus_ueber_aussentemperatur"
+  },
+  {
+    "settings_selection_id": "number:12",
+    "canonical_name": "Alle Heizkreise Aus bei Tagabsenkung",
+    "default_entity_id": "number.alle_heizkreise_aus_bei_tagabsenkung",
+    "discovery_object_id": "alle_heizkreise_aus_bei_tagabsenkung"
+  },
+  {
+    "settings_selection_id": "number:13",
+    "canonical_name": "Alle Heizkreise Aus bei Nachtabsenkung",
+    "default_entity_id": "number.alle_heizkreise_aus_bei_nachtabsenkung",
+    "discovery_object_id": "alle_heizkreise_aus_bei_nachtabsenkung"
+  },
+  {
+    "settings_selection_id": "number:2",
+    "canonical_name": "Boiler 1 Solltemperatur",
+    "default_entity_id": "number.boiler_1_solltemperatur",
+    "discovery_object_id": "boiler_1_solltemperatur"
+  },
+  {
+    "settings_selection_id": "number:4",
+    "canonical_name": "Heizkreis 1 Tagtemperatur",
+    "default_entity_id": "number.heizkreis_1_tagtemperatur",
+    "discovery_object_id": "heizkreis_1_tagtemperatur"
+  },
+  {
+    "settings_selection_id": "number:5",
+    "canonical_name": "Heizkreis 1 Absenktemperatur",
+    "default_entity_id": "number.heizkreis_1_absenktemperatur",
+    "discovery_object_id": "heizkreis_1_absenktemperatur"
+  },
+  {
+    "settings_selection_id": "number:7",
+    "canonical_name": "Heizkreis 2 Tagtemperatur",
+    "default_entity_id": "number.heizkreis_2_tagtemperatur",
+    "discovery_object_id": "heizkreis_2_tagtemperatur"
+  },
+  {
+    "settings_selection_id": "number:8",
+    "canonical_name": "Heizkreis 2 Absenktemperatur",
+    "default_entity_id": "number.heizkreis_2_absenktemperatur",
+    "discovery_object_id": "heizkreis_2_absenktemperatur"
+  },
+  {
+    "settings_selection_id": "number:A12a",
+    "canonical_name": "Heizkreis 2 Steilheit FBH",
+    "default_entity_id": "number.heizkreis_2_steilheit_fbh",
+    "discovery_object_id": "heizkreis_2_steilheit_fbh"
+  },
+  {
+    "settings_selection_id": "number:A13a",
+    "canonical_name": "Heizkreis 2 Vorlauftemperatur Minimum FBH",
+    "default_entity_id": "number.heizkreis_2_vorlauftemperatur_minimum_fbh",
+    "discovery_object_id": "heizkreis_2_vorlauftemperatur_minimum_fbh"
+  },
+  {
+    "settings_selection_id": "number:A14a",
+    "canonical_name": "Heizkreis 2 Vorlauftemperatur Maximum FBH",
+    "default_entity_id": "number.heizkreis_2_vorlauftemperatur_maximum_fbh",
+    "discovery_object_id": "heizkreis_2_vorlauftemperatur_maximum_fbh"
+  },
+  {
+    "settings_selection_id": "number:A16d",
+    "canonical_name": "Heizkreis 2 Raumkorrektur",
+    "default_entity_id": "number.heizkreis_2_raumkorrektur",
+    "discovery_object_id": "heizkreis_2_raumkorrektur"
+  },
+  {
+    "settings_selection_id": "number:A18a",
+    "canonical_name": "Heizkreis 2 Sommer-Badheizen Puffer-Mindesttemperatur",
+    "default_entity_id": "number.heizkreis_2_sommer_badheizen_puffer_mindesttemperatur",
+    "discovery_object_id": "heizkreis_2_sommer_badheizen_puffer_mindesttemperatur"
+  },
+  {
+    "settings_selection_id": "number:A18c",
+    "canonical_name": "Heizkreis 2 Sommer-Badheizen Vorlauf-Soll",
+    "default_entity_id": "number.heizkreis_2_sommer_badheizen_vorlauf_soll",
+    "discovery_object_id": "heizkreis_2_sommer_badheizen_vorlauf_soll"
+  },
+  {
+    "settings_selection_id": "number:A2",
+    "canonical_name": "Heizkreis 1 Steilheit",
+    "default_entity_id": "number.heizkreis_1_steilheit",
+    "discovery_object_id": "heizkreis_1_steilheit"
+  },
+  {
+    "settings_selection_id": "number:A3",
+    "canonical_name": "Heizkreis 1 Vorlauftemperatur Minimum",
+    "default_entity_id": "number.heizkreis_1_vorlauftemperatur_minimum",
+    "discovery_object_id": "heizkreis_1_vorlauftemperatur_minimum"
+  },
+  {
+    "settings_selection_id": "number:A4",
+    "canonical_name": "Heizkreis 1 Vorlauftemperatur Maximum",
+    "default_entity_id": "number.heizkreis_1_vorlauftemperatur_maximum",
+    "discovery_object_id": "heizkreis_1_vorlauftemperatur_maximum"
+  },
+  {
+    "settings_selection_id": "number:A6d",
+    "canonical_name": "Heizkreis 1 Raumkorrektur",
+    "default_entity_id": "number.heizkreis_1_raumkorrektur",
+    "discovery_object_id": "heizkreis_1_raumkorrektur"
+  },
+  {
+    "settings_selection_id": "number:A8a",
+    "canonical_name": "Heizkreis 1 Sommer-Badheizen Puffer-Mindesttemperatur",
+    "default_entity_id": "number.heizkreis_1_sommer_badheizen_puffer_mindesttemperatur",
+    "discovery_object_id": "heizkreis_1_sommer_badheizen_puffer_mindesttemperatur"
+  },
+  {
+    "settings_selection_id": "number:A8c",
+    "canonical_name": "Heizkreis 1 Sommer-Badheizen Vorlauf-Soll",
+    "default_entity_id": "number.heizkreis_1_sommer_badheizen_vorlauf_soll",
+    "discovery_object_id": "heizkreis_1_sommer_badheizen_vorlauf_soll"
+  },
+  {
+    "settings_selection_id": "number:B2",
+    "canonical_name": "Boiler 1 Boilertemperatur Schaltdifferenz",
+    "default_entity_id": "number.boiler_1_boilertemperatur_schaltdifferenz",
+    "discovery_object_id": "boiler_1_boilertemperatur_schaltdifferenz"
+  },
+  {
+    "settings_selection_id": "number:B3",
+    "canonical_name": "Boiler 1 Boilertemperatur Minimum",
+    "default_entity_id": "number.boiler_1_boilertemperatur_minimum",
+    "discovery_object_id": "boiler_1_boilertemperatur_minimum"
+  },
+  {
+    "settings_selection_id": "number:B9a",
+    "canonical_name": "Boiler 1 Energiesparmodus nach der Dauer",
+    "default_entity_id": "number.boiler_1_energiesparmodus_nach_der_dauer",
+    "discovery_object_id": "boiler_1_energiesparmodus_nach_der_dauer"
+  },
+  {
+    "settings_selection_id": "number:B9b",
+    "canonical_name": "Boiler 1 maximale Pumpenlaufzeit",
+    "default_entity_id": "number.boiler_1_maximale_pumpenlaufzeit",
+    "discovery_object_id": "boiler_1_maximale_pumpenlaufzeit"
+  },
+  {
+    "settings_selection_id": "number:C4c",
+    "canonical_name": "Zentralpuffer Mindesttemperatur oben",
+    "default_entity_id": "number.zentralpuffer_mindesttemperatur_oben",
+    "discovery_object_id": "zentralpuffer_mindesttemperatur_oben"
+  },
+  {
+    "settings_selection_id": "number:C5a",
+    "canonical_name": "Pufferzwangsladung Außentemperaturgrenze",
+    "default_entity_id": "number.pufferzwangsladung_aussentemperaturgrenze",
+    "discovery_object_id": "pufferzwangsladung_aussentemperaturgrenze"
+  },
+  {
+    "settings_selection_id": "number:D40",
+    "canonical_name": "Pelletvorrat einstellen",
+    "default_entity_id": "number.pelletvorrat_einstellen",
+    "discovery_object_id": "pelletvorrat_einstellen"
+  },
+  {
+    "settings_selection_id": "select:15",
+    "canonical_name": "Urlaubsschaltung",
+    "default_entity_id": "select.urlaubsschaltung",
+    "discovery_object_id": "urlaubsschaltung"
+  },
+  {
+    "settings_selection_id": "select:15a",
+    "canonical_name": "Heizkreis 1 Urlaubsschaltung",
+    "default_entity_id": "select.heizkreis_1_urlaubsschaltung",
+    "discovery_object_id": "heizkreis_1_urlaubsschaltung"
+  },
+  {
+    "settings_selection_id": "select:15b",
+    "canonical_name": "Heizkreis 2 Urlaubsschaltung",
+    "default_entity_id": "select.heizkreis_2_urlaubsschaltung",
+    "discovery_object_id": "heizkreis_2_urlaubsschaltung"
+  },
+  {
+    "settings_selection_id": "select:A18",
+    "canonical_name": "Heizkreis 2 Sommer-Badheizen",
+    "default_entity_id": "select.heizkreis_2_sommer_badheizen",
+    "discovery_object_id": "heizkreis_2_sommer_badheizen"
+  },
+  {
+    "settings_selection_id": "select:A8",
+    "canonical_name": "Heizkreis 1 Sommer-Badheizen",
+    "default_entity_id": "select.heizkreis_1_sommer_badheizen",
+    "discovery_object_id": "heizkreis_1_sommer_badheizen"
+  },
+  {
+    "settings_selection_id": "select:B9",
+    "canonical_name": "Boiler 1 Energiesparmodus",
+    "default_entity_id": "select.boiler_1_energiesparmodus",
+    "discovery_object_id": "boiler_1_energiesparmodus"
+  },
+  {
+    "settings_selection_id": "select:D80d",
+    "canonical_name": "Zentralpuffer Solar/Fremdwärmebetrieb aktivieren",
+    "default_entity_id": "select.zentralpuffer_solar_fremdwaermebetrieb_aktivieren",
+    "discovery_object_id": "zentralpuffer_solar_fremdwaermebetrieb_aktivieren"
+  },
+  {
+    "settings_selection_id": "select:PR001",
+    "canonical_name": "Kesselprogramm",
+    "default_entity_id": "select.kesselprogramm",
+    "discovery_object_id": "kesselprogramm"
+  },
+  {
+    "settings_selection_id": "sensor:Boilerstatus",
+    "canonical_name": "Boilerstatus",
+    "default_entity_id": "sensor.boilerstatus",
+    "discovery_object_id": "boilerstatus"
+  },
+  {
+    "settings_selection_id": "sensor:Brennerstatus",
+    "canonical_name": "Kesselstatus",
+    "default_entity_id": "sensor.kesselstatus",
+    "discovery_object_id": "kesselstatus"
+  },
+  {
+    "settings_selection_id": "sensor:DiffR3TDiff1",
+    "canonical_name": "Solar Zieltemperatur",
+    "default_entity_id": "sensor.solar_zieltemperatur",
+    "discovery_object_id": "solar_zieltemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:DiffR3TWq",
+    "canonical_name": "Solar Quellentemperatur",
+    "default_entity_id": "sensor.solar_quellentemperatur",
+    "discovery_object_id": "solar_quellentemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:Heizkreis_1_Status",
+    "canonical_name": "Heizkreis 1 Status",
+    "default_entity_id": "sensor.heizkreis_1_status",
+    "discovery_object_id": "heizkreis_1_status"
+  },
+  {
+    "settings_selection_id": "sensor:Heizkreis_2_Status",
+    "canonical_name": "Heizkreis 2 Status",
+    "default_entity_id": "sensor.heizkreis_2_status",
+    "discovery_object_id": "heizkreis_2_status"
+  },
+  {
+    "settings_selection_id": "sensor:Lagerstand",
+    "canonical_name": "Lagerstand",
+    "default_entity_id": "sensor.lagerstand",
+    "discovery_object_id": "lagerstand"
+  },
+  {
+    "settings_selection_id": "sensor:Leistung",
+    "canonical_name": "Gemeldete Leistung",
+    "default_entity_id": "sensor.gemeldete_leistung",
+    "discovery_object_id": "gemeldete_leistung"
+  },
+  {
+    "settings_selection_id": "sensor:O2",
+    "canonical_name": "Restsauerstoff",
+    "default_entity_id": "sensor.restsauerstoff",
+    "discovery_object_id": "restsauerstoff"
+  },
+  {
+    "settings_selection_id": "sensor:O2soll",
+    "canonical_name": "Restsauerstoff Sollwert",
+    "default_entity_id": "sensor.restsauerstoff_sollwert",
+    "discovery_object_id": "restsauerstoff_sollwert"
+  },
+  {
+    "settings_selection_id": "sensor:Puffer_Fuellgrad",
+    "canonical_name": "Puffer Füllgrad",
+    "default_entity_id": "sensor.puffer_fuellgrad",
+    "discovery_object_id": "puffer_fuellgrad"
+  },
+  {
+    "settings_selection_id": "sensor:Puffer_Max_Anforderung",
+    "canonical_name": "Puffer höchste Anforderung",
+    "default_entity_id": "sensor.puffer_hoechste_anforderung",
+    "discovery_object_id": "puffer_hoechste_anforderung"
+  },
+  {
+    "settings_selection_id": "sensor:Puffer_Soll_Oben",
+    "canonical_name": "Puffer Solltemperatur oben",
+    "default_entity_id": "sensor.puffer_solltemperatur_oben",
+    "discovery_object_id": "puffer_solltemperatur_oben"
+  },
+  {
+    "settings_selection_id": "sensor:Puffer_Soll_Unten",
+    "canonical_name": "Puffer Solltemperatur unten",
+    "default_entity_id": "sensor.puffer_solltemperatur_unten",
+    "discovery_object_id": "puffer_solltemperatur_unten"
+  },
+  {
+    "settings_selection_id": "sensor:Pufferstatus",
+    "canonical_name": "Pufferstatus",
+    "default_entity_id": "sensor.pufferstatus",
+    "discovery_object_id": "pufferstatus"
+  },
+  {
+    "settings_selection_id": "sensor:Solar_Leistung",
+    "canonical_name": "Solar gemeldete Leistung",
+    "default_entity_id": "sensor.solar_gemeldete_leistung",
+    "discovery_object_id": "solar_gemeldete_leistung"
+  },
+  {
+    "settings_selection_id": "sensor:Solar_Pumpe1_Leistung",
+    "canonical_name": "Solarpumpe 1 – Ansteuerung",
+    "default_entity_id": "sensor.solarpumpe_1_ansteuerung",
+    "discovery_object_id": "solarpumpe_1_ansteuerung"
+  },
+  {
+    "settings_selection_id": "sensor:Solar_Tagesenergie",
+    "canonical_name": "Solar Tagesenergie",
+    "default_entity_id": "sensor.solar_tagesenergie",
+    "discovery_object_id": "solar_tagesenergie"
+  },
+  {
+    "settings_selection_id": "sensor:TA_Gem",
+    "canonical_name": "Außentemperatur gemittelt",
+    "default_entity_id": "sensor.aussentemperatur_gemittelt",
+    "discovery_object_id": "aussentemperatur_gemittelt"
+  },
+  {
+    "settings_selection_id": "sensor:TB1",
+    "canonical_name": "Boiler 1 Boilertemperatur",
+    "default_entity_id": "sensor.boiler_1_boilertemperatur",
+    "discovery_object_id": "boiler_1_boilertemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:TK",
+    "canonical_name": "Kesseltemperatur",
+    "default_entity_id": "sensor.kesseltemperatur",
+    "discovery_object_id": "kesseltemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:TKs",
+    "canonical_name": "Kessel Solltemperatur",
+    "default_entity_id": "sensor.kessel_solltemperatur",
+    "discovery_object_id": "kessel_solltemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:TPo",
+    "canonical_name": "Pufferfühler oben",
+    "default_entity_id": "sensor.pufferfuehler_oben",
+    "discovery_object_id": "pufferfuehler_oben"
+  },
+  {
+    "settings_selection_id": "sensor:TPu",
+    "canonical_name": "Pufferfühler unten",
+    "default_entity_id": "sensor.pufferfuehler_unten",
+    "discovery_object_id": "pufferfuehler_unten"
+  },
+  {
+    "settings_selection_id": "sensor:TRA_1",
+    "canonical_name": "Heizkreis 1 Raumtemperatur",
+    "default_entity_id": "sensor.heizkreis_1_raumtemperatur",
+    "discovery_object_id": "heizkreis_1_raumtemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:TRG",
+    "canonical_name": "Rauchgastemperatur",
+    "default_entity_id": "sensor.rauchgastemperatur",
+    "discovery_object_id": "rauchgastemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:TRL",
+    "canonical_name": "Rücklauftemperatur",
+    "default_entity_id": "sensor.ruecklauftemperatur",
+    "discovery_object_id": "ruecklauftemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:TRLsoll",
+    "canonical_name": "Rücklauf Solltemperatur",
+    "default_entity_id": "sensor.ruecklauf_solltemperatur",
+    "discovery_object_id": "ruecklauf_solltemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:TRs_1",
+    "canonical_name": "Heizkreis 1 interner Regelsollwert",
+    "default_entity_id": "sensor.heizkreis_1_interner_regelsollwert",
+    "discovery_object_id": "heizkreis_1_interner_regelsollwert"
+  },
+  {
+    "settings_selection_id": "sensor:TRs_2",
+    "canonical_name": "Heizkreis 2 interner Regelsollwert",
+    "default_entity_id": "sensor.heizkreis_2_interner_regelsollwert",
+    "discovery_object_id": "heizkreis_2_interner_regelsollwert"
+  },
+  {
+    "settings_selection_id": "sensor:TVL_1",
+    "canonical_name": "Heizkreis 1 Vorlauftemperatur",
+    "default_entity_id": "sensor.heizkreis_1_vorlauftemperatur",
+    "discovery_object_id": "heizkreis_1_vorlauftemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:TVL_2",
+    "canonical_name": "Heizkreis 2 Vorlauftemperatur",
+    "default_entity_id": "sensor.heizkreis_2_vorlauftemperatur",
+    "discovery_object_id": "heizkreis_2_vorlauftemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:TVLs_1",
+    "canonical_name": "Heizkreis 1 Vorlauf Solltemperatur",
+    "default_entity_id": "sensor.heizkreis_1_vorlauf_solltemperatur",
+    "discovery_object_id": "heizkreis_1_vorlauf_solltemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:TVLs_2",
+    "canonical_name": "Heizkreis 2 Vorlauf-Solltemperatur",
+    "default_entity_id": "sensor.heizkreis_2_vorlauf_solltemperatur",
+    "discovery_object_id": "heizkreis_2_vorlauf_solltemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:Taus",
+    "canonical_name": "Außentemperatur",
+    "default_entity_id": "sensor.aussentemperatur",
+    "discovery_object_id": "aussentemperatur"
+  },
+  {
+    "settings_selection_id": "sensor:ZK",
+    "canonical_name": "Kesselstatus-Code",
+    "default_entity_id": "sensor.kesselstatus_code",
+    "discovery_object_id": "kesselstatus_code"
+  },
+  {
+    "settings_selection_id": "text:16",
+    "canonical_name": "Urlaubszeit von",
+    "default_entity_id": "text.urlaubszeit_von",
+    "discovery_object_id": "urlaubszeit_von"
+  },
+  {
+    "settings_selection_id": "text:16a",
+    "canonical_name": "Heizkreis 1 Urlaubszeit von",
+    "default_entity_id": "text.heizkreis_1_urlaubszeit_von",
+    "discovery_object_id": "heizkreis_1_urlaubszeit_von"
+  },
+  {
+    "settings_selection_id": "text:16b",
+    "canonical_name": "Heizkreis 2 Urlaubszeit von",
+    "default_entity_id": "text.heizkreis_2_urlaubszeit_von",
+    "discovery_object_id": "heizkreis_2_urlaubszeit_von"
+  },
+  {
+    "settings_selection_id": "text:17",
+    "canonical_name": "Urlaubszeit bis",
+    "default_entity_id": "text.urlaubszeit_bis",
+    "discovery_object_id": "urlaubszeit_bis"
+  },
+  {
+    "settings_selection_id": "text:17a",
+    "canonical_name": "Heizkreis 1 Urlaubszeit bis",
+    "default_entity_id": "text.heizkreis_1_urlaubszeit_bis",
+    "discovery_object_id": "heizkreis_1_urlaubszeit_bis"
+  },
+  {
+    "settings_selection_id": "text:17b",
+    "canonical_name": "Heizkreis 2 Urlaubszeit bis",
+    "default_entity_id": "text.heizkreis_2_urlaubszeit_bis",
+    "discovery_object_id": "heizkreis_2_urlaubszeit_bis"
+  },
+  {
+    "settings_selection_id": "text:Z41",
+    "canonical_name": "Name Heizkreis 1",
+    "default_entity_id": "text.name_heizkreis_1",
+    "discovery_object_id": "name_heizkreis_1"
+  },
+  {
+    "settings_selection_id": "text:Z42",
+    "canonical_name": "Name Heizkreis 2",
+    "default_entity_id": "text.name_heizkreis_2",
+    "discovery_object_id": "name_heizkreis_2"
+  },
+  {
+    "settings_selection_id": "text:Z51",
+    "canonical_name": "Name Boiler 1",
+    "default_entity_id": "text.name_boiler_1",
+    "discovery_object_id": "name_boiler_1"
+  },
+  {
+    "settings_selection_id": "text:Z54a",
+    "canonical_name": "Name Zentralpuffer",
+    "default_entity_id": "text.name_zentralpuffer",
+    "discovery_object_id": "name_zentralpuffer"
+  },
+  {
+    "settings_selection_id": "text:Z59",
+    "canonical_name": "Name PWM DiffReg Kreis 1",
+    "default_entity_id": "text.name_pwm_diffreg_kreis_1",
+    "discovery_object_id": "name_pwm_diffreg_kreis_1"
+  }
+]
