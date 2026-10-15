@@ -196,5 +196,5 @@ window.deviceGroupTestResults = { passed: results.every(x => x.passed), tests: r
 document.querySelector("#results").textContent = JSON.stringify(window.deviceGroupTestResults, null, 2);
 
 if (window.parent !== window) window.parent.postMessage({
-  type: "hargassner-device-group-tests", version: "1.4.0", groups: window.deviceGroupTestResults,
+  type: "hargassner-device-group-tests", version: "1.4.1", groups: window.deviceGroupTestResults,
 }, "*");

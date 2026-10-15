@@ -44,3 +44,23 @@ The custom `custom:hargassner-thermostat-card` uses the same contract without
 changing HA's `off`/`heat`/`auto` domain state. Its displayed target, measured room
 temperature and correction are separate values. Frontend device-page grouping
 also leaves one existing MQTT device and all registry/discovery identities intact.
+
+## Bounded presentation reconciliation
+
+`Sollwertbasis` identifies a fresh confirmed target context. During a qualified
+known change the backend can expose `Sollwertaktualisierung` with exactly
+`id`, `basis`, `phase`, `version: 2`, `reason`, `previousPreset`, `nextPreset`.
+Reasons are `mode_report`, `parameter_report`, `phase_report`, `pending_change`;
+phase is `pending` or `readback`. The old basis/preset identify the previous
+confirmed snapshot. `nextPreset` is the current reported preset, never a
+prediction of a requested mode. Legacy exact `id`, `basis`, `phase` markers
+remain valid only when the reported mode/preset is unchanged.
+
+Frontend1.4.1 keeps that old target only as a private inert presentation with an
+update note for one fixed eight-second window. It does not publish a target,
+change HA states, or enable a command. Repeated reports do not renew the window.
+Off, offline, unknown state, lost context and absent proof clear it. A fresh
+confirmed target replaces the native control and permanently retires callbacks
+from the old basis; room/status heartbeats leave a current control intact.
+The separately installed backend remains responsible for validating fresh
+reports, source identity and command eligibility.

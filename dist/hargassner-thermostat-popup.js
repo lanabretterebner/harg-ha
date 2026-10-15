@@ -4,7 +4,7 @@
  * existing preset handler. No data fetch, temperature command or mode guess.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.0";
+const VERSION = "1.4.1";
 const SCHEMA = "configured_room_setpoint_v1";
 const PRESETS = Object.freeze(["Aus", "Auto", "Heizen", "Absenken", "1x Heizen", "1x Absenken"]);
 // Original SVG paths from @mdi/js 7.4.47, icon data Apache-2.0.
@@ -64,6 +64,233 @@ export function installHargassnerThermostatPopup(environment = window) {
   const queued = new Set();
   let running = true, prototype, originalDescriptor, wrapped;
 
+  // Presentation records are scoped to one native popup child. The real
+  // more-info stateObj and Home Assistant states are never replaced.
+  const targetRecords = new Map();
+  const targetCallShims = new WeakMap();
+  function popupHass(host) {
+    let node = host;
+    for (let depth = 0; node && depth < 64; depth++) {
+      if (node.hass?.states && typeof node.hass.callService === "function") return node.hass;
+      node = node.parentNode || node.host;
+    }
+    return document.querySelector("home-assistant")?.hass;
+  }
+  function popupConnected(host) {
+    const hass = popupHass(host);
+    return !!hass && hass.connected !== false && hass.connection?.connected !== false;
+  }
+  function popupMode(state) {
+    const preset = state?.attributes?.preset_mode;
+    return PRESETS.includes(preset) && preset !== "Aus" &&
+      state.state === (preset === "Auto" ? "auto" : "heat");
+  }
+  function popupTarget(state) {
+    return !!eligible({ stateObj: state }) && popupMode(state) && validTarget(state) &&
+      Number.isSafeInteger(state.attributes.supported_features) && state.attributes.supported_features >= 0 &&
+      (state.attributes.supported_features & 1) !== 0;
+  }
+  function popupMarker(state, previous) {
+    const marker = state?.attributes?.Sollwertaktualisierung;
+    if (!marker || typeof marker !== "object" || Array.isArray(marker) ||
+        marker.basis !== previous.basis || typeof marker.id !== "string" ||
+        !/^[A-Za-z0-9_-]{1,128}$/.test(marker.id) ||
+        !["pending", "readback"].includes(marker.phase)) return null;
+    const keys = Object.keys(marker).sort().join(",");
+    if (keys === "basis,id,phase") return state.state === previous.state.state &&
+      state.attributes.preset_mode === previous.state.attributes.preset_mode ? marker : null;
+    return keys === "basis,id,nextPreset,phase,previousPreset,reason,version" && marker.version === 2 &&
+      ["mode_report", "parameter_report", "phase_report", "pending_change"].includes(marker.reason) &&
+      marker.previousPreset === previous.state.attributes.preset_mode &&
+      marker.nextPreset === state.attributes.preset_mode && popupMode(previous.state) && popupMode(state)
+      ? marker : null;
+  }
+  function descriptor(node, key) {
+    for (let current = node; current; current = Object.getPrototypeOf(current)) {
+      const found = Object.getOwnPropertyDescriptor(current, key);
+      if (found) return found;
+    }
+  }
+  function popupContext(state, host) {
+    const a = state.attributes;
+    return JSON.stringify([state.entity_id, state.state, a.preset_mode, a.Sollwertbasis,
+      a.temperature, a.min_temp, a.max_temp, a.target_temp_step, a.supported_features,
+      popupHass(host)?.config?.unit_system?.temperature]);
+  }
+  function targetCurrent(record, epoch) {
+    const state = record.host.stateObj;
+    return running && !record.closed && targetRecords.get(record.host) === record &&
+      record.epoch === epoch && !record.held && record.host.isConnected && record.node.isConnected &&
+      record.host.shadowRoot?.querySelectorAll("ha-state-control-climate-temperature").length === 1 &&
+      record.host.shadowRoot.querySelector("ha-state-control-climate-temperature") === record.node &&
+      state?.entity_id === record.entity && popupConnected(record.host) && popupTarget(state) &&
+      record.qualifiedContext === popupContext(state, record.host);
+  }
+  function rotateTarget(record) {
+    record.originalDebounce.cancel();
+    const epoch = ++record.epoch;
+    record.apiCache = null;
+    record.callWrapper = function (value) {
+      if (this !== record.node || !targetCurrent(record, epoch)) return;
+      const ticket = value && typeof value === "object" ? record.tickets.get(value) : null;
+      if (ticket && ticket.epoch !== epoch) return;
+      if (typeof value !== "string" && !ticket) return;
+      return record.originalCall.call(this, ticket ? ticket.value : value);
+    };
+    record.debounceWrapper = function (value) {
+      if (!targetCurrent(record, epoch) || typeof value !== "string") return;
+      const ticket = {};
+      record.tickets.set(ticket, { value, epoch });
+      record.originalDebounce(ticket);
+    };
+    record.debounceWrapper.cancel = () => record.originalDebounce.cancel();
+    Object.defineProperty(record.node, "_callService", { configurable: true, writable: true, value: record.callWrapper });
+    Object.defineProperty(record.node, "_debouncedCallService", { configurable: true, writable: true, value: record.debounceWrapper });
+  }
+  function ownsTarget(record) {
+    const own = Object.getOwnPropertyDescriptor(record.node, "_api");
+    return own?.get === record.apiGet && own?.set === record.apiSet &&
+      record.node._callService === record.callWrapper && record.node._debouncedCallService === record.debounceWrapper;
+  }
+  function clearTarget(host) {
+    const record = targetRecords.get(host);
+    if (!record) return;
+    record.closed = true; record.epoch++; record.originalDebounce.cancel();
+    environment.clearTimeout(record.timer); environment.clearTimeout(record.poll);
+    record.observer.disconnect(); record.note?.remove();
+    if (record.held) {
+      record.node.inert = record.inert;
+      if (record.aria === null) record.node.removeAttribute("aria-disabled");
+      else record.node.setAttribute("aria-disabled", record.aria);
+    }
+    for (const [key, value] of [["_api", record.apiGet], ["_callService", record.callWrapper], ["_debouncedCallService", record.debounceWrapper]]) {
+      const own = Object.getOwnPropertyDescriptor(record.node, key);
+      if ((key === "_api" ? own?.get : own?.value) !== value) continue;
+      const original = record.originals[key];
+      if (key === "_callService") {
+        // A cancelled debounce may already have queued a callback. Its opaque
+        // ticket must never become a native string target after disposal.
+        // This tiny shim retains no popup/state reference; normal native
+        // string targets keep the original method and API behavior.
+        const call = record.originalCall;
+        const shim = function (type) { if (typeof type === "string") return call.call(this, type); };
+        targetCallShims.set(shim, call);
+        Object.defineProperty(record.node, key, { configurable: true, writable: true,
+          enumerable: original?.enumerable ?? false, value: shim });
+      } else if (original) Object.defineProperty(record.node, key, original);
+      else delete record.node[key];
+    }
+    // Parent Lit still owns this exact child and continues its normal updates.
+    if (host.stateObj && record.node.isConnected) record.node.stateObj = host.stateObj;
+    targetRecords.delete(host);
+  }
+  function makeTargetRecord(host, node, state) {
+    const api = descriptor(node, "_api"), debounced = node._debouncedCallService;
+    if (!popupConnected(host) || !api?.get || !api.set || api.configurable === false ||
+        typeof node._callService !== "function" || typeof debounced !== "function" ||
+        typeof debounced.cancel !== "function" || !Object.isExtensible(node) ||
+        typeof node._api?.callService !== "function" ||
+        ["_api", "_callService", "_debouncedCallService"].some(key => Object.getOwnPropertyDescriptor(node, key)?.configurable === false)) return null;
+    const record = { host, node, entity: state.entity_id, epoch: 0, closed: false, held: null, previous: null, initial: true,
+      originalCall: targetCallShims.get(node._callService) || node._callService, originalDebounce: debounced, tickets: new WeakMap(),
+      originals: Object.fromEntries(["_api", "_callService", "_debouncedCallService"].map(key => [key, Object.getOwnPropertyDescriptor(node, key)])),
+      observer: new MutationObserver(() => schedule(host)) };
+    record.apiGet = function () {
+      const raw = api.get.call(this), epoch = record.epoch;
+      if (!raw || typeof raw.callService !== "function") return raw;
+      if (record.apiCache?.raw === raw && record.apiCache.epoch === epoch) return record.apiCache.proxy;
+      const guarded = (...args) => {
+        const state = host.stateObj, temperature = args[2]?.temperature;
+        if (!targetCurrent(record, epoch) || api.get.call(node) !== raw ||
+            args[0] !== "climate" || args[1] !== "set_temperature" || args[2]?.entity_id !== record.entity ||
+            !Number.isFinite(temperature) || temperature < state.attributes.min_temp || temperature > state.attributes.max_temp) return Promise.resolve();
+        return raw.callService(...args);
+      };
+      const proxy = new Proxy(raw, { get: (value, key) => key === "callService" ? guarded :
+        typeof value[key] === "function" ? value[key].bind(value) : value[key] });
+      record.apiCache = { raw, epoch, proxy }; return proxy;
+    };
+    record.apiSet = function (value) { api.set.call(this, value); record.apiCache = null; };
+    try {
+      targetRecords.set(host, record);
+      Object.defineProperty(node, "_api", { configurable: true, get: record.apiGet, set: record.apiSet });
+      rotateTarget(record); observe(record);
+      return record;
+    } catch { clearTarget(host); return null; }
+  }
+  function reconcileTarget(host) {
+    const state = host.stateObj, children = host.shadowRoot?.querySelectorAll("ha-state-control-climate-temperature");
+    let record = targetRecords.get(host);
+    if (!host.isConnected || !eligible(host) || !popupConnected(host) || !popupMode(state) || children?.length !== 1 ||
+        children[0].parentElement?.classList.contains("controls") !== true) { clearTarget(host); return; }
+    const node = children[0];
+    if (record && (record.node !== node || record.entity !== state.entity_id || !ownsTarget(record))) {
+      clearTarget(host); record = null;
+    }
+    if (!record) {
+      if (!popupTarget(state)) return;
+      record = makeTargetRecord(host, node, state);
+      if (!record) return;
+    }
+    if (popupTarget(state)) {
+      const context = popupContext(state, host);
+      const changed = record.qualifiedContext !== undefined && record.qualifiedContext !== context;
+      if (record.held) {
+        environment.clearTimeout(record.timer); environment.clearTimeout(record.poll);
+        record.node.inert = record.inert;
+        if (record.aria === null) record.node.removeAttribute("aria-disabled");
+        else record.node.setAttribute("aria-disabled", record.aria);
+        record.held = null; record.note?.remove(); rotateTarget(record);
+      } else if (changed) rotateTarget(record);
+      record.qualifiedContext = context;
+      const basis = state.attributes.Sollwertbasis;
+      record.previous = typeof basis === "string" && /^[a-f0-9]{32}$/.test(basis)
+        ? { basis, unit: popupHass(host)?.config?.unit_system?.temperature,
+          state: { ...state, attributes: { ...state.attributes } } } : null;
+      if (record.initial) {
+        node.stateObj = { ...state, attributes: { ...state.attributes } }; record.initial = false;
+      } else if (node.stateObj !== state) node.stateObj = state;
+      observe(record); return;
+    }
+    const previous = record.previous, marker = previous && popupMarker(state, previous);
+    if (!previous || previous.unit !== popupHass(host)?.config?.unit_system?.temperature ||
+        state.attributes["Zieltemperatur verfügbar"] !== false || !marker ||
+        !Number.isSafeInteger(state.attributes.supported_features) || state.attributes.supported_features < 0 ||
+        record.held && record.held.id !== marker.id) { clearTarget(host); return; }
+    if (!record.held) {
+      record.held = { id: marker.id, actual: null, display: null }; record.inert = node.inert; record.aria = node.getAttribute("aria-disabled");
+      rotateTarget(record);
+      const held = record.held;
+      record.timer = environment.setTimeout(() => {
+        if (targetRecords.get(host) === record && record.held === held) { clearTarget(host); schedule(host); }
+      }, 8000);
+      const poll = () => {
+        if (targetRecords.get(host) !== record || record.held !== held) return;
+        if (!popupConnected(host)) { clearTarget(host); schedule(host); return; }
+        record.poll = environment.setTimeout(poll, 250);
+      };
+      record.poll = environment.setTimeout(poll, 250);
+      record.note = document.createElement("div"); record.note.dataset.hargassnerTargetUpdate = VERSION;
+      record.note.setAttribute("role", "status"); record.note.setAttribute("aria-live", "polite");
+      record.note.textContent = "Wird aktualisiert · letzter bestätigter Sollwert";
+      record.note.style.cssText = "text-align:center;color:var(--secondary-text-color);margin:8px 0;";
+    }
+    // Keep reported mode/status current; only this inert native child's target
+    // presentation gets the last confirmed numeric fields and feature bit.
+    if (record.held.actual !== state) {
+      const frozen = { ...state.attributes };
+      for (const key of ["temperature", "min_temp", "max_temp", "target_temp_step"])
+        frozen[key] = previous.state.attributes[key];
+      frozen.supported_features = state.attributes.supported_features | (previous.state.attributes.supported_features & 1);
+      record.held.actual = state; record.held.display = { ...state, attributes: frozen };
+    }
+    if (node.stateObj !== record.held.display) node.stateObj = record.held.display;
+    if (!node.inert) node.inert = true;
+    if (node.getAttribute("aria-disabled") !== "true") node.setAttribute("aria-disabled", "true");
+    if (record.note.parentNode !== node.parentNode) node.insertAdjacentElement("afterend", record.note);
+    observe(record);
+  }
+
   function restore(record) {
     record.observer?.disconnect();
     try {
@@ -101,6 +328,7 @@ export function installHargassnerThermostatPopup(environment = window) {
       try { reconcile(host); } catch {
         try { clear(host); } catch { /* Optional UI only. */ }
         try { clearStatus(host); } catch { /* Optional UI only. */ }
+        try { clearTarget(host); } catch { /* Optional UI only. */ }
       }
     });
   }
@@ -160,6 +388,7 @@ export function installHargassnerThermostatPopup(environment = window) {
     observe(record);
   }
   function reconcile(host) {
+    reconcileTarget(host);
     reconcileStatus(host);
     if (!host.isConnected || !host.shadowRoot) { clear(host); return; }
     const context = eligible(host);
@@ -213,7 +442,7 @@ export function installHargassnerThermostatPopup(environment = window) {
         menu.style.setProperty("display", "none", "important");
     }
     if (record.modus.value !== context.attributes.preset_mode) record.modus.value = context.attributes.preset_mode;
-    const disabled = !!(hvac.disabled || preset.disabled || context.state.state === "unavailable");
+    const disabled = !!(hvac.disabled || preset.disabled || context.state.state === "unavailable" || targetRecords.get(host)?.held);
     if (record.modus.disabled !== disabled) record.modus.disabled = disabled;
     observe(record);
   }
@@ -232,12 +461,13 @@ export function installHargassnerThermostatPopup(environment = window) {
   const controller = {
     version: VERSION,
     get running() { return running; },
-    status: () => ({ running, activePopups: records.size, statusPopups: statusRecords.size, queued: queued.size }),
+    status: () => ({ running, activePopups: records.size, statusPopups: statusRecords.size, targetPopups: targetRecords.size, queued: queued.size }),
     stop() {
       if (!running) return;
       running = false;
       for (const record of [...records.values()]) { try { restore(record); } catch { /* Keep stopping other records. */ } }
       for (const host of [...statusRecords.keys()]) { try { clearStatus(host); } catch { /* Keep stopping other records. */ } }
+      for (const host of [...targetRecords.keys()]) { try { clearTarget(host); } catch { /* Keep stopping other records. */ } }
       queued.clear();
       if (prototype && prototype.updated === wrapped) {
         if (originalDescriptor) Object.defineProperty(prototype, "updated", originalDescriptor);
@@ -258,6 +488,9 @@ export function installHargassnerThermostatPopup(environment = window) {
     const original = prototype.updated;
     wrapped = function (...args) {
       const result = original.apply(this, args);
+      // Runs before the native child's queued Lit update, preventing the
+      // interactive-to-readonly template flash without touching host state.
+      try { reconcileTarget(this); } catch { try { clearTarget(this); } catch { /* Optional UI only. */ } }
       schedule(this);
       return result;
     };
@@ -284,6 +517,7 @@ function validTarget(state) {
   return scopedClimate(state) && ["auto", "heat"].includes(state.state) &&
     sameValues(a.hvac_modes, HVAC) &&
     a["Zieltemperatur verfügbar"] === true &&
+    Number.isSafeInteger(a.supported_features) && (a.supported_features & 1) === 1 &&
     [a.temperature, a.min_temp, a.max_temp, a.target_temp_step].every(Number.isFinite) &&
     a.target_temp_step > 0 && a.max_temp > a.min_temp &&
     a.temperature >= a.min_temp && a.temperature <= a.max_temp;
@@ -389,17 +623,27 @@ export function installHargassnerThermostatCard(environment = window) {
       _rememberTarget(state) {
         const basis = state.attributes.Sollwertbasis;
         this._lastConfirmed = typeof basis === "string" && /^[a-f0-9]{32}$/.test(basis)
-          ? { basis, state: { ...state, attributes: { ...state.attributes } } } : null;
+          ? { basis, unit: this._hass?.config?.unit_system?.temperature, state: { ...state, attributes: { ...state.attributes } } } : null;
+      }
+      _markerModes(marker, state, previous) {
+        const from = previous.state, keys = Object.keys(marker).sort().join(",");
+        if (keys === "basis,id,phase") return state.state === from.state &&
+          state.attributes.preset_mode === from.attributes.preset_mode;
+        if (keys !== "basis,id,nextPreset,phase,previousPreset,reason,version" || marker.version !== 2 ||
+            !["mode_report", "parameter_report", "phase_report", "pending_change"].includes(marker.reason) ||
+            marker.previousPreset !== from.attributes.preset_mode || marker.nextPreset !== state.attributes.preset_mode ||
+            !PRESETS.slice(1).includes(marker.previousPreset) || !PRESETS.slice(1).includes(marker.nextPreset)) return false;
+        return from.state === (marker.previousPreset === "Auto" ? "auto" : "heat") &&
+          state.state === (marker.nextPreset === "Auto" ? "auto" : "heat");
       }
       _holdTarget(state) {
         const previous = this._lastConfirmed, marker = state?.attributes?.Sollwertaktualisierung;
-        if (!this._native || !this._guardedNative.has(this._native) || !previous || !this._connectedHA() || !scopedClimate(state) ||
+        if (!this._native || !this._guardedNative.has(this._native) || !previous || previous.unit !== this._hass?.config?.unit_system?.temperature || !this._connectedHA() || !scopedClimate(state) ||
             !["auto", "heat"].includes(state.state) || !sameValues(state.attributes.hvac_modes, HVAC) ||
             state.attributes["Zieltemperatur verfügbar"] !== false ||
-            state.entity_id !== previous.state.entity_id || state.state !== previous.state.state ||
-            state.attributes.preset_mode !== previous.state.attributes.preset_mode ||
+            state.entity_id !== previous.state.entity_id ||
             !marker || typeof marker !== "object" || Array.isArray(marker) ||
-            Object.keys(marker).sort().join(",") !== "basis,id,phase" || marker.basis !== previous.basis ||
+            !this._markerModes(marker, state, previous) || marker.basis !== previous.basis ||
             typeof marker.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(marker.id) ||
             !["pending", "readback"].includes(marker.phase) ||
             this._held && this._held.id !== marker.id) return false;
@@ -415,15 +659,37 @@ export function installHargassnerThermostatCard(environment = window) {
         }
         // Presentation-only frozen confirmed state; never updates HA states or
         // qualifies a command. The scoped native API guard reads latest HA state.
-        const frozen = { ...previous.state, attributes: { ...previous.state.attributes } };
+        const target = previous.state.attributes;
+        const currentFeatures = Number.isSafeInteger(state.attributes.supported_features) ? state.attributes.supported_features : 0;
+        const oldTargetFeature = Number.isSafeInteger(target.supported_features) ? target.supported_features & 1 : 0;
+        const frozen = { ...state, attributes: { ...state.attributes,
+          temperature: target.temperature, min_temp: target.min_temp,
+          max_temp: target.max_temp, target_temp_step: target.target_temp_step,
+          // HA TARGET_TEMPERATURE=1 controls the native handle. Preserve only
+          // that old single-target display bit, never live HA capabilities.
+          supported_features: currentFeatures | oldTargetFeature } };
         this._native.hass = { ...this._hass, states: { ...this._hass.states, [state.entity_id]: frozen } };
         this._native.inert = true; this._native.setAttribute("aria-disabled", "true");
         this._ui.updateNote.hidden = false; this._ui.placeholder.hidden = true;
         return true;
       }
+      _targetContext(state) {
+        if (!scopedClimate(state)) return null;
+        const a = state.attributes;
+        // Only command-relevant confirmed context; sensor/status heartbeats do
+        // not retire the native control or interrupt a current interaction.
+        return JSON.stringify([state.entity_id, state.state, a.preset_mode,
+          a.Sollwertbasis, a.temperature, a.min_temp, a.max_temp,
+          a.target_temp_step, a.supported_features, a.hvac_modes,
+          this._hass?.config?.unit_system?.temperature]);
+      }
       _guardNativeApi(native, generation) {
+        const targetContext = this._targetContext(this._hass?.states?.[this._config?.entity]);
+        this._nativeTargetContext = targetContext;
         const current = () => this.isConnected && this._generation === generation && this._native === native &&
-          !this._held && !this._retiredNative.has(native) && this._connectedHA() && validTarget(this._hass?.states?.[this._config?.entity]);
+          !this._held && !this._retiredNative.has(native) && this._connectedHA() &&
+          validTarget(this._hass?.states?.[this._config?.entity]) &&
+          targetContext === this._targetContext(this._hass?.states?.[this._config?.entity]);
         const guarded = (...args) => {
           if (!current() || args[0] !== "climate" || args[1] !== "set_temperature" ||
               args[2]?.entity_id !== this._config?.entity) return Promise.resolve();
@@ -470,6 +736,10 @@ export function installHargassnerThermostatCard(environment = window) {
           if (!this._failed && !customElements.get("ha-control-select-menu")) this._load(false);
           return;
         }
+        // A fully qualified update can arrive without an intermediate null.
+        // Retire callbacks bound to the old basis before showing the new one.
+        if (this._native && this._nativeTargetContext !== this._targetContext(state))
+          this._retiredNative.add(this._native);
         this._clearHold(); this._rememberTarget(state);
         if (customElements.get("ha-control-select-menu")) this._renderMenu(state);
         if (this._native) {

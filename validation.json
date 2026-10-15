@@ -1,26 +1,33 @@
 {
   "schema_version": 1,
-  "version": "1.4.0",
-  "prepared_at": "2026-10-15T00:24:35.928361+00:00",
+  "version": "1.4.1",
+  "supervisor_app_version": "1.4.0",
+  "prepared_at": "2026-10-15T01:08:35.668180+00:00",
   "source_only": true,
   "hacs_installation_verified": false,
   "supervisor_app_installation_verified": false,
-  "frontend_source": "independently reviewed continuity candidate; root actual native HA synthetic-state check passed without heating writes",
-  "ingress_source": "30 synthetic TLS, SNI, retry, identity and log-secrecy cases passed",
+  "frontend_source": "Exact disjoint baseline1.4 + independently reviewed card and popup candidates; native-component replay pending root",
+  "functional_composed_sha256": "4effb3228d581f8e4d9e40897f2ebeab43ac08a2bb30dd00d817330b1f0b48ab",
+  "version_only_promotion": true,
+  "ingress_source": "Every app subtree byte unchanged from published1.4.0; no rebuild or app update in this frontend release",
   "private_backend_included": false,
   "package_tests_passed": 7,
-  "ingress_tests_passed": 30,
-  "browser_fixture": {
-    "browser": "T3 Code collaborative browser",
-    "popup": 59,
-    "card": 46,
-    "groups": 22,
-    "all_passed": true
+  "node_card_model_tests_passed": 356,
+  "node_popup_model_tests_passed": 319,
+  "browser_fixture_execution": "Not performed by this package owner; root owns combined real native/Lit validation",
+  "actual_installation": "Pending separate hosted release receipt; this source checkpoint does not claim installation",
+  "physical_commands": 0,
+  "node_portable_tests": {
+    "card": {
+      "passed": 356,
+      "failed": 0,
+      "source_sha256": "f479d467c6ea5b4f520320f0f340d7488c1b693c075fbf142400b72fc599ce59"
+    },
+    "popup": {
+      "passed": 319,
+      "failed": 0,
+      "source_sha256": "f479d467c6ea5b4f520320f0f340d7488c1b693c075fbf142400b72fc599ce59"
+    }
   },
-  "native_component_review": {
-    "scope": "real HA native card and climate dial, synthetic state and service spy only",
-    "same_dial_inert_during_hold": true,
-    "stale_debounced_calls_blocked": true,
-    "physical_commands": 0
-  }
+  "portable_default_module_resolution": "Both suites executed from unrelated working directory in package path containing spaces; no explicit module argument"
 }

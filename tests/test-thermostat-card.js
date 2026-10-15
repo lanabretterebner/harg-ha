@@ -2,6 +2,7 @@ import { installHargassnerThermostatCard } from "../dist/hargassner-thermostat-p
 
 // Isolated HA helpers/service stand-ins only. Never connect this fixture to HA.
 const PRESETS = ["Aus", "Auto", "Heizen", "Absenken", "1x Heizen", "1x Absenken"];
+const BASIS = "a".repeat(32), OTHER = "b".repeat(32);
 const fixtures = document.querySelector("#fixtures");
 let requests = [], created = [], helperCalls = 0;
 class NativeThermostat extends HTMLElement {
@@ -10,12 +11,12 @@ class NativeThermostat extends HTMLElement {
   set hass(value) { this._hass = value; this.shadowRoot.textContent = String(value.states[this.config.entity]?.attributes.temperature); }
   get hass() { return this._hass; }
   connectedCallback() {
-    if (NativeThermostat.skipApi) return;
     const event = new Event("context-request", { bubbles: true, composed: true });
-    event.context = "hassApi"; event.callback = value => { this.api = value; }; this.dispatchEvent(event);
+    event.context = "hassApi"; event.callback = api => { this.api = api; };
+    this.dispatchEvent(event);
   }
   syntheticTemperature(value) {
-    this._hass.callService("climate", "set_temperature", { entity_id: this.config.entity, temperature: value });
+    this.api.callService("climate", "set_temperature", { entity_id: this.config.entity, temperature: value });
   }
 }
 customElements.define("hui-thermostat-card", NativeThermostat);
@@ -25,7 +26,7 @@ const helpers = { createCardElement(config) {
 const load = () => { helperCalls++; return Promise.resolve(helpers); };
 const state = (changes = {}, attrs = {}) => ({ entity_id: "climate.synthetic_one", state: "auto", ...changes,
   attributes: { friendly_name: "Heizkreis 1", hargassner_control_schema: "configured_room_setpoint_v1",
-    hvac_modes: ["off", "heat", "auto"], preset_modes: ["none", ...PRESETS], preset_mode: "Auto",
+    hvac_modes: ["off", "heat", "auto"], supported_features: 385, preset_modes: ["none", ...PRESETS], preset_mode: "Auto",
     temperature: 19, min_temp: 16, max_temp: 22, target_temp_step: 0.5, current_temperature: null,
     "Zieltemperatur verfügbar": true, Raumkorrektur: "0", "Heizkreisstatus": "Tag/Nacht Abschaltung",
     "Heizkreisstatus-Code": 4, "Heizkreisstatus verfügbar": true, ...attrs } });
@@ -188,101 +189,103 @@ await test("removing a card clears handlers and pending work without service cal
   const card = mount(); await settle(); const old = menu(card); card.remove(); pick(old, "Heizen"); await settle();
   equal(requests, []); equal(card.shadowRoot.children.length, 0);
 });
-const BASIS = "a".repeat(32), OTHER = "b".repeat(32);
-await test("unsupported native API context disables display retention", async () => {
-  NativeThermostat.skipApi = true;
-  try {
-    const card = mount(hass(state({}, { Sollwertbasis: BASIS }))); await settle(); assert(native(card));
-    card.hass = hass(state({}, { temperature: null, "Zieltemperatur verfügbar": false,
-      Sollwertaktualisierung: { id: "operation_1", basis: BASIS, phase: "pending" } })); await settle(); equal(native(card), null);
-  } finally { NativeThermostat.skipApi = false; }
+const activeMode = preset => preset === "Auto" ? "auto" : preset === "Aus" ? "off" : "heat";
+const modeHass = (preset, attrs = {}, entity = "climate.synthetic_one") => hass(state({ entity_id: entity, state: activeMode(preset) },
+  { preset_mode: preset, Sollwertbasis: BASIS, "Zieltemperatur verfügbar": preset !== "Aus", ...attrs }));
+const v2 = (from, to, reason = "mode_report") => ({ id: "mode_operation", basis: BASIS, phase: "readback", version: 2,
+  reason, previousPreset: from, nextPreset: to });
+for (const entity of ["climate.synthetic_one", "climate.synthetic_two"]) for (const from of PRESETS) for (const to of PRESETS)
+await test(`V2 ${entity} ${from} → ${to} preserves only a confirmed active presentation`, async () => {
+  const card = mount(modeHass(from, {}, entity), { entity }); await settle(); const old = native(card), api = old?.api;
+  card.hass = modeHass(to, { temperature: null, "Zieltemperatur verfügbar": false, Sollwertbasis: null, Sollwertaktualisierung: v2(from, to) }, entity); await settle();
+  if (from !== "Aus" && to !== "Aus") {
+    equal(native(card), old); assert(old.inert); equal(menu(card).value, to); assert(menu(card).disabled);
+    equal(old.hass.states[entity].attributes.temperature, 19); equal(old.hass.states[entity].state, activeMode(to));
+    equal(old.hass.states[entity].attributes.preset_mode, to); equal(old.hass.states[entity].attributes["Zieltemperatur verfügbar"], false);
+  } else equal(native(card), null);
+  if (api) await api.callService("climate", "set_temperature", { entity_id: entity, temperature: 21 }); equal(requests, []);
+  card.hass = modeHass(to, { Sollwertbasis: OTHER, temperature: 20 }, entity); await settle();
+  if (to === "Aus") equal(native(card), null); else {
+    assert(native(card)); assert(!native(card).inert); if (old) assert(native(card) !== old);
+    equal(native(card).hass.states[entity].attributes.temperature, 20);
+  }
+  if (api) await api.callService("climate", "set_temperature", { entity_id: entity, temperature: 21 }); equal(requests, []);
 });
-const confirmed = (attrs = {}) => hass(state({}, { Sollwertbasis: BASIS, ...attrs }));
-const updating = (attrs = {}) => hass(state({}, { temperature: null, "Zieltemperatur verfügbar": false,
-  Sollwertbasis: null, Sollwertaktualisierung: { id: "operation_1", basis: BASIS, phase: "pending" }, ...attrs }));
-await test("explicit matching update retains only the last confirmed dial, inert and visibly marked", async () => {
-  const card = mount(confirmed()); await settle(); const old = native(card); card.hass = updating(); await settle();
-  equal(native(card), old); equal(old.hass.states["climate.synthetic_one"].attributes.temperature, 19);
-  assert(old.inert); equal(old.getAttribute("aria-disabled"), "true"); assert(menu(card).disabled);
-  assert(!card.shadowRoot.querySelector('[role="status"].placeholder').hidden); equal(requests, []);
+await test("V2 superseding modes and known input/phase changes keep one fixed display epoch", async () => {
+  const card = mount(modeHass("Auto")); await settle(); const old = native(card);
+  for (const [next, reason] of [["Heizen", "mode_report"], ["Absenken", "mode_report"], ["1x Heizen", "parameter_report"], ["1x Absenken", "phase_report"], ["Auto", "pending_change"]]) {
+    card.hass = modeHass(next, { temperature: null, "Zieltemperatur verfügbar": false, Sollwertbasis: null, Sollwertaktualisierung: v2("Auto", next, reason) }); await settle();
+    equal(native(card), old); assert(old.inert); equal(menu(card).value, next); equal(old.hass.states["climate.synthetic_one"].attributes.temperature, 19);
+  }
+  equal(requests, []);
 });
-await test("pending and readback never forward native API calls or invent the requested target", async () => {
-  const card = mount(confirmed()); await settle(); const old = native(card), api = old.api;
-  card.hass = updating(); await settle(); await api.callService("climate", "set_temperature", { entity_id: "climate.synthetic_one", temperature: 20 });
-  card.hass = updating({ Sollwertaktualisierung: { id: "operation_1", basis: BASIS, phase: "readback" } }); await settle();
-  equal(native(card), old); equal(old.hass.states["climate.synthetic_one"].attributes.temperature, 19); equal(requests, []);
-});
-await test("fresh recovery displays confirmed target and permanently rejects old debounced callbacks", async () => {
-  const card = mount(confirmed()); await settle(); const old = native(card), api = old.api;
-  card.hass = updating(); await settle(); card.hass = confirmed({ Sollwertbasis: OTHER, temperature: 19.5 }); await settle();
-  assert(native(card) !== old); assert(!native(card).inert); assert(!menu(card).disabled);
-  equal(native(card).hass.states["climate.synthetic_one"].attributes.temperature, 19.5);
-  await api.callService("climate", "set_temperature", { entity_id: "climate.synthetic_one", temperature: 21 }); equal(requests, []);
-  await native(card).api.callService("climate", "set_temperature", { entity_id: "climate.synthetic_one", temperature: 20 }); equal(requests.length, 1);
-});
-await test("unmarked qualification loss clears rather than holding a stale target", async () => {
-  const card = mount(confirmed()); await settle(); card.hass = updating({ Sollwertaktualisierung: null }); await settle(); equal(native(card), null);
-});
-await test("pending marker without a previously confirmed basis cannot fabricate a dial", async () => {
-  const card = mount(updating()); await settle(); equal(native(card), null); equal(created.length, 0);
-});
-await test("legacy qualified targets still work but cannot gain a display hold without a basis token", async () => {
-  const card = mount(); await settle(); assert(native(card)); card.hass = updating(); await settle(); equal(native(card), null);
-});
-await test("malformed or cross-basis operation markers never retain the dial", async () => {
-  for (const marker of [null, {}, [], { id: "op", basis: OTHER, phase: "pending" },
-    { id: "op", basis: BASIS, phase: "confirmed" }, { id: "op", basis: BASIS, phase: "pending", extra: true },
-    { id: "bad id", basis: BASIS, phase: "pending" }]) {
-    const card = mount(confirmed()); await settle(); card.hass = updating({ Sollwertaktualisierung: marker }); await settle(); equal(native(card), null); card.remove();
+await test("V2 proof cannot invent a source mode, next mode, reason or version", async () => {
+  for (const patch of [{ previousPreset: "Heizen" }, { nextPreset: "Heizen" }, { previousPreset: "Aus" },
+    { reason: "anything" }, { version: 3 }, { extra: true }, { nextPreset: "unknown" }]) {
+    const card = mount(modeHass("Auto")); await settle();
+    card.hass = modeHass("Absenken", { temperature: null, "Zieltemperatur verfügbar": false, Sollwertaktualisierung: { ...v2("Auto", "Absenken"), ...patch } }); await settle();
+    equal(native(card), null); card.remove();
   }
 });
-await test("offline, unknown, unavailable and mode changes override an apparently valid pending marker", async () => {
-  for (const mode of ["unknown", "unavailable", "off", "heat"]) {
-    const card = mount(confirmed()); await settle(); const h = updating(); h.states["climate.synthetic_one"].state = mode;
-    card.hass = h; await settle(); equal(native(card), null); card.remove();
-  }
-  const card = mount(confirmed()); await settle(); const h = updating(); h.connected = false; card.hass = h; await settle(); equal(native(card), null);
+await test("V2 mismatched HVAC projection fails closed despite apparently valid mode labels", async () => {
+  const card = mount(modeHass("Auto")); await settle(); const h = modeHass("Heizen", { temperature: null, "Zieltemperatur verfügbar": false, Sollwertaktualisierung: v2("Auto", "Heizen") });
+  h.states["climate.synthetic_one"].state = "auto"; card.hass = h; await settle(); equal(native(card), null);
 });
-await test("preset or entity changes discard the held display and its API permission", async () => {
-  const card = mount(confirmed()); await settle(); const api = native(card).api; card.hass = updating(); await settle();
-  card.hass = updating({ preset_mode: "Absenken" }); await settle(); equal(native(card), null);
-  await api.callService("climate", "set_temperature", { entity_id: "climate.synthetic_one", temperature: 21 }); equal(requests, []);
-  card.setConfig({ entity: "climate.synthetic_two" }); await settle(); equal(native(card), null);
+await test("V2 latest measured/status/correction data stays truthful beside the historical target", async () => {
+  const card = mount(modeHass("Auto")); await settle();
+  card.hass = modeHass("Heizen", { temperature: null, "Zieltemperatur verfügbar": false, current_temperature: 22,
+    Raumkorrektur: "0.5", "Heizkreisstatus": "Heizen", Sollwertaktualisierung: v2("Auto", "Heizen") }); await settle();
+  const shown = native(card).hass.states["climate.synthetic_one"].attributes;
+  equal(shown.temperature, 19); equal(shown.current_temperature, 22); equal(shown.Raumkorrektur, "0.5");
+  assert(card.shadowRoot.textContent.includes("Ist-Temperatur: 22 °C")); assert(card.shadowRoot.textContent.includes("HeizkreisstatusHeizen")); equal(requests, []);
 });
-await test("replacement operation cannot extend a prior pending display", async () => {
-  const card = mount(confirmed()); await settle(); card.hass = updating(); await settle();
-  card.hass = updating({ Sollwertaktualisierung: { id: "operation_2", basis: BASIS, phase: "pending" } }); await settle(); equal(native(card), null);
+await test("unit changes during an otherwise marked reconciliation cannot reinterpret an old target", async () => {
+  const card = mount(modeHass("Auto")); await settle(); const h = modeHass("Heizen", { temperature: null,
+    "Zieltemperatur verfügbar": false, Sollwertaktualisierung: v2("Auto", "Heizen") });
+  h.config.unit_system.temperature = "°F"; card.hass = h; await settle(); equal(native(card), null);
 });
-await test("eight second visual limit is not renewed by repeated readback messages", async () => {
-  const card = mount(confirmed()); await settle(); const set = window.setTimeout, clear = window.clearTimeout;
-  let callback, scheduled = 0; const token = -500;
-  window.setTimeout = (fn, delay, ...args) => delay === 8000 ? (scheduled++, callback = fn, token) : set(fn, delay, ...args);
-  window.clearTimeout = value => { if (value !== token) clear(value); };
+await test("V2 readback repeats and superseding reason do not renew the eight-second visual deadline", async () => {
+  const card = mount(modeHass("Auto")); await settle(); const set = window.setTimeout, clear = window.clearTimeout; let callback, scheduled = 0;
+  window.setTimeout = (fn, delay, ...args) => delay === 8000 ? (scheduled++, callback = fn, -701) : set(fn, delay, ...args);
+  window.clearTimeout = value => { if (value !== -701) clear(value); };
   try {
-    card.hass = updating(); await settle(); card.hass = updating(); await settle(); equal(scheduled, 1);
-    callback(); await settle(); equal(native(card), null); card.hass = updating(); await settle(); equal(native(card), null);
+    for (const next of ["Heizen", "Absenken", "Auto"]) {
+      card.hass = modeHass(next, { temperature: null, "Zieltemperatur verfügbar": false, Sollwertaktualisierung: v2("Auto", next) }); await settle();
+    }
+    equal(scheduled, 1); callback(); await settle(); equal(native(card), null);
   } finally { window.setTimeout = set; window.clearTimeout = clear; }
 });
-await test("old hold timeout cannot remove a newly recovered native dial", async () => {
-  const card = mount(confirmed()); await settle(); const set = window.setTimeout, clear = window.clearTimeout; let callback;
-  window.setTimeout = (fn, delay, ...args) => delay === 8000 ? (callback = fn, -501) : set(fn, delay, ...args);
-  window.clearTimeout = value => { if (value !== -501) clear(value); };
-  try {
-    card.hass = updating(); await settle(); card.hass = confirmed({ Sollwertbasis: OTHER, temperature: 19.5 }); await settle(); const current = native(card);
-    callback(); await settle(); equal(native(card), current); equal(requests, []);
-  } finally { window.setTimeout = set; window.clearTimeout = clear; }
+await test("V2 native handle capability survives only inside the inert historical projection", async () => {
+  const card = mount(modeHass("Auto", { supported_features: 3 })); await settle(); const h = modeHass("Heizen", {
+    supported_features: 128, temperature: null, "Zieltemperatur verfügbar": false,
+    Sollwertaktualisierung: v2("Auto", "Heizen") }); card.hass = h; await settle();
+  const shown = native(card).hass.states["climate.synthetic_one"].attributes;
+  equal(shown.supported_features, 129); equal(h.states["climate.synthetic_one"].attributes.supported_features, 128);
+  equal(h.states["climate.synthetic_one"].attributes.temperature, null); assert(native(card).inert); equal(requests, []);
 });
-await test("disconnect removes pending display and retired callback cannot address a replacement card", async () => {
-  const card = mount(confirmed()); await settle(); const api = native(card).api; card.hass = updating(); await settle(); card.remove();
-  const next = mount(confirmed()); await settle(); assert(native(next));
-  await api.callService("climate", "set_temperature", { entity_id: "climate.synthetic_one", temperature: 21 }); equal(requests, []);
+for (const kind of ["basis", "mode", "target", "min", "max", "step", "unit", "capabilities"])
+await test(`atomic qualified ${kind} change replaces native without a null-target stage`, async () => {
+  const card = mount(modeHass("Auto")); await settle(); const old = native(card), api = old.api;
+  assert(api); const h = modeHass("Auto"); const a = h.states["climate.synthetic_one"].attributes;
+  if (kind === "basis") a.Sollwertbasis = OTHER;
+  if (kind === "mode") { h.states["climate.synthetic_one"].state = "heat"; a.preset_mode = "Heizen"; a.temperature = 22; }
+  if (kind === "target") a.temperature = 20;
+  if (kind === "min") a.min_temp = 15; if (kind === "max") a.max_temp = 23;
+  if (kind === "step") a.target_temp_step = 1;
+  if (kind === "unit") h.config.unit_system.temperature = "°F";
+  if (kind === "capabilities") a.supported_features = 387;
+  card.hass = h;
+  assert(native(card) && native(card) !== old); assert(!native(card).inert);
+  equal(native(card).hass, h); equal(card.shadowRoot.querySelector(".placeholder").hidden, true);
+  await api.callService("climate", "set_temperature", { entity_id: "climate.synthetic_one", temperature: 19.5 }); equal(requests, []);
+  card.hass = modeHass("Auto"); await settle();
+  await api.callService("climate", "set_temperature", { entity_id: "climate.synthetic_one", temperature: 19.5 }); equal(requests, []);
 });
-await test("native API provider guards wrong service, wrong entity and latest target qualification", async () => {
-  const card = mount(confirmed()); await settle(); const api = native(card).api;
-  await api.callService("climate", "set_temperature", { entity_id: "climate.synthetic_two", temperature: 20 });
-  await api.callService("climate", "set_preset_mode", { entity_id: "climate.synthetic_one", preset_mode: "Heizen" }); equal(requests, []);
-  card.hass = updating({ Sollwertaktualisierung: null }); await settle();
-  await api.callService("climate", "set_temperature", { entity_id: "climate.synthetic_one", temperature: 20 }); equal(requests, []);
+await test("measurement/status heartbeats keep the current native control and its scoped API", async () => {
+  const card = mount(modeHass("Auto")); await settle(); const old = native(card), api = old.api;
+  card.hass = modeHass("Auto", { current_temperature: 21, "Heizkreisstatus": "Heizen", Raumkorrektur: "0.5" });
+  equal(native(card), old); await api.callService("climate", "set_temperature", { entity_id: "climate.synthetic_one", temperature: 19.5 });
+  equal(requests.length, 1);
 });
 fixtures.replaceChildren(); delete window.loadCardHelpers;
 window.cardTestResults = { passed: results.every(x => x.passed), tests: results.length, results,

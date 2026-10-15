@@ -1,6 +1,6 @@
 # Hargassner for Home Assistant
 
-Version1.4.0 includes the HA clients for an existing Hargassner local-control
+Frontend1.4.1 and the unchanged optional ingress app1.4.0 include the HA clients for an existing Hargassner local-control
 backend: a discoverable thermostat dashboard card, the matching native popup,
 one-device page grouping, the optional dashboard Ingress app and reference examples.
 
@@ -27,7 +27,7 @@ MQTT/backend services. No live backend identity, configuration or token is inclu
    this URL as a **JavaScript module**:
 
    ```text
-   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.4.0
+   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.4.1
    ```
 
 3. Remove older manual resource URLs, fully reload each browser/Companion App,
@@ -42,7 +42,7 @@ loading before a dashboard is visited.
 
 For manual installation, copy `dist/hargassner-thermostat-popup.js` to
 `/config/www/hargassner-thermostat-popup.js` and use
-`/local/hargassner-thermostat-popup.js?v=1.4.0` instead. Remove that manual
+`/local/hargassner-thermostat-popup.js?v=1.4.1` instead. Remove that manual
 registration when switching to HACS.
 
 The single **Modus** menu offers **Aus · Auto · Heizen · Absenken · 1x Heizen ·
@@ -134,8 +134,7 @@ entity. MQTT discovery, freshness and correction-only dial writes remain backend
 
 The popup contract was researched against HA frontend20260930.3. The preceding
 1.2.0 release was downloaded in HA2026.9.3/HACS2.0.5, with both matching native
-popups showing one Modus menu, icons and status. Current1.4.0 card/device-page
-installation is accepted separately from this source package. Release-specific fixture checks are in
+popups showing one Modus menu, icons and status. Current1.4.1 installation and native-component acceptance are recorded separately from this source package. Release-specific fixture checks are in
 [validation.json](validation.json). Unsupported layouts and unknown current
 presets retain native controls. Future HA DOM changes may require an update.
 
@@ -157,7 +156,7 @@ The transfer ZIP is not a HACS `zip_release` archive.
 [HACS structure](https://www.hacs.xyz/docs/publish/plugin/),
 [HA app repositories](https://developers.home-assistant.io/docs/apps/repository/).
 
-Run `python3 tools/validate.py` and `npm run check`. Install the development-only
+Run `python3 tools/validate.py`, `npm run check` and `npm test`. Install the development-only
 `tools/requirements.txt`, then run `python3 tools/test_package.py`. The app
 loopback suite uses Python/OpenSSL and synthetic temporary HTTPS endpoints:
 
@@ -169,8 +168,8 @@ Serve this repository locally and open `tests/test-thermostat-popup.html` for
 the popup/card fixture and `tests/test-device-groups.html` for scoped grouping.
 Tests contact no live HA/controller. Structure, syntax and
 loopback tests do not establish hosted installation or physical heating response.
-Publish a GitHub release tagged `v1.4.0` with the standalone JavaScript asset;
+Publish a GitHub release tagged `v1.4.1` with the standalone JavaScript asset;
 Supervisor builds the committed app source from the repository.
 [Third-party icon licenses](THIRD-PARTY-NOTICES.md).
 
-Version1.4.0 adds qualified offset-readback dial continuity and ingress access for all authenticated HA users. Optional `upstream_connect_host` pins the app TCP connection to a LAN IP while preserving the HTTPS URL hostname for SNI, certificate verification and Host. Earlier installation evidence remains dated to its original release; the new release requires its own acceptance.
+Frontend1.4.1 extends qualified presentation continuity to known mode, base, offset and phase changes in both custom cards and native popups. Last confirmed targets stay visibly inert with an update note for at most eight seconds; Off or genuine unavailability settles normally. Old callbacks remain retired after a qualified context change, including updates without an intermediate missing target. No confirmed target or mode is invented. The optional ingress app stays1.4.0 unchanged; no app update is needed for this frontend release. Optional `upstream_connect_host` pins the app TCP connection to a LAN IP while preserving the HTTPS URL hostname for SNI, certificate verification and Host. Earlier installation evidence remains dated to its original release; the new release requires its own acceptance.

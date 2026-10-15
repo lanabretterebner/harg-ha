@@ -22,7 +22,9 @@ class PackageTests(unittest.TestCase):
         self.assertTrue(repository["name"])
         for field in ("name", "version", "slug", "description", "arch"):
             self.assertTrue(app[field])
-        self.assertEqual(app["version"], package["version"])
+        release = json.loads((ROOT / "release.json").read_text())
+        self.assertEqual(app["version"], release["supervisor_app_version"])
+        self.assertEqual(package["version"], release["version"])
         self.assertRegex(app["slug"], r"^[a-z0-9_]+$")
         self.assertEqual(set(app["arch"]), {"amd64", "aarch64"})
         self.assertNotIn("image", app, "Supervisor must build the included source")

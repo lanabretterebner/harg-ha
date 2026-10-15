@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.1
+
+- Keep the last confirmed target visibly inert during qualified mode, base, offset and phase readback, with a fixed eight-second limit.
+- Cover both the custom thermostat card and native more-info popup; keep current reported mode/status truthful.
+- Permanently retire callbacks from earlier target contexts, including fully-qualified updates without a missing-target stage.
+- Leave the optional Supervisor ingress app at1.4.0 with identical source and configuration.
+
 ## 1.4.0
 
 - Preserve the last confirmed thermostat dial during a bounded, qualified room-offset readback. Block stale and already-debounced service calls while it reconciles.

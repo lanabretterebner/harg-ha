@@ -1,9 +1,10 @@
 {
   "name": "harg-ha",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check dist/hargassner-thermostat-popup.js"
+    "check": "node --check dist/hargassner-thermostat-popup.js",
+    "test": "node tests/test-card-continuity.mjs && node tests/test-popup-continuity.mjs"
   }
 }

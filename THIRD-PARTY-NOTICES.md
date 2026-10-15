@@ -20,3 +20,10 @@ The extracted `package/mdi.js` is SHA-256
 `0edde73c83c07bc4d8675e96aba3a853a1fc8fa2b251e3f5f6dede4d0332ab3f`.
 Only five path strings are redistributed; no runtime package/network dependency
 is added. Preserve these notices when redistributing the module.
+
+The development-only popup continuity suite also redistributes two verbatim
+Home Assistant frontend function bodies under Apache License2.0. Their pinned
+upstream sources and complete notices are in
+[the test fixture notice](tests/THIRD-PARTY-NOTICES.md), with the complete
+[Apache License](tests/Apache-2.0.txt). They are test fixtures and are not
+loaded by the production browser module.

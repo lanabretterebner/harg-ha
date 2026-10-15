@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "license": "Apache-2.0",
+  "upstream_project": "Home Assistant frontend",
+  "upstream_tag": "20260930.3",
+  "sources": [
+    {
+      "path": "src/state-control/climate/ha-state-control-climate-temperature.ts",
+      "url": "https://raw.githubusercontent.com/home-assistant/frontend/20260930.3/src/state-control/climate/ha-state-control-climate-temperature.ts",
+      "sha256": "c5aa68f9857b02ec9200f6f359ebc7d700e8c9b406648a1ae2e1f775f98e80f6"
+    },
+    {
+      "path": "src/common/util/debounce.ts",
+      "url": "https://raw.githubusercontent.com/home-assistant/frontend/20260930.3/src/common/util/debounce.ts",
+      "sha256": "ebe061124268366ccf08901cddb4b2a0d2b7c023fd37b5a62b5bd373b8bc7971"
+    }
+  ],
+  "extraction": "Verbatim _callService function body and debounce arrow-function body only; TypeScript erasure happens in test harness. No source logic changed.",
+  "native_call_service_body": "\n    if (type === \"high\" || type === \"low\") {\n      this._api.callService(\"climate\", \"set_temperature\", {\n        entity_id: this.stateObj!.entity_id,\n        target_temp_low: this._targetTemperature.low,\n        target_temp_high: this._targetTemperature.high,\n      });\n      return;\n    }\n    this._api.callService(\"climate\", \"set_temperature\", {\n      entity_id: this.stateObj!.entity_id,\n      temperature: this._targetTemperature.value,\n    });",
+  "native_debounce_body": "\n  let timeout: number | undefined;\n  let trailingArgs: T | undefined;\n\n  const debouncedFunc = (...args: T): void => {\n    const isLeading = immediate && !timeout;\n\n    if (timeout) {\n      trailingArgs = args;\n    }\n    clearTimeout(timeout);\n\n    timeout = window.setTimeout(() => {\n      timeout = undefined;\n      if (trailingArgs) {\n        func(...trailingArgs);\n        trailingArgs = undefined;\n      } else if (!immediate) {\n        func(...args);\n      }\n    }, wait);\n\n    if (isLeading) {\n      func(...args);\n    }\n  };\n\n  debouncedFunc.cancel = () => {\n    clearTimeout(timeout);\n    trailingArgs = undefined;\n  };\n\n  return debouncedFunc;\n"
+}

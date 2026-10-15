@@ -1,7 +1,7 @@
 # Native HA tiles; paste into Dashboard > Edit > Add card > Manual.
 # Auto1=day,2/3/4=setback both circuits;9 remains phase-ambiguous.
 # Verify actual registry IDs and any HA suffixes before using these examples.
-# HACS/manual popup1.4.0 supplies one Modus menu, mode icons and status.
+# HACS/manual popup1.4.1 supplies one Modus menu, mode icons and status.
 # Requires backend Heizkreisstatus attributes; verify actual registry IDs.
 # Native tile state_content supports an entity attribute; no extra state sensor.
 # Dial changes correction only; separate day/setback numbers edit the bases.
