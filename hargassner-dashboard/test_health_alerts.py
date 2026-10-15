@@ -63,6 +63,23 @@ class UnitTests(unittest.TestCase):
         p.chmod(mode)
         return p
 
+    def test_webhook_header_names_are_unique_ignoring_case(self):
+        with self.assertRaises(h.Refusal):
+            h.settings({'webhook': {'url': 'https://example.invalid/hook',
+                                   'headers': {'Authorization': 'synthetic-a', 'authorization': 'synthetic-b'}}})
+
+    def test_truncated_get_body_is_not_accepted_as_a_complete_report(self):
+        class Socket:
+            def makefile(self, *_args):
+                return io.BytesIO(b'HTTP/1.1 200 OK\r\nContent-Length: 12\r\nConnection: close\r\n\r\n{}')
+        response = h.http.client.HTTPResponse(Socket()); response.begin()
+        class Connection:
+            def request(self, *_args, **_kwargs): pass
+            def getresponse(self): return response
+            def close(self): response.close()
+        with patch.object(h.http.client, 'HTTPSConnection', return_value=Connection()), self.assertRaises(h.Refusal):
+            h.network_worker({'url': 'https://example.invalid/health', 'method': 'GET', 'timeout': 1})
+
     def test_capture_strips_all_nonallowlisted_fields_and_preserves_times(self):
         result = h.capture(self.write('certificate', certificate()), self.write('telnet', telnet()), NOW + 10)
         self.assertEqual(result['checks']['certificate']['checked_at'], NOW)
@@ -328,6 +345,42 @@ class UnitTests(unittest.TestCase):
         with self.assertRaises(h.Refusal):
             h.transition(h.evaluate(heartbeat(NOW+100, telnet='fault'), now=NOW+100), state, NOW+100)
         self.assertEqual(state, original)
+
+    def full_outbox(self):
+        state = h.initial_state()
+        for index in range(h.MAX_QUEUE):
+            state = h.transition(h.evaluate(heartbeat(NOW + index, telnet='fault' if index % 2 == 0 else 'healthy'), now=NOW + index),
+                                 state, NOW + index)
+        h.atomic_json(self.state, state)
+        return state
+
+    def test_full_outbox_drains_before_admitting_the_next_transition(self):
+        saved = self.full_outbox()
+        delivered = []
+        def send(event, config):
+            self.assertEqual(h.read_json(self.state, private=True)['queue'][0], event)
+            delivered.append(event['event_id'])
+        with patch.object(h, 'delivery', side_effect=send):
+            result = h.run(heartbeat(NOW + 64, telnet='fault'), self.state, self.config, NOW + 64, True)
+        self.assertEqual(delivered[:64], [event['event_id'] for event in saved['queue']])
+        self.assertEqual(len(delivered), 65)
+        self.assertEqual(result['pending_count'], 0)
+        self.assertEqual(h.read_json(self.state, private=True)['conditions']['telnet']['status'], 'fault')
+
+    def test_full_outbox_failed_delivery_preserves_the_existing_queue(self):
+        self.full_outbox(); before = self.state.read_bytes()
+        with patch.object(h, 'delivery', side_effect=h.Refusal('delivery_failed')) as send:
+            result = h.run(heartbeat(NOW + 64, telnet='fault'), self.state, self.config, NOW + 64, True)
+        send.assert_called_once()
+        self.assertEqual(result['error'], 'delivery_failed')
+        self.assertEqual(self.state.read_bytes(), before)
+
+    def test_full_outbox_dry_run_never_drains_or_rewrites_state(self):
+        self.full_outbox(); before = self.state.read_bytes()
+        with patch.object(h, 'delivery') as send, self.assertRaises(h.Refusal):
+            h.run(heartbeat(NOW + 64, telnet='fault'), self.state, self.config, NOW + 64)
+        send.assert_not_called()
+        self.assertEqual(self.state.read_bytes(), before)
 
     def test_destination_required_for_explicit_delivery(self):
         with self.assertRaises(h.Refusal): h.run(heartbeat(), self.state, {}, NOW, True)

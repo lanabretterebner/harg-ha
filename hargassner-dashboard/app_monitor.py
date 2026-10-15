@@ -13,7 +13,7 @@ import threading
 import time
 
 import health_alerts as health
-from ingress_proxy import Settings, TOKEN_PATTERN, upstream_connection
+from ingress_proxy import Settings, TOKEN_PATTERN, read_options, upstream_connection
 
 SUPERVISOR_IP = '172.30.32.2'
 HEARTBEAT_PATH = '/api/dashboard/v1/monitor-health'
@@ -31,9 +31,8 @@ class MonitorSettings:
 
     @classmethod
     def load(cls, filename='/data/options.json'):
-        upstream = Settings.load(filename)
-        with open(filename, 'rb') as stream:
-            options = health.decode(stream.read(MAX_RESPONSE + 1))
+        options = read_options(filename)
+        upstream = Settings.from_options(options)
         if not isinstance(options, dict) or type(options.get('monitor_enabled', False)) is not bool:
             raise ValueError('monitor_configuration')
         enabled = options.get('monitor_enabled', False)
@@ -96,6 +95,8 @@ def request_worker(request):
             if length is not None and (not re.fullmatch('[0-9]{1,8}', length) or int(length) > MAX_RESPONSE):
                 return {'ok': False}
             raw = response.read(MAX_RESPONSE + 1)
+            if response.length not in (None, 0):
+                return {'ok': False}
             return {'ok': True, 'document': health.decode(raw)}
         if kind == 'notification':
             token = request['token']
@@ -182,7 +183,14 @@ class Monitor:
                 if self.state_path.exists() or self.state_path.is_symlink():
                     raise health.Refusal('state_invalid') from None
                 saved = health.initial_state()
-            proposed = health.transition(health.evaluate(document, now=now, endpoint_failed=failed), saved, now)
+            rows = health.evaluate(document, now=now, endpoint_failed=failed)
+            deferred = False
+            try:
+                proposed = health.transition(rows, saved, now)
+            except health.Refusal as error:
+                if str(error) != 'state_capacity':
+                    raise
+                proposed, deferred = saved, True
             health.atomic_json(self.state_path, proposed)
             self.update_status(queue_count=len(proposed['queue']))
             if proposed['queue'] and not (stop is not None and stop.is_set()):
@@ -195,7 +203,20 @@ class Monitor:
                 proposed['queue'].pop(0)
                 health.atomic_json(self.state_path, proposed)
                 self.update_status(queue_count=len(proposed['queue']))
+                if deferred:
+                    # At most one delivery per poll. Several polls may be
+                    # needed to make room for all current condition changes.
+                    try:
+                        proposed = health.transition(rows, proposed, now)
+                    except health.Refusal as error:
+                        if str(error) != 'state_capacity':
+                            raise
+                        return {'pending': len(proposed['queue']), 'delivered': 1, 'error': 'state_capacity'}
+                    health.atomic_json(self.state_path, proposed)
+                    self.update_status(queue_count=len(proposed['queue']))
                 return {'pending': len(proposed['queue']), 'delivered': 1}
+            if deferred:
+                return {'pending': len(proposed['queue']), 'delivered': 0, 'error': 'state_capacity'}
             return {'pending': len(proposed['queue']), 'delivered': 0}
 
     def run(self, stop):

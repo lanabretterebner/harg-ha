@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.5.2
+
+- Drain a full notification outbox before recording current condition changes,
+  preserving original events, stable IDs and at most one delivery per poll.
+- Read ingress and monitor options from one strict, bounded configuration
+  snapshot; reject duplicate options and ambiguous webhook header names.
+- Reject incomplete upstream responses before forwarding dashboard content or
+  accepting heartbeat evidence.
+
 ## 1.5.1
 
 - Start Python through S6 with-contenv so enabled monitoring receives the Supervisor-provided credential.

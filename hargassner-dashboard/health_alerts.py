@@ -265,6 +265,8 @@ def settings(config):
                        or any(ord(c) < 32 or ord(c) > 126 for c in v)
                        for k, v in headers.items())):
             raise Refusal('configuration_invalid')
+        if len({key.lower() for key in headers}) != len(headers):
+            raise Refusal('configuration_invalid')
     if 'home_assistant' in result:
         ha = result['home_assistant']
         if ('webhook' in result or not isinstance(ha, dict)
@@ -455,6 +457,8 @@ def network_worker(request):
             raise Refusal('delivery_failed')
         if request['method'] == 'GET':
             raw = response.read(MAX_DOCUMENT + 1)
+            if response.length not in (None, 0):
+                raise Refusal('delivery_failed')
             return {'ok': True, 'document': decode(raw)}
         # Delivery success needs response headers only; never expose receiver body.
         return {'ok': True}
@@ -522,7 +526,16 @@ def run(report, state_path, config, now, deliver=False, endpoint_failed=False):
     except OSError:
         raise Refusal('state_invalid') from None
     def process(saved):
-        proposed = transition(evaluate(report, config, now, endpoint_failed), saved, now)
+        rows = evaluate(report, config, now, endpoint_failed)
+        deferred = False
+        try:
+            proposed = transition(rows, saved, now)
+        except Refusal as error:
+            if str(error) != 'state_capacity' or not deliver:
+                raise
+            # Existing durable events can still be delivered when there is no
+            # room for the next transition. Never drop them to create space.
+            proposed, deferred = saved, True
         if not deliver:
             return {'schema_version': 1, 'dry_run': True, 'conditions': proposed['conditions'],
                     'pending_events': proposed['queue'], 'delivered': 0}
@@ -530,16 +543,22 @@ def run(report, state_path, config, now, deliver=False, endpoint_failed=False):
             raise Refusal('destination_unconfigured')
         atomic_json(state_path, proposed)  # durable outbox before any delivery
         sent = 0
-        while proposed['queue']:
-            event = proposed['queue'][0]
-            try:
-                delivery(event, config)
-            except Refusal:
-                return {'schema_version': 1, 'dry_run': False, 'conditions': proposed['conditions'],
-                        'pending_count': len(proposed['queue']), 'delivered': sent, 'error': 'delivery_failed'}
-            proposed['queue'].pop(0)
+        while True:
+            while proposed['queue']:
+                event = proposed['queue'][0]
+                try:
+                    delivery(event, config)
+                except Refusal:
+                    return {'schema_version': 1, 'dry_run': False, 'conditions': proposed['conditions'],
+                            'pending_count': len(proposed['queue']), 'delivered': sent, 'error': 'delivery_failed'}
+                proposed['queue'].pop(0)
+                atomic_json(state_path, proposed)
+                sent += 1
+            if not deferred:
+                break
+            proposed = transition(rows, proposed, now)
             atomic_json(state_path, proposed)
-            sent += 1
+            deferred = False
         return {'schema_version': 1, 'dry_run': False, 'conditions': proposed['conditions'],
                 'pending_count': 0, 'delivered': sent}
     if deliver:

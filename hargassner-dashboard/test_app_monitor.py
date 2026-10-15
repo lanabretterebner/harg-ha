@@ -56,6 +56,23 @@ class MonitorTests(unittest.TestCase):
             with self.subTest(changes=changes), self.assertRaises(ValueError): self.load(**changes)
         self.assertEqual(self.load(monitor_poll_interval=15).interval, 15)
         self.assertEqual(self.load(monitor_poll_interval=60).interval, 60)
+
+    def test_ingress_and_monitor_settings_come_from_one_options_snapshot(self):
+        original_open = Path.open
+        replacement = {**self.config, 'monitor_enabled': False, 'upstream_url': 'https://replacement.example'}
+        def swap_after_read(path, *args, **kwargs):
+            stream = original_open(path, *args, **kwargs)
+            mode = args[0] if args else kwargs.get('mode', 'r')
+            if path == self.options and mode.startswith('r'):
+                raw = stream.read(); stream.close()
+                with original_open(self.options, 'w') as output: json.dump(replacement, output)
+                return io.BytesIO(raw) if isinstance(raw, bytes) else io.StringIO(raw)
+            return stream
+        with patch.object(Path, 'open', new=swap_after_read):
+            settings = m.MonitorSettings.load(self.options)
+        self.assertTrue(settings.enabled)
+        self.assertEqual(settings.upstream.host, 'dashboard.example')
+        self.assertEqual(settings.token, HEALTH)
     def test_secrets_not_in_settings_repr(self):
         self.assertNotIn(HEALTH, repr(self.settings)); self.assertNotIn(INGRESS, repr(self.settings))
     def test_supervisor_token_env_validation(self):
@@ -152,12 +169,36 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(status['last_delivery_condition']['status'], 'unknown')
         self.assertEqual(set(status), {'schema_version', 'enabled', 'running', 'last_check_at', 'queue_count', 'last_delivery_condition', 'last_error'})
         for secret in [INGRESS, HEALTH, SUPERVISOR, self.settings.upstream.host]: self.assertNotIn(secret, json.dumps(status))
-    def test_full_outbox_is_preserved_without_new_delivery_or_discard(self):
+    def full_outbox(self):
         row = h.transition({kind: h.result('unknown', 'run_missing') for kind in h.KINDS}, h.initial_state(), NOW)
         template = row['queue'][0]; row['queue'] = [{**template, 'event_id': f'{i:064x}'} for i in range(64)]
-        h.atomic_json(self.monitor.state_path, row); before = self.monitor.state_path.read_bytes()
-        with self.assertRaises(h.Refusal): self.monitor.poll_once()
-        self.assertEqual(self.monitor.state_path.read_bytes(), before); self.assertEqual(self.posts(), [])
+        h.atomic_json(self.monitor.state_path, row)
+        return row
+    def test_full_outbox_drains_one_per_poll_and_then_records_current_conditions(self):
+        row = self.full_outbox()
+        for index in range(3):
+            result = self.monitor.poll_once()
+            self.assertEqual(result['delivered'], 1)
+            self.assertEqual(len(self.posts()), index + 1)
+            self.assertEqual(self.posts()[-1]['event'], row['queue'][index])
+            if index < 2:
+                self.assertTrue(all(item['status'] == 'unknown' for item in self.state()['conditions'].values()))
+        self.assertTrue(all(item['status'] == 'healthy' for item in self.state()['conditions'].values()))
+        self.assertEqual(len(self.state()['queue']), 64)
+        for _ in range(64): self.monitor.poll_once()
+        self.assertEqual(self.state()['queue'], [])
+        self.assertEqual(len({item['event']['event_id'] for item in self.posts()}), 67)
+    def test_full_outbox_failed_delivery_keeps_every_original_event(self):
+        self.full_outbox(); before = self.monitor.state_path.read_bytes(); self.fail_post = True
+        result = self.monitor.poll_once()
+        self.assertEqual(result['error'], 'delivery_failed')
+        self.assertEqual(self.monitor.state_path.read_bytes(), before)
+        self.assertEqual(len(self.posts()), 1)
+    def test_full_outbox_shutdown_does_not_send_or_discard(self):
+        self.full_outbox(); before = self.monitor.state_path.read_bytes(); stop = threading.Event(); stop.set()
+        self.assertEqual(self.monitor.poll_once(stop)['delivered'], 0)
+        self.assertEqual(self.monitor.state_path.read_bytes(), before)
+        self.assertEqual(self.posts(), [])
     def test_child_transport_is_wall_bounded_and_environment_strips_credentials(self):
         with patch.object(m.subprocess, 'run', side_effect=subprocess.TimeoutExpired('synthetic', 5)) as run:
             with self.assertRaises(h.Refusal): m.bounded_request({'kind': 'heartbeat'})

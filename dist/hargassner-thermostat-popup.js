@@ -1,11 +1,11 @@
-/* Hargassner thermostat popup and dashboard card, v1.4.6.
+/* Hargassner thermostat popup and dashboard card, v1.4.7.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. Qualified target gestures use guarded climate.set_temperature.
  * Unknown-target correction controls use the separately commissioned number.set_value.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.6";
+const VERSION = "1.4.7";
 // Coalesce rapid native +/- gestures while reducing the avoidable send delay.
 const TEMPERATURE_BUTTON_DEBOUNCE_MS = 250;
 const SCHEMA = "configured_room_setpoint_v1";
@@ -650,7 +650,7 @@ export function createHargassnerCorrectionControl(environment, current) {
   const node = document.createElement("div"); node.dataset.hargassnerCorrection = VERSION;
   node.className = "hargassner-correction";
   const controlStyle = document.createElement("style");
-  controlStyle.textContent = `.hargassner-correction button{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:44px;height:44px;padding:0;color:var(--primary-text-color);background:transparent;border:0;border-radius:12px;cursor:pointer}.hargassner-correction button:hover:not(:disabled),.hargassner-correction button:focus-visible{background:var(--card-background-color,var(--ha-card-background,#fff))}.hargassner-correction button:focus-visible{outline:2px solid var(--primary-text-color,#666);outline-offset:2px}.hargassner-correction button:disabled{opacity:.4;cursor:default}`;
+  controlStyle.textContent = `.hargassner-correction button{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:44px;height:44px;padding:0;color:var(--primary-text-color);background:rgba(var(--rgb-primary-text-color,127,127,127),.05);border:1px solid var(--divider-color);border-radius:12px;cursor:pointer}.hargassner-correction button:hover:not(:disabled),.hargassner-correction button:focus-visible{background:var(--card-background-color,var(--ha-card-background,#fff))}.hargassner-correction button:focus-visible{outline:2px solid var(--primary-text-color,#666);outline-offset:2px}.hargassner-correction button:disabled{opacity:.4;cursor:default}`;
   node.style.cssText = "text-align:center;max-width:240px;margin:4px auto 8px;line-height:1.35";
   const label = document.createElement("div"); label.textContent = "Raumkorrektur";
   label.style.cssText = "font-size:13px;font-weight:500;line-height:18px";
@@ -672,7 +672,7 @@ export function createHargassnerCorrectionControl(environment, current) {
   value.style.cssText = "position:absolute;left:0;right:0;top:60px;font-size:30px;line-height:38px;font-weight:400;pointer-events:none";
   dial.append(svg, value);
   const buttons = document.createElement("div"); buttons.className = "correction-stepper";
-  buttons.style.cssText = "display:flex;align-items:center;justify-content:center;gap:12px;position:relative;margin:-12px auto 6px;padding:2px;max-width:120px;min-height:48px;box-sizing:border-box;border:1px solid var(--divider-color);border-radius:var(--control-border-radius,14px);background:rgba(var(--rgb-primary-text-color,127,127,127),.05)";
+  buttons.style.cssText = "display:flex;align-items:center;justify-content:center;gap:12px;position:relative;margin:-12px auto 6px;padding:2px;max-width:120px;min-height:48px;box-sizing:border-box;border:0;background:transparent";
   const minus = document.createElement("button"), plus = document.createElement("button");
   for (const [button, pathData, title] of [[minus, "M5 12H19", "Raumkorrektur verringern"], [plus, "M12 5V19M5 12H19", "Raumkorrektur erhöhen"]]) {
     button.type = "button"; button.setAttribute("aria-label", title);

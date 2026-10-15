@@ -125,6 +125,8 @@ No DNS fallback to a different server is attempted.
 your dashboard password and not a Home Assistant API token. It is stored in
 the app's private options, never in browser URLs or frontend JavaScript. Protect
 Home Assistant backups and administrator access, which can include app options.
+Options are read once per load, limited to64KiB and rejected on duplicate keys
+or nonfinite numbers. Ingress and monitoring use the same configuration snapshot.
 
 Start the app, choose **Open Web UI**, and enable **Show in sidebar** if desired.
 Home Assistant will open the dashboard inside its authenticated interface.
@@ -254,7 +256,8 @@ The VM read is exactly `GET /api/dashboard/v1/monitor-health` with the separate
 verification stays enabled; the optional TCP connect-IP preserves the original
 origin hostname for SNI, certificate checks and Host. There are no redirects,
 plaintext VM reads or retries within an individual poll. Response JSON is
-strict, limited to64KiB and rejected on duplicate keys/nonfinite numbers.
+strict, limited to64KiB and rejected on duplicate keys/nonfinite numbers or a
+body shorter than its declared content length.
 A child-process deadline bounds DNS, TLS, headers and body reads to5s.
 
 The accepted sanitized health schema keeps original certificate/Telnet checker
@@ -280,9 +283,12 @@ State is separate from all controller/charge journals: evaluator-owned0700
 app restarts and normal upgrades. Events are durable before sending, with a
 stable retry ID and component notification ID. One event at most is delivered
 per poll; failed/ambiguous delivery retains that event. The bounded64-event
-outbox refuses corruption, unsafe ownership or capacity without deleting events.
-Do not erase active state to clear a warning. A full/corrupt outbox requires
-explicit operator inspection/backup recovery. This is at-least-once delivery,
+outbox refuses corruption or unsafe ownership without sending or deleting events.
+When full, it continues delivering the existing queue one event per poll; current
+condition changes are recorded once enough space is available. Failed delivery
+keeps the original events and IDs. Do not erase active state to clear a warning;
+corrupt state requires explicit operator inspection/backup recovery.
+This is at-least-once delivery,
 not exactly-once; a lost successful response can cause a stable-ID redelivery.
 
 `GET /api/local-monitor/status`, relative to the app's existing Ingress base,

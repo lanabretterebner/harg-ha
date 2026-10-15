@@ -95,7 +95,8 @@ readback honestly uncertain. No elapsed timer proves success or resends a write.
 Compact-card layout fixtures: `node tools/test_card_layout.mjs` checks three
 327-pixel desktop cards and 390/320-pixel mobile viewports in light/dark themes.
 It verifies bounds, no clipping, 44-pixel touch targets with 24-pixel SVG icons,
-a filled pill with a subtle outer border, hidden absent room readings and retained semantic status
+separate rounded filled buttons with individual 1-pixel borders, at least an
+8-pixel gap and an unbordered transparent wrapper, hidden absent room readings and retained semantic status
 labels. The page uses local themed stand-ins, synthetic entity states and
 recorded number services. It does not establish actual HA theme/native visual
 acceptance. Set `HARG_TEST_ARTIFACT_DIR` to save screenshots. Existing control

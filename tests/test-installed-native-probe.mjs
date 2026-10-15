@@ -54,13 +54,13 @@ function fixture({ slider = true, extraContext, callDelayMs = 0, dropCall = fals
   class Observer { constructor(fn) { this.fn = fn; this.disconnected = false; observers.push(this); } observe() {} disconnect() { this.disconnected = true; } }
   const body = new Element("body"); body.isConnected = true;
   const document = { body, createElement: name => new Element(name), querySelector: () => { denied.push("real-document-query"); throw Error("No real HA lookup allowed"); } };
-  const window = { hargassnerThermostatPopup: { version: "1.4.6", running: true } };
+  const window = { hargassnerThermostatPopup: { version: "1.4.7", running: true } };
   const context = vm.createContext({ window, document, customElements: { get: () => class {} }, MutationObserver: Observer,
     CustomEvent: class { constructor(type, options) { this.type = type; Object.assign(this, options); } },
     setTimeout, clearTimeout, Date, Symbol, WeakSet, Map, Set, Object, Number, String, Promise,
     requestAnimationFrame() { throw Error("RAF is forbidden"); } });
   vm.runInContext(source, context);
-  const start = options => context.startHargassnerNativeProbeV2({ installedVersion: "1.4.6", verifiedResourceSha256: "d".repeat(64), timeoutMs: 300, ...options });
+  const start = options => context.startHargassnerNativeProbeV2({ installedVersion: "1.4.7", verifiedResourceSha256: "d".repeat(64), timeoutMs: 300, ...options });
   return { start, window, body, contexts, denied, observers };
 }
 const results = [];

@@ -55,6 +55,16 @@ class ValidationTests(unittest.TestCase):
             with self.subTest(token=token), self.assertRaises(ValueError):
                 self.settings(ingress_token=token)
 
+    def test_oversized_options_are_refused_before_configuration_is_used(self):
+        with self.assertRaises(ValueError):
+            self.settings(unused_padding="x" * 65537)
+
+    def test_duplicate_options_are_not_silently_resolved_to_the_last_value(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "options.json"
+            path.write_text('{"upstream_url":"https://first.example","upstream_url":"https://second.example","ingress_token":' + json.dumps(SYNTHETIC_TOKEN) + '}')
+            with self.assertRaises(ValueError): proxy.Settings.load(path)
+
     def test_optional_connect_host_is_only_a_literal_unicast_ip(self):
         for address in ("192.0.2.57", "2001:db8::57"):
             self.assertEqual(self.settings(upstream_connect_host=address).connect_host, address)
@@ -66,7 +76,7 @@ class ValidationTests(unittest.TestCase):
 
     def test_panel_access_and_version_metadata(self):
         config = Path(__file__).with_name("config.yaml").read_text()
-        self.assertIn('version: "1.5.1"', config)
+        self.assertIn('version: "1.5.2"', config)
         self.assertIn("panel_admin: false", config)
         self.assertIn('upstream_connect_host: "str?"', config)
         self.assertNotIn("ports:", config)
@@ -111,7 +121,8 @@ class UpstreamHandler(BaseHTTPRequestHandler):
         self.send_response(self.server.status)
         for name, value in self.server.response_headers:
             self.send_header(name, value)
-        self.send_header("Content-Length", str(len(self.server.body)))
+        declared = getattr(self.server, "declared_length", None)
+        self.send_header("Content-Length", str(len(self.server.body) if declared is None else declared))
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(self.server.body)
@@ -150,6 +161,7 @@ class HTTPSProxyTests(unittest.TestCase):
     def setUp(self):
         self.upstream.requests = []
         self.upstream.disconnects = 0
+        self.upstream.declared_length = None
         self.sni.clear()
         self.upstream.body = b'{"authenticated":true,"csrfToken":"synthetic-csrf"}'
         self.upstream.status = 200
@@ -287,6 +299,12 @@ class HTTPSProxyTests(unittest.TestCase):
         with patch.object(proxy, "MAX_RESPONSE", 1024):
             self.assertEqual(self.request()[0], 502)
 
+    def test_truncated_upstream_body_is_not_reframed_as_a_successful_response(self):
+        self.upstream.declared_length = len(self.upstream.body) + 10
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(self.request()[0], 502)
+        self.assertEqual(len(self.upstream.requests), 1)
+
     def test_ip_override_preserves_original_host_sni_and_hostname_validation(self):
         port = self.upstream.server_address[1]
         self.server.settings = proxy.Settings("localhost", port, f"localhost:{port}", SYNTHETIC_TOKEN, "127.0.0.1")
@@ -390,6 +408,7 @@ class HTTPSProxyTests(unittest.TestCase):
         first.request.side_effect = socket.gaierror(socket.EAI_AGAIN, "not logged")
         second.getresponse.return_value.status = 200
         second.getresponse.return_value.read.return_value = b"ok"
+        second.getresponse.return_value.length = 0
         second.getresponse.return_value.getheaders.return_value = []
         closed = threading.Event()
         second.close.side_effect = closed.set

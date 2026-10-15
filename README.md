@@ -1,6 +1,6 @@
 # Hargassner for Home Assistant
 
-Frontend1.4.6 and the optional ingress/monitor app1.5.1 include the HA clients for an existing Hargassner local-control
+Frontend1.4.7 and the optional ingress/monitor app1.5.2 include the HA clients for an existing Hargassner local-control
 backend: a discoverable thermostat dashboard card, the matching native popup,
 one-device page grouping, the optional dashboard Ingress app and reference examples.
 
@@ -16,12 +16,14 @@ both stores independently. HACS downloads the browser module; Supervisor
 builds the included app. Installing either does not install the other or the
 MQTT/backend services. No live backend identity, configuration or token is included.
 
-Frontend1.4.6 keeps an independent room-correction control available when
+Frontend1.4.7 keeps an independent room-correction control available when
 Auto has no qualified day/setback target basis, including summer phases.
 The configured target remains unknown until the backend qualifies that basis.
 Install/update the HACS resource and fully reload the frontend. The separately
-versioned ingress/monitor app remains1.5.1; no app update is needed for this
-frontend release. Existing v1.4.4 and v1.4.5 tags and release assets remain immutable.
+versioned ingress/monitor app1.5.2 contains separate notification-outbox, strict
+configuration and incomplete-response fixes. Update that app through Supervisor
+to receive its fixes; updating HACS alone changes only the thermostat frontend.
+Existing tags and release assets remain immutable.
 
 ## Thermostat popup through HACS
 
@@ -34,7 +36,7 @@ frontend release. Existing v1.4.4 and v1.4.5 tags and release assets remain immu
    this URL as a **JavaScript module**:
 
    ```text
-   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.4.6
+   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.4.7
    ```
 
 3. Remove older manual resource URLs, fully reload each browser/Companion App,
@@ -49,7 +51,7 @@ loading before a dashboard is visited.
 
 For manual installation, copy `dist/hargassner-thermostat-popup.js` to
 `/config/www/hargassner-thermostat-popup.js` and use
-`/local/hargassner-thermostat-popup.js?v=1.4.6` instead. Remove that manual
+`/local/hargassner-thermostat-popup.js?v=1.4.7` instead. Remove that manual
 registration when switching to HACS.
 
 The single **Modus** menu offers **Aus · Auto · Heizen · Absenken · 1x Heizen ·
@@ -110,7 +112,7 @@ https://github.com/lanabretterebner/harg-ha
 Install **Hargassner Dashboard**. Supervisor builds the source for `amd64` or
 `aarch64`; no prebuilt app image is required. The verified official base image
 index is pinned by digest. The app exposes no host ports or Supervisor-management,
-Docker or host privileges. App1.5.1 requests HA API permission solely for optional
+Docker or host privileges. App1.5.2 requests HA API permission solely for optional
 monitor notifications using the Supervisor-provided token; monitoring is disabled
 by default. No long-lived HA user token is needed.
 
@@ -152,7 +154,7 @@ entity. MQTT discovery, freshness and correction-only dial writes remain backend
 
 The popup contract was researched against HA frontend20260930.3. The preceding
 1.2.0 release was downloaded in HA2026.9.3/HACS2.0.5, with both matching native
-popups showing one Modus menu, icons and status. Current1.4.6 installation and native-component acceptance must be recorded separately from this source package. Release-specific fixture checks are in
+popups showing one Modus menu, icons and status. Current1.4.7 installation and native-component acceptance must be recorded separately from this source package. Release-specific fixture checks are in
 [validation.json](validation.json). Unsupported layouts and unknown current
 presets retain native controls. Future HA DOM changes may require an update.
 
@@ -198,22 +200,23 @@ assertions plus page/console/request errors. It emits a structured result.
 open the HTML fixtures manually. These synthetic checks contact no live HA or
 controller and do not establish installed-native rendering or physical heating
 response. See [browser checks](tests/README.md).
-Publish frontend1.4.6 as a new `v1.4.6` release after its final source,
+Publish frontend1.4.7 as a new `v1.4.7` release after its final source,
 package and frontend tests pass. Preserve all existing tags and release assets.
-The separately versioned Supervisor app remains1.5.1 with unchanged source.
+The independently versioned Supervisor app1.5.2 includes its own ingress/monitor
+fixes and requires a separate Supervisor update.
 HACS users update the resource and fully reload each browser/Companion App.
 [Third-party icon licenses](THIRD-PARTY-NOTICES.md).
 
-Frontend1.4.6 keeps the native thermostat and temperature-control nodes mounted while readback catches up. A requested number is shown as **Angefragt** until coherent qualified readback confirms it; an uncertain outcome says **Bestätigung unklar**, without automatic retry or silent rollback. A definitive rejection restores the confirmed number. Current modes/status stay truthful, and genuine schedule/base changes reconcile normally. During qualification loss the previous confirmed number remains visibly read-only; offline never becomes command authority. The separate Modus selector remains usable whenever its own native authority is available. The separately updated optional ingress app1.5.1 retains disabled-by-default independent
+Frontend1.4.7 keeps the native thermostat and temperature-control nodes mounted while readback catches up. A requested number is shown as **Angefragt** until coherent qualified readback confirms it; an uncertain outcome says **Bestätigung unklar**, without automatic retry or silent rollback. A definitive rejection restores the confirmed number. Current modes/status stay truthful, and genuine schedule/base changes reconcile normally. During qualification loss the previous confirmed number remains visibly read-only; offline never becomes command authority. The separate Modus selector remains usable whenever its own native authority is available. The separately updated optional ingress app1.5.2 retains disabled-by-default independent
 VM-health monitoring; see its instructions for private options and commissioning.
 
 
-Frontend1.4.6 also retires old popup temperature callbacks synchronously when
+Frontend1.4.7 also retires old popup temperature callbacks synchronously when
 connection/user identity or connectivity changes before a native Lit render.
 Native connection/config contexts are observed directly; existing hass setters
 are preserved. Repeated connected snapshots of the same identity keep a queued
 adjustment. Stop/reparent releases only owned bindings. This adds no new command
-authority, automatic retries or target confirmation, and remains part of frontend1.4.6.
+authority, automatic retries or target confirmation, and remains part of frontend1.4.7.
 
 
 When a qualified configured target is unavailable, the card and popup can use
@@ -224,9 +227,11 @@ entity's own current backend authority; absent or unavailable correction entitie
 remain read-only. The six-mode selector retains its own independent availability.
 
 
-Frontend1.4.6 refines the thermostat card layout and spacing while preserving
+Frontend1.4.7 gives minus and plus separate rounded, filled, subtly bordered
+buttons with a visible gap. It preserves compact thermostat spacing and
 its existing native target controls, independent room-correction fallback,
 six-mode selector and status. Update the HACS resource and fully reload each
 browser/Companion App to replace an already registered card class. The separately
-versioned ingress/monitor app remains1.5.1. Layout changes do not grant command
+versioned ingress/monitor app1.5.2 includes independent fixes and is updated
+separately through Supervisor. Layout changes do not grant command
 authority or supply missing target/room values.

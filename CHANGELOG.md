@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.7
+
+- Give minus and plus separate rounded, filled, subtly bordered buttons with a visible gap and 44-pixel touch targets.
+- Preserve compact card spacing, correction bounds, six-mode selection and existing command/readback behavior.
+- Include the independently versioned optional ingress/monitor app1.5.2 with notification-outbox, bounded configuration and incomplete-response fixes; update it separately through Supervisor.
+
 ## 1.4.6
 
 - Compact thermostat cards with aligned mode/status rows and Mushroom-style filled adjustment controls.

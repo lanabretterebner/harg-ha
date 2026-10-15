@@ -30,7 +30,8 @@ class Handler(BaseHTTPRequestHandler):
         self.server.requests.append((self.command, self.path, dict(self.headers), body))
         self.send_response(self.server.status)
         for name, value in self.server.headers: self.send_header(name, value)
-        self.send_header('Content-Length', str(len(self.server.body))); self.end_headers()
+        declared = getattr(self.server, 'declared_length', None)
+        self.send_header('Content-Length', str(len(self.server.body) if declared is None else declared)); self.end_headers()
         try: self.wfile.write(self.server.body)
         except (OSError, ssl.SSLError): pass
     do_GET = do_POST = reply
@@ -52,7 +53,7 @@ class WireTests(unittest.TestCase):
         cls.temp.cleanup()
     def setUp(self):
         self.sni.clear()
-        for server in [self.tls, self.http]: server.requests = []; server.status = 200; server.body = b'{}'; server.headers = []
+        for server in [self.tls, self.http]: server.requests = []; server.status = 200; server.body = b'{}'; server.headers = []; server.declared_length = None
     def heartbeat(self, host='localhost'):
         port = self.tls.server_address[1]
         context = ssl.create_default_context(cafile=str(self.cert))
@@ -73,6 +74,10 @@ class WireTests(unittest.TestCase):
         for body, headers in [(b' ' * (m.MAX_RESPONSE + 1), []), (b'{"a":1,"a":2}', []), (b'{}', [('Content-Encoding', 'gzip')])]:
             self.tls.body = body; self.tls.headers = headers
             with self.subTest(bytes=len(body)): self.assertFalse(self.heartbeat()['ok'])
+    def test_truncated_heartbeat_body_is_refused_even_when_json_is_complete(self):
+        self.tls.declared_length = len(self.tls.body) + 10
+        self.assertFalse(self.heartbeat()['ok'])
+        self.assertEqual(len(self.tls.requests), 1)
     def test_notification_exact_local_supervisor_path_and_stable_id_on_wire(self):
         original = http.client.HTTPConnection
         def connect(host, port, **kwargs):

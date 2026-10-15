@@ -19,6 +19,7 @@ from urllib.parse import urlsplit
 SUPERVISOR_IP = "172.30.32.2"
 MAX_BODY = 256 * 1024
 MAX_RESPONSE = 16 * 1024 * 1024
+MAX_OPTIONS_BYTES = 65536
 SOCKET_TIMEOUT = 15
 REQUEST_HEADERS = (
     "Accept", "Accept-Language", "Content-Type", "Origin", "X-CSRF-Token",
@@ -97,6 +98,33 @@ class Rejected(Exception):
         self.message = message
 
 
+def read_options(filename):
+    """Read one bounded, unambiguous configuration snapshot."""
+    def unique_object(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError()
+            result[key] = value
+        return result
+
+    def reject_constant(value):
+        raise ValueError()
+
+    with Path(filename).open("rb") as handle:
+        raw = handle.read(MAX_OPTIONS_BYTES + 1)
+    if len(raw) > MAX_OPTIONS_BYTES:
+        raise ValueError("Invalid app configuration")
+    try:
+        options = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object,
+                             parse_constant=reject_constant)
+        if not isinstance(options, dict):
+            raise ValueError()
+        return options
+    except (ValueError, UnicodeError, RecursionError):
+        raise ValueError("Invalid app configuration") from None
+
+
 @dataclass(frozen=True)
 class Settings:
     host: str
@@ -107,8 +135,10 @@ class Settings:
 
     @classmethod
     def load(cls, filename="/data/options.json"):
-        with Path(filename).open(encoding="utf-8") as handle:
-            options = json.load(handle)
+        return cls.from_options(read_options(filename))
+
+    @classmethod
+    def from_options(cls, options):
         if not isinstance(options, dict):
             raise ValueError("Invalid app configuration")
         url, token = options.get("upstream_url"), options.get("ingress_token")
@@ -302,6 +332,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             content = response.read(MAX_RESPONSE + 1)
             if len(content) > MAX_RESPONSE:
                 raise Rejected(502, "The dashboard response is too large.")
+            if response.length not in (None, 0):
+                raise Rejected(502, "The dashboard response is incomplete.")
             response_headers = [
                 (name, value) for name, value in response.getheaders()
                 if name.lower() in RESPONSE_HEADERS
