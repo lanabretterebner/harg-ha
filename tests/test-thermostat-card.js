@@ -78,7 +78,7 @@ await test("native thermostat receives exact climate and original hass with expl
   const h = hass(), card = mount(h); await settle();
   equal(native(card).config, { type: "thermostat", entity: "climate.synthetic_one", name: "Zieltemperatur", show_current_as_primary: false, features: [] });
   equal(native(card).hass, h); equal(created.length, 1); equal(requests, []);
-  assert(card.shadowRoot.textContent.includes("Ist-Temperatur: Nicht verfügbar"));
+  assert(card.shadowRoot.textContent.includes("Ist: Nicht verfügbar"));
   assert(card.shadowRoot.textContent.includes("Raumkorrektur: 0 °C"));
 });
 await test("all six card presets have the same embedded icons and current reported mode", async () => {
@@ -116,14 +116,14 @@ await test("target qualification can recover without changing mode or entity", a
 });
 await test("zero measured temperature is real but missing measurement stays unavailable", async () => {
   const card = mount(hass(state({}, { current_temperature: 0 }))); await settle();
-  assert(card.shadowRoot.textContent.includes("Ist-Temperatur: 0 °C"));
-  card.hass = hass(); await settle(); assert(card.shadowRoot.textContent.includes("Ist-Temperatur: Nicht verfügbar"));
+  assert(card.shadowRoot.textContent.includes("Ist: 0 °C"));
+  card.hass = hass(); await settle(); assert(card.shadowRoot.textContent.includes("Ist: Nicht verfügbar"));
 });
 await test("raw Celsius room correction is not mislabeled in a Fahrenheit HA system", async () => {
   const h = hass(state({}, { temperature: 66.2, min_temp: 60, max_temp: 72, target_temp_step: 0.9,
     current_temperature: 68, Raumkorrektur: "0.5" })); h.config.unit_system.temperature = "°F";
   const card = mount(h); await settle();
-  assert(card.shadowRoot.textContent.includes("Ist-Temperatur: 68 °F"));
+  assert(card.shadowRoot.textContent.includes("Ist: 68 °F"));
   assert(card.shadowRoot.textContent.includes("Raumkorrektur: 0,5 °C"));
   equal(native(card).hass, h); equal(h.states["climate.synthetic_one"].attributes.temperature, 66.2); equal(requests, []);
 });

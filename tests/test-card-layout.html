@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Thermostat layout — synthetic</title>
+<style>
+ :root{font:14px/1.4 system-ui,sans-serif;--primary-color:#03a9f4;--primary-text-color:#202124;--secondary-text-color:#6a6e75;--divider-color:#dce0e5;--secondary-background-color:#f3f5f7;--ha-card-background:#fff;--error-color:#d93025}
+ body{margin:0;padding:24px;background:#f1f3f5;color:var(--primary-text-color)}
+ body.dark{--primary-text-color:#e5e9ed;--secondary-text-color:#9fa8b2;--divider-color:#353c43;--secondary-background-color:#242a30;--ha-card-background:#191f24;background:#101519}
+ #cards{display:grid;grid-template-columns:repeat(3,327px);gap:16px;align-items:start;max-width:1013px;margin:auto}
+ hargassner-thermostat-card{min-width:0}
+ @media(max-width:600px){body{padding:16px}#cards{grid-template-columns:minmax(0,1fr);max-width:380px}}
+</style>
+<main id="cards"></main><script type="module" src="./test-card-layout.js"></script>

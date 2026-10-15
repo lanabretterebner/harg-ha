@@ -1,24 +1,24 @@
 {
   "app_bytes_unchanged_from_1_5_1": true,
-  "backend_contract_tests": 484,
-  "backend_maintained_tests": 310,
   "browser_assertions": 228,
   "browser_pointer_gestures": 2,
   "browser_runner_negative_cases": 10,
-  "component_checkpoint": "frontend-1.4.5-app-1.5.1",
+  "component_checkpoint": "frontend-1.4.6-app-1.5.1",
   "container_build_performed": false,
-  "frontend_source_sha256": "77917f9879331ad4fcf018ab05be450b4ca65d92e9bfc30ce1d5b236c27ae46e",
+  "control_behavior_unchanged": true,
+  "frontend_layout_composition_pending": false,
+  "frontend_source_sha256": "64e36e501f03ba5cb1fd20b8a42f7f6f3bd9d631c9d66611c8fe1d691af5ecf8",
   "frontend_validation_pending": false,
   "hacs_installation_verified": false,
-  "independent_resolver_adversarial_checks": 6,
   "independent_source_review": true,
+  "layout_viewport_theme_cases": 5,
   "node_checks": 804,
   "physical_commands": 0,
   "private_backend_included": false,
   "real_ha_service_calls": 0,
   "real_notification_deliveries": 0,
   "schema_version": 2,
-  "scope": "Final frontend1.4.5 correction fallback source; synthetic/loopback validation, installation separately recorded.",
+  "scope": "Final compact Mushroom-style frontend1.4.6; synthetic/loopback control and responsive-layout validation, installation separately recorded.",
   "source_only": true,
   "supervisor_app_installation_verified": false,
   "supervisor_app_version": "1.5.1",
@@ -28,5 +28,5 @@
     "app_source_freeze_sha256": "4dba491f950f45e3188ca405589726bf64591313702505deca5f34d83adb0a8c",
     "app_unittest_methods": 141
   },
-  "version": "1.4.5"
+  "version": "1.4.6"
 }

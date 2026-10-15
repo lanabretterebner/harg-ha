@@ -1,11 +1,11 @@
-/* Hargassner thermostat popup and dashboard card, v1.4.5.
+/* Hargassner thermostat popup and dashboard card, v1.4.6.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. Qualified target gestures use guarded climate.set_temperature.
  * Unknown-target correction controls use the separately commissioned number.set_value.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.5";
+const VERSION = "1.4.6";
 // Coalesce rapid native +/- gestures while reducing the avoidable send delay.
 const TEMPERATURE_BUTTON_DEBOUNCE_MS = 250;
 const SCHEMA = "configured_room_setpoint_v1";
@@ -648,14 +648,16 @@ export function createHargassnerCorrectionControl(environment, current) {
   const attr = (element, key, value) => { if (element.getAttribute(key) !== String(value)) element.setAttribute(key, String(value)); };
   const text = (element, value) => { if (element.textContent !== value) element.textContent = value; };
   const node = document.createElement("div"); node.dataset.hargassnerCorrection = VERSION;
-  node.style.cssText = "text-align:center;max-width:290px;margin:8px auto 16px;line-height:1.5";
+  node.className = "hargassner-correction";
+  const controlStyle = document.createElement("style");
+  controlStyle.textContent = `.hargassner-correction button{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:44px;height:44px;padding:0;color:var(--primary-text-color);background:transparent;border:0;border-radius:12px;cursor:pointer}.hargassner-correction button:hover:not(:disabled),.hargassner-correction button:focus-visible{background:var(--card-background-color,var(--ha-card-background,#fff))}.hargassner-correction button:focus-visible{outline:2px solid var(--primary-text-color,#666);outline-offset:2px}.hargassner-correction button:disabled{opacity:.4;cursor:default}`;
+  node.style.cssText = "text-align:center;max-width:240px;margin:4px auto 8px;line-height:1.35";
   const label = document.createElement("div"); label.textContent = "Raumkorrektur";
-  const target = document.createElement("div"); target.textContent = "Aktive Zieltemperatur unbekannt";
-  target.style.cssText = "font-size:12px;color:var(--secondary-text-color)";
+  label.style.cssText = "font-size:13px;font-weight:500;line-height:18px";
   const dial = document.createElement("div");
   dial.setAttribute("role", "slider"); dial.setAttribute("aria-label", "Raumkorrektur in Grad Celsius");
   dial.setAttribute("aria-valuemin", "-3"); dial.setAttribute("aria-valuemax", "3");
-  dial.tabIndex = 0; dial.style.cssText = "position:relative;width:220px;height:190px;margin:auto;touch-action:pan-y;outline-offset:3px";
+  dial.tabIndex = 0; dial.style.cssText = "position:relative;width:180px;height:155px;margin:auto;touch-action:pan-y;outline-offset:3px";
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 220 190"); svg.setAttribute("aria-hidden", "true");
   svg.style.cssText = "width:100%;height:100%;pointer-events:none";
@@ -667,20 +669,24 @@ export function createHargassnerCorrectionControl(environment, current) {
   thumb.setAttribute("r", "9"); thumb.setAttribute("fill", "var(--primary-color,#03a9f4)");
   svg.append(path, thumb);
   const value = document.createElement("div");
-  value.style.cssText = "position:absolute;left:0;right:0;top:75px;font-size:32px;pointer-events:none";
-  const limits = document.createElement("div"); limits.textContent = "−3 bis +3 °C · 0,5 °C Schritte";
-  limits.style.cssText = "font-size:12px;color:var(--secondary-text-color)";
+  value.style.cssText = "position:absolute;left:0;right:0;top:60px;font-size:30px;line-height:38px;font-weight:400;pointer-events:none";
   dial.append(svg, value);
-  const buttons = document.createElement("div"); buttons.style.cssText = "display:flex;gap:24px;justify-content:center";
+  const buttons = document.createElement("div"); buttons.className = "correction-stepper";
+  buttons.style.cssText = "display:flex;align-items:center;justify-content:center;gap:12px;position:relative;margin:-12px auto 6px;padding:2px;max-width:120px;min-height:48px;box-sizing:border-box;border:1px solid var(--divider-color);border-radius:var(--control-border-radius,14px);background:rgba(var(--rgb-primary-text-color,127,127,127),.05)";
   const minus = document.createElement("button"), plus = document.createElement("button");
-  for (const [button, text, title] of [[minus, "−", "Raumkorrektur verringern"], [plus, "+", "Raumkorrektur erhöhen"]]) {
-    button.type = "button"; button.textContent = text; button.setAttribute("aria-label", title);
-    button.style.cssText = "font:inherit;font-size:24px;color:var(--primary-color);background:transparent;border:1px solid var(--divider-color);border-radius:50%;width:44px;height:44px;cursor:pointer";
-    buttons.append(button);
+  for (const [button, pathData, title] of [[minus, "M5 12H19", "Raumkorrektur verringern"], [plus, "M12 5V19M5 12H19", "Raumkorrektur erhöhen"]]) {
+    button.type = "button"; button.setAttribute("aria-label", title);
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("width", "24"); icon.setAttribute("height", "24");
+    icon.setAttribute("aria-hidden", "true"); icon.setAttribute("focusable", "false");
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    line.setAttribute("d", pathData); line.setAttribute("fill", "none"); line.setAttribute("stroke", "currentColor");
+    line.setAttribute("stroke-width", "2"); line.setAttribute("stroke-linecap", "round");
+    icon.append(line); button.append(icon); buttons.append(button);
   }
   const note = document.createElement("div"); note.setAttribute("role", "status"); note.setAttribute("aria-live", "polite");
-  note.style.cssText = "min-height:24px;font-size:12px;color:var(--secondary-text-color)";
-  node.append(label, target, dial, buttons, limits, note);
+  note.style.cssText = "min-height:0;font-size:11px;line-height:16px;margin-top:2px;color:var(--secondary-text-color)";
+  node.append(controlStyle, label, dial, buttons, note);
   let closed = false, model = null, session = null, scope = null, epoch = 0, timer = null, draft = null, dragging = null, visible = false;
   const notify = () => { for (const listener of [...(model?.listeners || [])]) listener(); };
   const cancelDraft = () => { if (timer !== null) environment.clearTimeout(timer); timer = null; draft = null; dragging = null; epoch++; };
@@ -1117,8 +1123,8 @@ export function installHargassnerThermostatCard(environment = window) {
       }
       set hass(value) { this._hass = value; this._render(); }
       get hass() { return this._hass; }
-      getCardSize() { return 11; }
-      getGridOptions() { return { columns: 12, rows: 9, min_columns: 6, min_rows: 9 }; }
+      getCardSize() { return 7; }
+      getGridOptions() { return { columns: 12, rows: 7, min_columns: 6, min_rows: 6 }; }
       connectedCallback() { this._render(); }
       disconnectedCallback() { this._dispose(); }
       _cancelNative(force = false) {
@@ -1154,13 +1160,13 @@ export function installHargassnerThermostatCard(environment = window) {
       _build() {
         const style = document.createElement("style");
         style.textContent = `:host{display:block;height:100%}ha-card{height:100%;box-sizing:border-box;overflow:hidden}
-          h3{font-size:var(--ha-font-size-l,20px);font-weight:500;margin:16px 16px 0;text-align:center;overflow-wrap:anywhere}
-          .native{--ha-card-border-width:0;--ha-card-box-shadow:none;--ha-card-border-radius:0;--ha-card-background:transparent;display:block;height:320px}
+          h3{font-size:16px;line-height:22px;font-weight:500;margin:16px 16px 6px;text-align:center;overflow-wrap:anywhere}
+          .native{--ha-card-border-width:0;--ha-card-box-shadow:none;--ha-card-border-radius:0;--ha-card-background:transparent;display:block;height:260px}
           .placeholder{text-align:center;padding:28px 16px;color:var(--secondary-text-color)}
-          .footer{padding:8px 16px 16px;display:grid;gap:12px;text-align:center}
-          .readings{display:grid;gap:4px;font-size:var(--ha-font-size-s,12px);color:var(--secondary-text-color)}
-          .status-label{font-size:var(--ha-font-size-s,12px);color:var(--secondary-text-color)}
-          .status{overflow-wrap:anywhere}.error{color:var(--error-color)}[hidden]{display:none!important}
+          .footer{padding:4px 16px 14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;align-items:center;text-align:left}
+          .readings{grid-column:1/-1;display:flex;flex-wrap:wrap;justify-content:center;gap:2px 10px;font-size:12px;line-height:18px;color:var(--secondary-text-color)}
+          .status-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+          .mode{min-width:0}.mode ha-control-select-menu{max-width:100%}.status{max-width:150px;text-align:right;font-size:13px;line-height:18px;overflow-wrap:anywhere}.error{grid-column:1/-1;font-size:12px;line-height:18px;color:var(--error-color)}.error:empty{display:none}[hidden]{display:none!important}
           button{font:inherit;color:var(--primary-color);background:none;border:1px solid var(--divider-color);border-radius:8px;padding:8px;cursor:pointer}`;
         const card = document.createElement("ha-card"), title = document.createElement("h3");
         const nativeHost = document.createElement("div"), placeholder = document.createElement("div");
@@ -1176,6 +1182,7 @@ export function installHargassnerThermostatCard(environment = window) {
         readings.append(current, correction);
         const correctionHost = document.createElement("div");
         const menuHost = document.createElement("div"), status = document.createElement("div");
+        menuHost.className = "mode";
         status.className = "status"; status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
         const statusLabel = document.createElement("div"), statusValue = document.createElement("div");
         statusLabel.className = "status-label"; statusLabel.textContent = "Heizkreisstatus";
@@ -1334,7 +1341,8 @@ export function installHargassnerThermostatCard(environment = window) {
           return;
         }
         const available = connected && !["unknown", "unavailable"].includes(state.state);
-        ui.current.textContent = `Ist-Temperatur: ${this._format(available ? state.attributes.current_temperature : null)}`;
+        ui.current.textContent = `Ist: ${this._format(available ? state.attributes.current_temperature : null)}`;
+        ui.current.hidden = !available || !Number.isFinite(state.attributes.current_temperature);
         ui.correction.textContent = `Raumkorrektur: ${this._format(available ? state.attributes.Raumkorrektur : null, true, "°C")}`;
         ui.statusValue.textContent = operatingState(state, connected);
         if (customElements.get("ha-control-select-menu")) this._renderMenu(state);

@@ -90,3 +90,13 @@ The generated runner failure fixtures disable only the extra correction suite;
 the public CLI always includes it. Pending correction confirms only against a
 matching, later HA number receipt; client/server clock skew can keep that
 readback honestly uncertain. No elapsed timer proves success or resends a write.
+
+
+Compact-card layout fixtures: `node tools/test_card_layout.mjs` checks three
+327-pixel desktop cards and 390/320-pixel mobile viewports in light/dark themes.
+It verifies bounds, no clipping, 44-pixel touch targets with 24-pixel SVG icons,
+a filled pill with a subtle outer border, hidden absent room readings and retained semantic status
+labels. The page uses local themed stand-ins, synthetic entity states and
+recorded number services. It does not establish actual HA theme/native visual
+acceptance. Set `HARG_TEST_ARTIFACT_DIR` to save screenshots. Existing control
+regressions still exercise the unchanged service and pending/readback routes.

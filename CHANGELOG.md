@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.6
+
+- Compact thermostat cards with aligned mode/status rows and Mushroom-style filled adjustment controls.
+- Remove visible step/range captions and redundant explanatory text; preserve enforced limits and accessible labels.
+- Preserve target/correction authority, unknown-value presentation, six-mode selection and native control behavior.
+- Keep the separately versioned ingress/monitor app1.5.1 unchanged.
+
 ## 1.4.5
 
 - Keep a separately qualified room-correction control available in the card and popup when Auto has no qualified configured target basis.
