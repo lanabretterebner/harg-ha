@@ -1,6 +1,6 @@
 # Hargassner for Home Assistant
 
-Frontend1.4.4 and the optional ingress/monitor app1.5.0 include the HA clients for an existing Hargassner local-control
+Frontend1.4.4 and the optional ingress/monitor app1.5.1 include the HA clients for an existing Hargassner local-control
 backend: a discoverable thermostat dashboard card, the matching native popup,
 one-device page grouping, the optional dashboard Ingress app and reference examples.
 
@@ -15,6 +15,13 @@ Use [this public repository](https://github.com/lanabretterebner/harg-ha) in
 both stores independently. HACS downloads the browser module; Supervisor
 builds the included app. Installing either does not install the other or the
 MQTT/backend services. No live backend identity, configuration or token is included.
+
+App1.5.1 is an app-only correction on the default branch: it preserves the
+Supervisor environment when starting the independent monitor. The HACS
+frontend remains1.4.4 with identical JavaScript; no frontend reload is needed
+for this app update. Install/update the app through the HA App store. Existing
+v1.4.4 tag and release assets remain immutable and contain the earlier app1.5.0
+source; use the default branch/App store for the corrected app.
 
 ## Thermostat popup through HACS
 
@@ -103,7 +110,7 @@ https://github.com/lanabretterebner/harg-ha
 Install **Hargassner Dashboard**. Supervisor builds the source for `amd64` or
 `aarch64`; no prebuilt app image is required. The verified official base image
 index is pinned by digest. The app exposes no host ports or Supervisor-management,
-Docker or host privileges. App1.5.0 requests HA API permission solely for optional
+Docker or host privileges. App1.5.1 requests HA API permission solely for optional
 monitor notifications using the Supervisor-provided token; monitoring is disabled
 by default. No long-lived HA user token is needed.
 
@@ -191,11 +198,12 @@ assertions plus page/console/request errors. It emits a structured result.
 open the HTML fixtures manually. These synthetic checks contact no live HA or
 controller and do not establish installed-native rendering or physical heating
 response. See [browser checks](tests/README.md).
-Publish a GitHub release tagged `v1.4.4` with the standalone JavaScript asset;
-Supervisor builds the committed app source from the repository.
+Preserve the existing `v1.4.4` tag and release assets. This app-only checkpoint
+is published to the default branch for Supervisor's app1.5.1 source. The frontend
+resource remains the existing1.4.4 asset; no frontend release or reload is required.
 [Third-party icon licenses](THIRD-PARTY-NOTICES.md).
 
-Frontend1.4.4 keeps the native thermostat and temperature-control nodes mounted while readback catches up. A requested number is shown as **Angefragt** until coherent qualified readback confirms it; an uncertain outcome says **Bestätigung unklar**, without automatic retry or silent rollback. A definitive rejection restores the confirmed number. Current modes/status stay truthful, and genuine schedule/base changes reconcile normally. During qualification loss the previous confirmed number remains visibly read-only; offline never becomes command authority. The separate Modus selector remains usable whenever its own native authority is available. The separately updated optional ingress app1.5.0 adds disabled-by-default independent
+Frontend1.4.4 keeps the native thermostat and temperature-control nodes mounted while readback catches up. A requested number is shown as **Angefragt** until coherent qualified readback confirms it; an uncertain outcome says **Bestätigung unklar**, without automatic retry or silent rollback. A definitive rejection restores the confirmed number. Current modes/status stay truthful, and genuine schedule/base changes reconcile normally. During qualification loss the previous confirmed number remains visibly read-only; offline never becomes command authority. The separate Modus selector remains usable whenever its own native authority is available. The separately updated optional ingress app1.5.1 retains disabled-by-default independent
 VM-health monitoring; see its instructions for private options and commissioning.
 
 
@@ -204,4 +212,4 @@ connection/user identity or connectivity changes before a native Lit render.
 Native connection/config contexts are observed directly; existing hass setters
 are preserved. Repeated connected snapshots of the same identity keep a queued
 adjustment. Stop/reparent releases only owned bindings. This adds no new command
-authority, automatic retries or target confirmation, and leaves app1.5.0 unchanged.
+authority, automatic retries or target confirmation, and leaves the frontend unchanged in this app1.5.1 checkpoint.

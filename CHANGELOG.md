@@ -1,5 +1,15 @@
 # Changelog
 
+## App1.5.1 checkpoint (frontend1.4.4 unchanged)
+
+Preserve the Supervisor environment through S6's with-contenv wrapper so enabled
+health monitoring starts alongside ingress. Startup errors log only fixed stage
+names. Six startup regressions and an exact digest-pinned image/init comparison
+cover the missing-environment failure and correction. Thermostat frontend bytes,
+monitor transport, TLS, permissions and durable state contracts are unchanged.
+Existing frontend tags and release assets are preserved.
+
+
 ## 1.4.4
 
 - Retire popup temperature API and debounce leases synchronously for coalesced connection/user and connectivity changes before Lit renders.

@@ -1,5 +1,5 @@
 name: Hargassner Dashboard
-version: "1.5.0"
+version: "1.5.1"
 slug: hargassner_dashboard
 description: Open the local Hargassner dashboard using your Home Assistant login.
 arch:

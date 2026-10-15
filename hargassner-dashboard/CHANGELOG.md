@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.1
+
+- Start Python through S6 with-contenv so enabled monitoring receives the Supervisor-provided credential.
+- Report fixed startup-stage categories without option values, credentials or exception text.
+- Preserve the disabled default, verified TLS, private monitor state and ingress permissions.
+
 ## 1.5.0
 
 - Add optional disabled-by-default HA-host health monitoring and persistent notifications through the Supervisor-provided token.

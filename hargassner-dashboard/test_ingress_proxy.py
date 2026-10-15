@@ -66,7 +66,7 @@ class ValidationTests(unittest.TestCase):
 
     def test_panel_access_and_version_metadata(self):
         config = Path(__file__).with_name("config.yaml").read_text()
-        self.assertIn('version: "1.5.0"', config)
+        self.assertIn('version: "1.5.1"', config)
         self.assertIn("panel_admin: false", config)
         self.assertIn('upstream_connect_host: "str?"', config)
         self.assertNotIn("ports:", config)

@@ -47,13 +47,22 @@ def main():
     server = None
     workers = []
     unexpected_stop = False
+    stage = 'options'
     try:
         settings = MonitorSettings.load()
         # Disabled monitoring never reads Supervisor credentials or state.
-        monitor = Monitor(settings, supervisor_token()) if settings.enabled else None
+        monitor = None
+        if settings.enabled:
+            stage = 'supervisor_token'
+            token = supervisor_token()
+            stage = 'monitor_state'
+            monitor = Monitor(settings, token)
+        stage = 'ingress_listener'
         server = MonitorProxyServer(('0.0.0.0', 8099), settings.upstream, monitor.status if monitor else disabled_status)
+        stage = 'signal_handlers'
         for name in ('SIGTERM', 'SIGINT'):
             signal.signal(getattr(signal, name), lambda *_args: stop.set())
+        stage = 'worker_start'
         proxy = threading.Thread(target=server.serve_forever, name='ingress', daemon=False)
         workers.append(proxy); proxy.start()
         if monitor is not None:
@@ -65,7 +74,8 @@ def main():
                 unexpected_stop = True
                 stop.set()
     except Exception:
-        print('App configuration or service unavailable.', flush=True)
+        # Only this fixed stage is logged; exception text can contain credentials.
+        print(f'App startup unavailable: {stage}.', flush=True)
         return 1
     finally:
         stop.set()
