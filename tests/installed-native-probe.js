@@ -3,7 +3,7 @@
  * Start returns synchronously. Poll window.hargassnerNativeProbeV2 later.
  * No RAF, updateComplete wait, real hass object, import or global patch. */
 function startHargassnerNativeProbeV2(options = {}) {
-  const namespace = "hargassnerNativeProbeV2", version = "1.4.8";
+  const namespace = "hargassnerNativeProbeV2", version = "1.4.9";
   if (window[namespace]?.running) throw Error("An owned probe is already running; stop it first");
   if (options.installedVersion !== version || !/^[a-f0-9]{64}$/.test(options.verifiedResourceSha256 || ""))
     throw Error("Verified installed version/resource hash required");

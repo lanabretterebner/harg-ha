@@ -1,6 +1,6 @@
 # Add Hargassner thermostat cards without YAML
 
-1. Download/update this repository to1.4.8 in HACS and verify its existing module
+1. Download/update this repository to 1.4.9 in HACS and verify its existing module
    resource. Reload the frontend and open a dashboard so the resource loads.
 2. Choose **Edit dashboard → Add card**. Search for **Hargassner Thermostat**
    in the custom cards list and select it.
@@ -26,7 +26,7 @@ compact alternative that opens the corrected popup. The separate Supervisor
 Ingress app opens the existing web dashboard and does not create these cards.
 
 If the card is absent from Add Card, confirm the exact module URL returns200,
-the HACS installed version is1.4.8 and the dashboard has loaded the resource.
+the HACS installed version is 1.4.9 and the dashboard has loaded the resource.
 A full frontend reload is required when upgrading an already registered custom
 card class; clearing HTTP cache alone cannot replace an existing class in memory.
 For direct Settings/device-page loading use the documented global loader.
@@ -42,14 +42,20 @@ Raumkorrektur control. It changes only correction (−3 to +3°C in0.5°C steps)
 not an inferred day/setback target. Missing or unavailable correction entities
 remain read-only; the unknown configured target stays explicitly unknown.
 
-Frontend1.4.8 refines card spacing and alignment; resource loading, entity
+Frontend 1.4.9 refines card spacing and alignment; resource loading, entity
 selection and command eligibility keep the existing contracts. Fully reload the
-frontend after the HACS update. The optional app1.5.2 has separate ingress/monitor fixes and its own Supervisor
+frontend after the HACS update. The optional app 1.5.2 has separate ingress/monitor fixes and its own Supervisor
 update; it is not installed by HACS.
 
 
-Frontend1.4.8 uses a compact card layout with centered mode/status rows stacked vertically and a
+Frontend 1.4.9 uses a compact card layout with centered mode/status rows stacked vertically and a
 pair of separately rounded, filled, subtly bordered Mushroom-style minus/plus
 buttons with a visible gap. Range and step captions are omitted;
 the backend limits and accessible labels remain enforced. Missing room sensors
 do not create an empty reading row. Pending or uncertain commands remain visible.
+
+In 1.4.9, **Ist** appears immediately below the set/correction number. An
+unavailable reading keeps its reserved line and says **Ist: Nicht verfügbar**.
+Cards have a fixed400-pixel frame; longer statuses remain readable in their
+scrollable status slot, and mode errors retain their full text in the error
+label/title. Native and correction controls preserve their existing authority.

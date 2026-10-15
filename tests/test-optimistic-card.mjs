@@ -126,4 +126,12 @@ await test('late transport error cannot poison newer explicit gesture after term
  assert.equal(f.card._presentation.intent,current);assert.equal(current.status,'pending');assert.equal(current.target,20);assert.equal(current.basis,FRESH);
  assert.equal(f.native.inert,true);assert.equal(f.node.stateObj.attributes.temperature,20);
 });
+
+for(const entity of ['climate.synthetic_hc1','climate.synthetic_hc2'])await test(`${entity} current reading changes retain requested target and native leases through missing/offline telemetry`,()=>{
+ const f=fixture({...state(19,true,{current_temperature:21.5}),entity_id:entity}),native=f.native,node=f.node;
+ f.input(19.5);f.flush();f.update({...state(19,true,{current_temperature:0}),entity_id:entity});
+ assert.equal(f.card._ui.current.textContent,'Ist: 0 °C');assert.equal(f.card._ui.current.hidden,false);assert.equal(node.stateObj.attributes.temperature,19.5);assert.equal(f.card._native,native);assert.equal(f.calls.length,1);
+ f.update({...state(null,false,{current_temperature:null}),entity_id:entity});assert.equal(f.card._ui.current.textContent,'Ist: Nicht verfügbar');assert.equal(f.card._ui.current.hidden,false);assert.equal(node.stateObj.attributes.temperature,19.5);
+ f.card._hass.connected=false;f.card._render();assert.equal(f.card._ui.current.textContent,'Ist: Nicht verfügbar');assert.equal(f.card._native,native);assert.equal(f.node,node);assert.equal(f.calls.length,1);
+});
 console.log(JSON.stringify({tests:results.length,passed:results.filter(r=>r.passed).length,failed:results.filter(r=>!r.passed).length,results},null,2));if(results.some(r=>!r.passed))process.exitCode=1;

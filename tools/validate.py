@@ -14,11 +14,11 @@ def validate():
     assert hacs == {"name": "Hargassner Thermostat Popup",
                     "filename": "hargassner-thermostat-popup.js"}
     assert package["name"] == "harg-ha"
-    assert package["version"] == release["version"] == "1.4.8"
+    assert package["version"] == release["version"] == "1.4.9"
     assert package["type"] == "module"
     script = ROOT / "dist" / hacs["filename"]
     text = script.read_text()
-    assert 'const VERSION = "1.4.8";' in text
+    assert 'const VERSION = "1.4.9";' in text
     assert 'const LABEL = "Modus";' in text
     assert "configured_room_setpoint_v1" in text
     assert "hargassner-thermostat-card" in text

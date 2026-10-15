@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.9
+
+- Show the actual room temperature as Ist directly below the set/correction number, including narrow native dials. Keep zero readings and explicitly show unavailable readings without inventing a value.
+- Keep all thermostat cards at a fixed 400px height across missing sensors, native/fallback targets, status text, pending/rejected commands, reconnects and helper failures.
+- Retain separate rounded minus/plus buttons, centered vertical mode/status rows, native controls and guarded correction-only writes.
+- Preserve popup behavior and all 15 independently versioned app 1.5.2 files unchanged.
+
 ## 1.4.8
 
 - Collapse the unavailable native target region only while the independent room-correction fallback is shown; restore native spacing when the configured target is available.

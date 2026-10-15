@@ -96,7 +96,7 @@ Compact-card layout fixtures: `node tools/test_card_layout.mjs` checks three
 327-pixel desktop cards and 390/320-pixel mobile viewports in light/dark themes.
 It verifies bounds, no clipping, 44-pixel touch targets with 24-pixel SVG icons,
 separate rounded filled buttons with individual 1-pixel borders, at least an
-8-pixel gap and an unbordered transparent wrapper, hidden absent room readings and retained semantic status
+8-pixel gap and an unbordered transparent wrapper, reserved truthful room-reading lines and retained semantic status
 labels. The page uses local themed stand-ins, synthetic entity states and
 recorded number services. It does not establish actual HA theme/native visual
 acceptance. Set `HARG_TEST_ARTIFACT_DIR` to save screenshots. Existing control
@@ -108,3 +108,12 @@ connectivity and mode changes preserve the same native and correction nodes,
 restore original inline values/priorities, and keep correction before mode/status.
 Correction removal and stop release owned styles; unrelated native control
 children prevent the dedicated-region collapse. All services remain synthetic.
+
+Card 1.4.9 geometry covers a fixed 400px height equality and 15 transitions per viewport/theme:
+qualified native/fallback targets, zero/missing readings, long status, offline and
+reconnect, mode changes/errors, unsupported and mismatched sources, actual retry
+clickability, user/unit replacement and bounded pending/rejected notes. Native
+secondary/readout behavior uses the pinned .info/primary/.secondary contract,
+including the xs rule hiding native labels. Two portable continuity cases verify
+room telemetry cannot change a requested target, replace native controls or send
+another command. These are synthetic checks, not installed HA acceptance.

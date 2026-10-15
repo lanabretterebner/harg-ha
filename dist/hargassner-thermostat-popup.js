@@ -1,11 +1,11 @@
-/* Hargassner thermostat popup and dashboard card, v1.4.8.
+/* Hargassner thermostat popup and dashboard card, v1.4.9.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. Qualified target gestures use guarded climate.set_temperature.
  * Unknown-target correction controls use the separately commissioned number.set_value.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.8";
+const VERSION = "1.4.9";
 // Coalesce rapid native +/- gestures while reducing the avoidable send delay.
 const TEMPERATURE_BUTTON_DEBOUNCE_MS = 250;
 const SCHEMA = "configured_room_setpoint_v1";
@@ -1165,7 +1165,7 @@ export function installHargassnerThermostatCard(environment = window) {
       connectedCallback() { this._render(); }
       disconnectedCallback() { this._dispose(); }
       _cancelNative(force = false) {
-        this._controlLease?.dispose(); this._controlLease = null; this._controlObserver?.disconnect(); this._controlObserver = null; this._apiEpoch = (this._apiEpoch || 0) + 1;
+        this._controlLease?.dispose(); this._controlLease = null; this._controlObserver?.disconnect(); this._controlObserver = null; this._clearCardReadingBinding(); this._apiEpoch = (this._apiEpoch || 0) + 1;
         if (this._nativeContext) {
           this._ui?.nativeHost.removeEventListener("context-request", this._nativeContext);
           this._nativeContext = null;
@@ -1196,28 +1196,31 @@ export function installHargassnerThermostatCard(environment = window) {
       }
       _build() {
         const style = document.createElement("style");
-        style.textContent = `:host{display:block;height:100%}ha-card{height:100%;box-sizing:border-box;overflow:hidden}
-          h3{font-size:16px;line-height:22px;font-weight:500;margin:16px 16px 6px;text-align:center;overflow-wrap:anywhere}
-          .native{--ha-card-border-width:0;--ha-card-box-shadow:none;--ha-card-border-radius:0;--ha-card-background:transparent;display:block;height:260px}
-          .placeholder{text-align:center;padding:28px 16px;color:var(--secondary-text-color)}
-          .footer{padding:4px 16px 14px;display:grid;grid-template-columns:minmax(0,1fr);gap:6px;align-items:center;justify-items:center;text-align:center}
-          .readings{grid-column:1/-1;display:flex;flex-wrap:wrap;justify-content:center;gap:2px 10px;font-size:12px;line-height:18px;color:var(--secondary-text-color)}
+        style.textContent = `:host{display:block;height:400px;min-height:400px;max-height:400px}ha-card{height:100%;box-sizing:border-box;overflow:hidden;display:grid;grid-template-rows:38px 226px minmax(0,1fr)}
+          h3{box-sizing:border-box;font-size:16px;line-height:22px;font-weight:500;margin:0;padding:12px 16px 4px;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+          .control-area{position:relative;display:grid;grid-template-columns:minmax(0,1fr);align-items:start;justify-items:center;min-height:0}
+          .native-host,.correction-host,.placeholder{grid-area:1/1;min-width:0}.native-host{width:220px;height:220px}.correction-host{width:100%;max-width:240px}.correction-host>.hargassner-correction{margin:0 auto!important;height:226px}.correction-host .correction-stepper{margin:-24px auto 0!important}.correction-host .hargassner-correction>[role=status]{height:28px;max-height:28px;min-height:28px!important;overflow:auto;line-height:14px!important;margin-top:0!important;font-size:11px}
+          .native{--ha-card-border-width:0;--ha-card-box-shadow:none;--ha-card-border-radius:0;--ha-card-background:transparent;display:block;width:220px;height:220px}
+          .placeholder{box-sizing:border-box;width:100%;height:180px;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px 16px;color:var(--secondary-text-color)}
+          .retry{position:absolute;bottom:4px;max-width:calc(100% - 32px)}
+          .footer{box-sizing:border-box;padding:0 16px 12px;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:56px 36px 18px;gap:6px;align-items:center;justify-items:center;text-align:center;min-height:0}
           .status-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
-          .mode{min-width:0;width:100%;max-width:240px}.mode ha-control-select-menu{max-width:100%}.status{max-width:100%;text-align:center;font-size:13px;line-height:18px;overflow-wrap:anywhere}.error{grid-column:1/-1;font-size:12px;line-height:18px;color:var(--error-color)}.error:empty{display:none}[hidden]{display:none!important}
+          .mode{min-width:0;width:100%;max-width:240px}.mode ha-control-select-menu{max-width:100%}.status{width:100%;height:36px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:13px;line-height:18px;overflow-wrap:anywhere}.status>div:last-child{max-height:36px;overflow:auto}.error{max-width:100%;font-size:12px;line-height:18px;height:18px;color:var(--error-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.error:empty{visibility:hidden}[hidden]{display:none!important}
           button{font:inherit;color:var(--primary-color);background:none;border:1px solid var(--divider-color);border-radius:8px;padding:8px;cursor:pointer}`;
         const card = document.createElement("ha-card"), title = document.createElement("h3");
         const nativeHost = document.createElement("div"), placeholder = document.createElement("div");
+        nativeHost.className = "native-host";
+        const controlArea = document.createElement("div"); controlArea.className = "control-area";
         const updateNote = document.createElement("div"); updateNote.className = "placeholder"; updateNote.hidden = true;
         updateNote.setAttribute("role", "status"); updateNote.setAttribute("aria-live", "polite");
         updateNote.textContent = "Wird aktualisiert · letzter bestätigter Sollwert";
         placeholder.className = "placeholder";
-        const retry = document.createElement("button"); retry.textContent = "Erneut versuchen";
+        const retry = document.createElement("button"); retry.className = "retry"; retry.textContent = "Erneut versuchen";
         retry.addEventListener("click", () => { this._failed = false; this._render(); });
         const footer = document.createElement("div"); footer.className = "footer";
-        const readings = document.createElement("div"); readings.className = "readings";
         const current = document.createElement("div"), correction = document.createElement("div");
-        readings.append(current, correction);
-        const correctionHost = document.createElement("div");
+        for (const node of [current, correction, updateNote]) node.dataset.hargassnerCardReading = "";
+        const correctionHost = document.createElement("div"); correctionHost.className = "correction-host";
         const menuHost = document.createElement("div"), status = document.createElement("div");
         menuHost.className = "mode";
         status.className = "status"; status.setAttribute("role", "status"); status.setAttribute("aria-live", "polite");
@@ -1225,25 +1228,77 @@ export function installHargassnerThermostatCard(environment = window) {
         statusLabel.className = "status-label"; statusLabel.textContent = "Heizkreisstatus";
         status.append(statusLabel, statusValue);
         const error = document.createElement("div"); error.className = "error"; error.setAttribute("role", "alert");
-        footer.append(readings, menuHost, status, error); card.append(title, nativeHost, correctionHost, updateNote, placeholder, retry, footer);
+        footer.append(menuHost, status, error);
+        controlArea.append(nativeHost, correctionHost, current, correction, updateNote, placeholder, retry);
+        card.append(title, controlArea, footer);
         this.shadowRoot.append(style, card);
-        this._ui = { card, title, nativeHost, updateNote, placeholder, retry, footer, current, correction, correctionHost, menuHost, statusValue, error };
+        this._ui = { card, title, controlArea, nativeHost, updateNote, placeholder, retry, footer, current, correction, correctionHost, menuHost, statusValue, error };
       }
       _renderCorrection(state) {
         if (!this._ui?.correctionHost) return false;
         if (!this._correctionControl && resolveHargassnerCorrection(this._hass, state)) {
           this._correctionControl = createHargassnerCorrectionControl(environment, () => ({
             hass: this._hass, state: this._hass?.states?.[this._config?.entity],
-            connected: this.isConnected && this._connectedHA(),
+            connected: this.isConnected && this._connectedHA() &&
+              this._hass?.states?.[this._config?.entity]?.entity_id === this._config?.entity,
           }));
           this._ui.correctionHost.append(this._correctionControl.node);
         }
         this._correctionControl?.render();
         const shown = !!this._correctionControl && !this._correctionControl.node.hidden;
         this._ui.nativeHost.hidden = shown;
-        this._ui.correction.hidden = shown;
+        this._ui.correction.hidden = shown || !scopedClimate(state) || state.entity_id !== this._config.entity;
         if (shown) { this._ui.placeholder.hidden = true; this._ui.updateNote.hidden = true; }
+        this._syncCardReadings();
         return shown;
+      }
+      _clearCardReadingBinding() {
+        this._roomObserver?.disconnect(); this._roomObserver = null;
+        this._roomStyle?.remove(); this._roomStyle = null; this._roomRoot = null;
+        const ui = this._ui; if (!ui?.controlArea) return;
+        for (const node of [ui.current, ui.correction, ui.updateNote])
+          if (node.parentNode !== ui.controlArea) ui.controlArea.append(node);
+      }
+      _syncCardReadings() {
+        const ui = this._ui; if (!ui?.controlArea) return;
+        const current = ui.current, correction = ui.correction, note = ui.updateNote;
+        const fallback = this._correctionControl?.node;
+        const dial = fallback && !fallback.hidden ? fallback.querySelector('[role="slider"]') : null;
+        if (dial) {
+          if (current.parentNode !== dial) dial.append(current);
+          current.style.cssText = "position:absolute;left:0;right:0;top:100px;text-align:center;font-size:12px;line-height:18px;color:var(--secondary-text-color);pointer-events:none";
+          return;
+        }
+        const root = this._native ? findTemperatureControl(this._native)?.shadowRoot : null;
+        const info = root?.querySelector(".info"), secondary = info?.querySelector(".secondary");
+        if (info && secondary) {
+          if (this._roomRoot !== root) {
+            this._clearCardReadingBinding(); this._roomRoot = root;
+            const style = document.createElement("style"); style.dataset.hargassnerCardRoom = "";
+            style.textContent = ".info>.secondary{display:none!important}.info>[data-hargassner-card-reading]{pointer-events:none!important;margin:0!important;max-width:100%;text-align:center;color:var(--secondary-text-color);font-size:12px;line-height:18px}";
+            this._roomStyle = style; root.append(style);
+            if (typeof environment.MutationObserver === "function") {
+              this._roomObserver = new environment.MutationObserver(() => this._syncCardReadings());
+              this._roomObserver.observe(root, { childList: true, subtree: true });
+            }
+          }
+          if (this._roomStyle?.parentNode !== root) root.append(this._roomStyle);
+          for (const [node, size] of [[current,12],[correction,11],[note,11]]) {
+            if (node.parentNode !== info) info.append(node);
+            const css = `position:static;height:auto;min-height:0;display:block;padding:0;margin:0;font-size:${size}px;line-height:${size === 12 ? 18 : 16}px;text-align:center;max-width:100%`;
+            if (node.style.cssText !== css) node.style.cssText = css;
+          }
+          return;
+        }
+        if (this._roomRoot) this._clearCardReadingBinding();
+        // An unsupported native template keeps the truthful reading in the
+        // owned card area; it never mutates an unknown HA control layout.
+        const retrySpace = ui.retry.hidden ? 0 : 48;
+        ui.placeholder.style.height = retrySpace ? "132px" : "180px";
+        for (const [node, bottom] of [[current,24],[correction,4],[note,44]]) {
+          if (node.parentNode !== ui.controlArea) ui.controlArea.append(node);
+          node.style.cssText = `position:absolute;left:0;right:0;bottom:${bottom + retrySpace}px;height:auto;min-height:0;display:block;padding:0;margin:0;font-size:12px;line-height:18px;text-align:center;color:var(--secondary-text-color);pointer-events:none`;
+        }
       }
       _format(value, allowString = false, unit = this._hass?.config?.unit_system?.temperature || "°C") {
         if (allowString && typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value)) value = Number(value);
@@ -1338,7 +1393,7 @@ export function installHargassnerThermostatCard(environment = window) {
         this._ui.placeholder.hidden = true;
         this._refreshControlLease();
         this._renderCorrection(state);
-        Promise.resolve(this._native.updateComplete).then(() => this._refreshControlLease());
+        Promise.resolve(this._native.updateComplete).then(() => { this._refreshControlLease(); this._syncCardReadings(); });
       }
       _render() {
         if (!this.isConnected || !this._config || !this._hass) return;
@@ -1364,11 +1419,17 @@ export function installHargassnerThermostatCard(environment = window) {
           });
         }
         ui.title.textContent = this._config.name || state?.attributes?.friendly_name || this._config.entity;
+        ui.title.title = ui.title.textContent; ui.error.title = ui.error.textContent;
+        const roomAvailable = scoped && connected && !["unknown", "unavailable"].includes(state.state);
+        ui.current.textContent = `Ist: ${this._format(roomAvailable ? state.attributes.current_temperature : null)}`;
+        ui.current.hidden = false;
         ui.footer.hidden = !scoped;
-        ui.retry.hidden = !this._failed || !scoped;
+        ui.retry.hidden = !this._failed || !scoped || !!this._native;
         if (!scoped) {
+          ui.correction.textContent = ""; ui.correction.hidden = true;
+          ui.updateNote.textContent = ""; ui.updateNote.hidden = true;
           this._renderCorrection(state);
-          this._presentation.scope(state, this._hass?.config?.unit_system?.temperature); this._cancelNative(true); ui.placeholder.hidden = false;
+          this._presentation.scope(state, this._hass?.config?.unit_system?.temperature); this._cancelNative(true); this._syncCardReadings(); ui.placeholder.hidden = false;
           ui.placeholder.textContent = !state || ["unknown", "unavailable"].includes(state.state)
             ? "Heizkreis nicht verfügbar." : "Diese Entität ist kein unterstützter Hargassner-Heizkreis.";
           if (this._binding) {
@@ -1378,8 +1439,6 @@ export function installHargassnerThermostatCard(environment = window) {
           return;
         }
         const available = connected && !["unknown", "unavailable"].includes(state.state);
-        ui.current.textContent = `Ist: ${this._format(available ? state.attributes.current_temperature : null)}`;
-        ui.current.hidden = !available || !Number.isFinite(state.attributes.current_temperature);
         ui.correction.textContent = `Raumkorrektur: ${this._format(available ? state.attributes.Raumkorrektur : null, true, "°C")}`;
         ui.statusValue.textContent = operatingState(state, connected);
         if (customElements.get("ha-control-select-menu")) this._renderMenu(state);
