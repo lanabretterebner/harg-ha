@@ -1,33 +1,43 @@
 {
   "schema_version": 1,
-  "version": "1.4.1",
+  "version": "1.4.2",
   "supervisor_app_version": "1.4.0",
-  "prepared_at": "2026-10-15T01:08:35.668180+00:00",
+  "prepared_at": "2026-10-15T03:13:33.759747+00:00",
   "source_only": true,
   "hacs_installation_verified": false,
   "supervisor_app_installation_verified": false,
-  "frontend_source": "Exact disjoint baseline1.4 + independently reviewed card and popup candidates; native-component replay pending root",
-  "functional_composed_sha256": "4effb3228d581f8e4d9e40897f2ebeab43ac08a2bb30dd00d817330b1f0b48ab",
-  "version_only_promotion": true,
-  "ingress_source": "Every app subtree byte unchanged from published1.4.0; no rebuild or app update in this frontend release",
   "private_backend_included": false,
-  "package_tests_passed": 7,
-  "node_card_model_tests_passed": 356,
-  "node_popup_model_tests_passed": 319,
-  "browser_fixture_execution": "Not performed by this package owner; root owns combined real native/Lit validation",
-  "actual_installation": "Pending separate hosted release receipt; this source checkpoint does not claim installation",
   "physical_commands": 0,
-  "node_portable_tests": {
-    "card": {
-      "passed": 356,
-      "failed": 0,
-      "source_sha256": "f479d467c6ea5b4f520320f0f340d7488c1b693c075fbf142400b72fc599ce59"
+  "frontend_source_sha256": "bed63c1907f9d83688dee21e1d073ec66220e6a2a556ca9093f6da2b23c9d704",
+  "ingress_source": "Every app subtree byte unchanged from published1.4.0; no rebuild or app update required",
+  "package_tests_passed": 7,
+  "node_model_tests": [
+    {
+      "file": "test-optimistic-card.mjs",
+      "tests": 17,
+      "passed": 17,
+      "failed": 0
     },
-    "popup": {
-      "passed": 319,
-      "failed": 0,
-      "source_sha256": "f479d467c6ea5b4f520320f0f340d7488c1b693c075fbf142400b72fc599ce59"
+    {
+      "file": "test-optimistic-popup.mjs",
+      "tests": 305,
+      "passed": 305,
+      "failed": 0
+    },
+    {
+      "file": "test-optimistic-matrix.mjs",
+      "tests": 288,
+      "passed": 288,
+      "failed": 0
+    },
+    {
+      "file": "test-optimistic-authority.mjs",
+      "tests": 68,
+      "passed": 68,
+      "failed": 0
     }
-  },
-  "portable_default_module_resolution": "Both suites executed from unrelated working directory in package path containing spaces; no explicit module argument"
+  ],
+  "node_model_tests_passed": 678,
+  "browser_fixture_execution": "Not executed by this owner; root owns actual browser/native acceptance",
+  "coverage_migration": "tests/COVERAGE-MIGRATION.md explicitly replaces incompatible8s/remount assertions while retaining mode/authority and exact native-body coverage"
 }

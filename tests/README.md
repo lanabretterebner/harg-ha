@@ -1,12 +1,5 @@
-# Portable popup continuity source-model tests
+# Portable thermostat checks
 
-Copy this directory's contents into the public package `tests/` directory.
-Run `node tests/test-popup-continuity.mjs` from any working directory; the default
-module is resolved relative to the test as `../dist/hargassner-thermostat-popup.js`.
-An explicit module path can be supplied as the first argument.
+Run `npm test` from this repository. The advertised card/popup entrypoints execute the optimistic card, both-circuit six-mode matrix, authority/atomic-context, and popup suites. All source-model tests run without HA, browser, network or controller. The bundled official service/debounce bodies remain hash-checked; preserve their notices/license. See [coverage migration](COVERAGE-MIGRATION.md) for the replacement of1.4.1 expiry/remount assertions.
 
-The 319 scenarios match the original frozen source-model suite. The only harness
-changes are relative module lookup and loading locally bundled source-pinned
-native function bodies instead of absolute development source paths. No network,
-DOM library, browser, HA instance or controller is needed. This does not test real
-Lit rendering. Preserve the fixture notice and complete Apache license.
+Serve this repository and open `test-thermostat-popup.html` for browser custom-element/card/menu fixtures, and `test-device-groups.html` for grouping. Those use synthetic native handlers. Actual installed HA Lit rendering/API-context consumption needs separate real-native acceptance; a Node pass does not claim that result.

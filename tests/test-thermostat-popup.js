@@ -18,6 +18,7 @@ class Popup extends HTMLElement {
   constructor() {
     super(); this.attachShadow({ mode: "open" }); this.reverse = false;
     this.nativeLabel = "Preset";
+    this.hass={connected:true,connection:{connected:true},states:{},config:{unit_system:{temperature:"°C"}},callService:async()=>{throw Error("Unexpected parent service")}};
     this._formatters = { formatEntityAttributeName: () => this.nativeLabel };
     this._api = { callService: async (domain, service, data) => {
       serviceCalls++; serviceRequests.push({ domain, service, data: JSON.parse(JSON.stringify(data)) });
@@ -27,6 +28,7 @@ class Popup extends HTMLElement {
   connectedCallback() { this.render(); }
   render(replace = false) {
     if (!this.stateObj) return;
+    this.hass.states[this.stateObj.entity_id]=this.stateObj;
     let container = this.shadowRoot.querySelector("ha-more-info-control-select-container");
     if (!container || replace) {
       container = document.createElement("ha-more-info-control-select-container");
@@ -360,12 +362,12 @@ await test("separate native menu parents retain the native layout", async () => 
   const p = mount(); await settle(); const wrapper=document.createElement("div");
   p.shadowRoot.append(wrapper); wrapper.append(p.preset); await settle(); native(p);
 });
-await test("older installed resource is stopped before version 1.4.1 starts", async () => {
+await test("older installed resource is stopped before version 1.4.2 starts", async () => {
   controller.stop(); let stopped=0;
   const prior={version:"1.1.0",running:true,stop(){stopped++;this.running=false;}};
   window[Symbol.for("hargassner.thermostat.popup.v1")]=prior;
   controller=installHargassnerThermostatPopup(window); await controller.ready;
-  equal(stopped,1); equal(controller.version,"1.4.1");
+  equal(stopped,1); equal(controller.version,"1.4.2");
   const p=mount(); await settle(); patched(p);
 });
 
@@ -375,5 +377,5 @@ window.popupTestResults = { passed: results.every(result => result.passed), test
 document.querySelector("#results").textContent = JSON.stringify(window.popupTestResults, null, 2);
 
 await import("./test-thermostat-card.js");
-window.hargassnerFrontendTests = { type: "hargassner-frontend-tests", version: "1.4.1", popup: window.popupTestResults, card: window.cardTestResults };
+window.hargassnerFrontendTests = { type: "hargassner-frontend-tests", version: "1.4.2", popup: window.popupTestResults, card: window.cardTestResults };
 if (window.parent !== window) window.parent.postMessage(window.hargassnerFrontendTests, "*");

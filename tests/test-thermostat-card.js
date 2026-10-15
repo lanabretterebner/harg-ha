@@ -5,19 +5,24 @@ const PRESETS = ["Aus", "Auto", "Heizen", "Absenken", "1x Heizen", "1x Absenken"
 const BASIS = "a".repeat(32), OTHER = "b".repeat(32);
 const fixtures = document.querySelector("#fixtures");
 let requests = [], created = [], helperCalls = 0;
+class TemperatureControl extends HTMLElement {
+  constructor(){ super(); this._debouncedCallService=type=>{clearTimeout(this.timer);this.timer=setTimeout(()=>this._callService(type),1000)};this._debouncedCallService.cancel=()=>clearTimeout(this.timer); }
+  get _api(){return this.rawApi} set _api(value){this.rawApi=value}
+  get stateObj(){return this.value} set stateObj(value){this.value=value;this._targetTemperature={value:value.attributes.temperature}}
+  _callService(type){if(type==='value')return this._api.callService('climate','set_temperature',{entity_id:this.stateObj.entity_id,temperature:this._targetTemperature.value})}
+}
+customElements.define('ha-state-control-climate-temperature',TemperatureControl);
 class NativeThermostat extends HTMLElement {
-  constructor() { super(); this.attachShadow({ mode: "open" }); }
+  constructor() { super(); this.attachShadow({ mode: "open" });this.control=document.createElement('ha-state-control-climate-temperature');this.shadowRoot.append(this.control);this.updateComplete=Promise.resolve(); }
   setConfig(config) { this.config = config; }
-  set hass(value) { this._hass = value; this.shadowRoot.textContent = String(value.states[this.config.entity]?.attributes.temperature); }
+  set hass(value) { this._hass = value; this.control.stateObj=value.states[this.config.entity]; }
   get hass() { return this._hass; }
   connectedCallback() {
     const event = new Event("context-request", { bubbles: true, composed: true });
-    event.context = "hassApi"; event.callback = api => { this.api = api; };
+    event.context = "hassApi"; event.callback = api => { this.api = api;this.control._api=api; };
     this.dispatchEvent(event);
   }
-  syntheticTemperature(value) {
-    this.api.callService("climate", "set_temperature", { entity_id: this.config.entity, temperature: value });
-  }
+  syntheticTemperature(value) { this.control._targetTemperature={value};this.control._callService('value'); }
 }
 customElements.define("hui-thermostat-card", NativeThermostat);
 const helpers = { createCardElement(config) {
@@ -28,7 +33,7 @@ const state = (changes = {}, attrs = {}) => ({ entity_id: "climate.synthetic_one
   attributes: { friendly_name: "Heizkreis 1", hargassner_control_schema: "configured_room_setpoint_v1",
     hvac_modes: ["off", "heat", "auto"], supported_features: 385, preset_modes: ["none", ...PRESETS], preset_mode: "Auto",
     temperature: 19, min_temp: 16, max_temp: 22, target_temp_step: 0.5, current_temperature: null,
-    "Zieltemperatur verfügbar": true, Raumkorrektur: "0", "Heizkreisstatus": "Tag/Nacht Abschaltung",
+    "Zieltemperatur verfügbar": true, Sollwertbasis: BASIS, Sollwertphase:"night", Sollwertparameter:"5", Raumkorrektur: "0", "Heizkreisstatus": "Tag/Nacht Abschaltung",
     "Heizkreisstatus-Code": 4, "Heizkreisstatus verfügbar": true, ...attrs } });
 const hass = (value = state()) => ({ connected: true, connection: { connected: true }, states: { [value.entity_id]: value },
   config: { unit_system: { temperature: "°C" } }, locale: { language: "de" },
@@ -119,14 +124,14 @@ await test("raw Celsius room correction is not mislabeled in a Fahrenheit HA sys
   assert(card.shadowRoot.textContent.includes("Raumkorrektur: 0,5 °C"));
   equal(native(card).hass, h); equal(h.states["climate.synthetic_one"].attributes.temperature, 66.2); equal(requests, []);
 });
-await test("disconnected HA removes the interactive dial and blocks late selection", async () => {
+await test("disconnected HA retains an inert dial and blocks late selection", async () => {
   const card = mount(); await settle(); const old = menu(card), h = hass(); h.connected = false; card.hass = h; await settle();
-  equal(native(card), null); assert(menu(card).disabled); pick(old, "Heizen"); await settle(); equal(requests, []);
+  assert(native(card)?.inert); assert(menu(card).disabled); pick(old, "Heizen"); await settle(); equal(requests, []);
   assert(card.shadowRoot.textContent.includes("HeizkreisstatusNicht verfügbar"));
 });
 await test("unavailable climate blocks modes and hides old status", async () => {
   const card = mount(); await settle(); card.hass = hass(state({ state: "unavailable" })); await settle();
-  equal(native(card), null); assert(menu(card).disabled); pick(menu(card), "Heizen"); await settle(); equal(requests, []);
+  assert(native(card)?.inert); assert(menu(card).disabled); pick(menu(card), "Heizen"); await settle(); equal(requests, []);
   assert(card.shadowRoot.textContent.includes("HeizkreisstatusNicht verfügbar"));
 });
 await test("unmarked entities never receive a native temperature control or preset action", async () => {
@@ -189,105 +194,33 @@ await test("removing a card clears handlers and pending work without service cal
   const card = mount(); await settle(); const old = menu(card); card.remove(); pick(old, "Heizen"); await settle();
   equal(requests, []); equal(card.shadowRoot.children.length, 0);
 });
-const activeMode = preset => preset === "Auto" ? "auto" : preset === "Aus" ? "off" : "heat";
-const modeHass = (preset, attrs = {}, entity = "climate.synthetic_one") => hass(state({ entity_id: entity, state: activeMode(preset) },
-  { preset_mode: preset, Sollwertbasis: BASIS, "Zieltemperatur verfügbar": preset !== "Aus", ...attrs }));
-const v2 = (from, to, reason = "mode_report") => ({ id: "mode_operation", basis: BASIS, phase: "readback", version: 2,
-  reason, previousPreset: from, nextPreset: to });
-for (const entity of ["climate.synthetic_one", "climate.synthetic_two"]) for (const from of PRESETS) for (const to of PRESETS)
-await test(`V2 ${entity} ${from} → ${to} preserves only a confirmed active presentation`, async () => {
-  const card = mount(modeHass(from, {}, entity), { entity }); await settle(); const old = native(card), api = old?.api;
-  card.hass = modeHass(to, { temperature: null, "Zieltemperatur verfügbar": false, Sollwertbasis: null, Sollwertaktualisierung: v2(from, to) }, entity); await settle();
-  if (from !== "Aus" && to !== "Aus") {
-    equal(native(card), old); assert(old.inert); equal(menu(card).value, to); assert(menu(card).disabled);
-    equal(old.hass.states[entity].attributes.temperature, 19); equal(old.hass.states[entity].state, activeMode(to));
-    equal(old.hass.states[entity].attributes.preset_mode, to); equal(old.hass.states[entity].attributes["Zieltemperatur verfügbar"], false);
-  } else equal(native(card), null);
-  if (api) await api.callService("climate", "set_temperature", { entity_id: entity, temperature: 21 }); equal(requests, []);
-  card.hass = modeHass(to, { Sollwertbasis: OTHER, temperature: 20 }, entity); await settle();
-  if (to === "Aus") equal(native(card), null); else {
-    assert(native(card)); assert(!native(card).inert); if (old) assert(native(card) !== old);
-    equal(native(card).hass.states[entity].attributes.temperature, 20);
-  }
-  if (api) await api.callService("climate", "set_temperature", { entity_id: entity, temperature: 21 }); equal(requests, []);
+const activeMode=p=>p==='Aus'?'off':p==='Auto'?'auto':'heat';
+const modeHass=(preset,attrs={},entity='climate.synthetic_one')=>hass(state({entity_id:entity,state:activeMode(preset)},{preset_mode:preset,'Zieltemperatur verfügbar':preset!=='Aus',temperature:preset==='Aus'?null:19,...attrs}));
+for(const entity of['climate.synthetic_one','climate.synthetic_two'])for(const from of PRESETS)for(const to of PRESETS)
+await test(`stable native ${entity} ${from} → ${to}, no stale API`,async()=>{
+ const card=mount(modeHass(from,{},entity),{entity});await settle();const old=native(card),api=old?.control._api;
+ card.hass=modeHass(to,{temperature:null,'Zieltemperatur verfügbar':false,Sollwertbasis:null},entity);await settle();
+ if(old){equal(native(card),old);assert(old.inert);if(to!=='Aus')equal(old.control.stateObj.attributes.temperature,19);}
+ assert(!menu(card).disabled,'Independently available modes must remain usable');
+ if(api)await api.callService('climate','set_temperature',{entity_id:entity,temperature:19.5});equal(requests,[]);
+ card.hass=modeHass(to,{temperature:to==='Aus'?null:20,Sollwertbasis:OTHER},entity);await settle();
+ if(to!=='Aus'){assert(native(card));if(old)equal(native(card),old);assert(!native(card).inert);equal(native(card).control.stateObj.attributes.temperature,20)}else if(old){equal(native(card),old);equal(old.control.stateObj.state,'off')}
+ if(api)await api.callService('climate','set_temperature',{entity_id:entity,temperature:19.5});equal(requests,[]);
 });
-await test("V2 superseding modes and known input/phase changes keep one fixed display epoch", async () => {
-  const card = mount(modeHass("Auto")); await settle(); const old = native(card);
-  for (const [next, reason] of [["Heizen", "mode_report"], ["Absenken", "mode_report"], ["1x Heizen", "parameter_report"], ["1x Absenken", "phase_report"], ["Auto", "pending_change"]]) {
-    card.hass = modeHass(next, { temperature: null, "Zieltemperatur verfügbar": false, Sollwertbasis: null, Sollwertaktualisierung: v2("Auto", next, reason) }); await settle();
-    equal(native(card), old); assert(old.inert); equal(menu(card).value, next); equal(old.hass.states["climate.synthetic_one"].attributes.temperature, 19);
-  }
-  equal(requests, []);
+for(const kind of['basis','mode','target','min','max','step','unit','capabilities'])
+await test(`atomic qualified ${kind} change keeps native and retires old API`,async()=>{
+ const card=mount();await settle();const old=native(card),node=old.control,api=node._api,h=modeHass('Auto'),a=h.states.climate;
+ const attrs=h.states['climate.synthetic_one'].attributes;
+ if(kind==='basis')attrs.Sollwertbasis=OTHER;if(kind==='mode'){h.states['climate.synthetic_one'].state='heat';attrs.preset_mode='Heizen';attrs.temperature=22}
+ if(kind==='target')attrs.temperature=20;if(kind==='min')attrs.min_temp=15;if(kind==='max')attrs.max_temp=23;if(kind==='step')attrs.target_temp_step=1;
+ if(kind==='unit')h.config.unit_system.temperature='°F';if(kind==='capabilities')attrs.supported_features=387;
+ card.hass=h;await settle();equal(native(card),old);equal(old.control,node);await api.callService('climate','set_temperature',{entity_id:'climate.synthetic_one',temperature:19.5});equal(requests,[]);
 });
-await test("V2 proof cannot invent a source mode, next mode, reason or version", async () => {
-  for (const patch of [{ previousPreset: "Heizen" }, { nextPreset: "Heizen" }, { previousPreset: "Aus" },
-    { reason: "anything" }, { version: 3 }, { extra: true }, { nextPreset: "unknown" }]) {
-    const card = mount(modeHass("Auto")); await settle();
-    card.hass = modeHass("Absenken", { temperature: null, "Zieltemperatur verfügbar": false, Sollwertaktualisierung: { ...v2("Auto", "Absenken"), ...patch } }); await settle();
-    equal(native(card), null); card.remove();
-  }
+await test('draft survives old report and no native node is replaced',async()=>{
+ const h=hass(),card=mount(h);await settle();const old=native(card),node=old.control;old.syntheticTemperature(19.5);await settle();
+ equal(node.stateObj.attributes.temperature,19.5);card.hass=h;await settle();equal(node.stateObj.attributes.temperature,19.5);equal(native(card),old);equal(requests.length,1);
+ card.hass=modeHass('Auto',{temperature:null,'Zieltemperatur verfügbar':false});await settle();equal(native(card),old);equal(node.stateObj.attributes.temperature,19.5);assert(old.inert);
 });
-await test("V2 mismatched HVAC projection fails closed despite apparently valid mode labels", async () => {
-  const card = mount(modeHass("Auto")); await settle(); const h = modeHass("Heizen", { temperature: null, "Zieltemperatur verfügbar": false, Sollwertaktualisierung: v2("Auto", "Heizen") });
-  h.states["climate.synthetic_one"].state = "auto"; card.hass = h; await settle(); equal(native(card), null);
-});
-await test("V2 latest measured/status/correction data stays truthful beside the historical target", async () => {
-  const card = mount(modeHass("Auto")); await settle();
-  card.hass = modeHass("Heizen", { temperature: null, "Zieltemperatur verfügbar": false, current_temperature: 22,
-    Raumkorrektur: "0.5", "Heizkreisstatus": "Heizen", Sollwertaktualisierung: v2("Auto", "Heizen") }); await settle();
-  const shown = native(card).hass.states["climate.synthetic_one"].attributes;
-  equal(shown.temperature, 19); equal(shown.current_temperature, 22); equal(shown.Raumkorrektur, "0.5");
-  assert(card.shadowRoot.textContent.includes("Ist-Temperatur: 22 °C")); assert(card.shadowRoot.textContent.includes("HeizkreisstatusHeizen")); equal(requests, []);
-});
-await test("unit changes during an otherwise marked reconciliation cannot reinterpret an old target", async () => {
-  const card = mount(modeHass("Auto")); await settle(); const h = modeHass("Heizen", { temperature: null,
-    "Zieltemperatur verfügbar": false, Sollwertaktualisierung: v2("Auto", "Heizen") });
-  h.config.unit_system.temperature = "°F"; card.hass = h; await settle(); equal(native(card), null);
-});
-await test("V2 readback repeats and superseding reason do not renew the eight-second visual deadline", async () => {
-  const card = mount(modeHass("Auto")); await settle(); const set = window.setTimeout, clear = window.clearTimeout; let callback, scheduled = 0;
-  window.setTimeout = (fn, delay, ...args) => delay === 8000 ? (scheduled++, callback = fn, -701) : set(fn, delay, ...args);
-  window.clearTimeout = value => { if (value !== -701) clear(value); };
-  try {
-    for (const next of ["Heizen", "Absenken", "Auto"]) {
-      card.hass = modeHass(next, { temperature: null, "Zieltemperatur verfügbar": false, Sollwertaktualisierung: v2("Auto", next) }); await settle();
-    }
-    equal(scheduled, 1); callback(); await settle(); equal(native(card), null);
-  } finally { window.setTimeout = set; window.clearTimeout = clear; }
-});
-await test("V2 native handle capability survives only inside the inert historical projection", async () => {
-  const card = mount(modeHass("Auto", { supported_features: 3 })); await settle(); const h = modeHass("Heizen", {
-    supported_features: 128, temperature: null, "Zieltemperatur verfügbar": false,
-    Sollwertaktualisierung: v2("Auto", "Heizen") }); card.hass = h; await settle();
-  const shown = native(card).hass.states["climate.synthetic_one"].attributes;
-  equal(shown.supported_features, 129); equal(h.states["climate.synthetic_one"].attributes.supported_features, 128);
-  equal(h.states["climate.synthetic_one"].attributes.temperature, null); assert(native(card).inert); equal(requests, []);
-});
-for (const kind of ["basis", "mode", "target", "min", "max", "step", "unit", "capabilities"])
-await test(`atomic qualified ${kind} change replaces native without a null-target stage`, async () => {
-  const card = mount(modeHass("Auto")); await settle(); const old = native(card), api = old.api;
-  assert(api); const h = modeHass("Auto"); const a = h.states["climate.synthetic_one"].attributes;
-  if (kind === "basis") a.Sollwertbasis = OTHER;
-  if (kind === "mode") { h.states["climate.synthetic_one"].state = "heat"; a.preset_mode = "Heizen"; a.temperature = 22; }
-  if (kind === "target") a.temperature = 20;
-  if (kind === "min") a.min_temp = 15; if (kind === "max") a.max_temp = 23;
-  if (kind === "step") a.target_temp_step = 1;
-  if (kind === "unit") h.config.unit_system.temperature = "°F";
-  if (kind === "capabilities") a.supported_features = 387;
-  card.hass = h;
-  assert(native(card) && native(card) !== old); assert(!native(card).inert);
-  equal(native(card).hass, h); equal(card.shadowRoot.querySelector(".placeholder").hidden, true);
-  await api.callService("climate", "set_temperature", { entity_id: "climate.synthetic_one", temperature: 19.5 }); equal(requests, []);
-  card.hass = modeHass("Auto"); await settle();
-  await api.callService("climate", "set_temperature", { entity_id: "climate.synthetic_one", temperature: 19.5 }); equal(requests, []);
-});
-await test("measurement/status heartbeats keep the current native control and its scoped API", async () => {
-  const card = mount(modeHass("Auto")); await settle(); const old = native(card), api = old.api;
-  card.hass = modeHass("Auto", { current_temperature: 21, "Heizkreisstatus": "Heizen", Raumkorrektur: "0.5" });
-  equal(native(card), old); await api.callService("climate", "set_temperature", { entity_id: "climate.synthetic_one", temperature: 19.5 });
-  equal(requests.length, 1);
-});
-fixtures.replaceChildren(); delete window.loadCardHelpers;
-window.cardTestResults = { passed: results.every(x => x.passed), tests: results.length, results,
-  scope: "Real browser custom elements and lifecycle; synthetic native-card/helper/service handlers, no HA connections." };
-document.querySelector("#results").textContent += "\n" + JSON.stringify(window.cardTestResults, null, 2);
+fixtures.replaceChildren();delete window.loadCardHelpers;
+window.cardTestResults={passed:results.every(x=>x.passed),tests:results.length,results,scope:'Real browser custom elements/lifecycle with synthetic native/control/helper/service handlers; no HA connection.'};
+document.querySelector('#results').textContent+='\n'+JSON.stringify(window.cardTestResults,null,2);

@@ -45,22 +45,12 @@ changing HA's `off`/`heat`/`auto` domain state. Its displayed target, measured r
 temperature and correction are separate values. Frontend device-page grouping
 also leaves one existing MQTT device and all registry/discovery identities intact.
 
-## Bounded presentation reconciliation
+## Requested-target presentation
 
-`Sollwertbasis` identifies a fresh confirmed target context. During a qualified
-known change the backend can expose `Sollwertaktualisierung` with exactly
-`id`, `basis`, `phase`, `version: 2`, `reason`, `previousPreset`, `nextPreset`.
-Reasons are `mode_report`, `parameter_report`, `phase_report`, `pending_change`;
-phase is `pending` or `readback`. The old basis/preset identify the previous
-confirmed snapshot. `nextPreset` is the current reported preset, never a
-prediction of a requested mode. Legacy exact `id`, `basis`, `phase` markers
-remain valid only when the reported mode/preset is unchanged.
+`Sollwertbasis` identifies the currently qualified configured target context. The backend remains the only command authority. Legacy `Sollwertaktualisierung` markers are display hints; they never authorize a temperature command.
 
-Frontend1.4.1 keeps that old target only as a private inert presentation with an
-update note for one fixed eight-second window. It does not publish a target,
-change HA states, or enable a command. Repeated reports do not renew the window.
-Off, offline, unknown state, lost context and absent proof clear it. A fresh
-confirmed target replaces the native control and permanently retires callbacks
-from the old basis; room/status heartbeats leave a current control intact.
-The separately installed backend remains responsible for validating fresh
-reports, source identity and command eligibility.
+Frontend1.4.2 also understands additive `Temperaturauftrag` schemaVersion1: controller-unit `temperatureUnit: °C`, opaque `context`, monotonic operation `sequence` and full-envelope `revision`, bounded last8 `records`, plus same-snapshot `confirmedTarget`, `confirmedBasis` and `confirmedPreset` echoes. A record contains its sequence, original basis/requested target, status (`pending`, `confirmed`, `rejected`, `sent_unconfirmed`), safe reason/origin and timestamps. A confirmed correction record alone is insufficient: the displayed actual target/basis/preset must match the coherent echoes before settling. HA Fahrenheit display converts the Celsius metadata explicitly.
+
+The client captures a local draft before native debounce, keeps it pending/uncertain without automatic retry, and rejects stale snapshots/outcomes. An older rejected request cannot undo newer input. Memory-only intent is scoped to the authenticated HA connection/user/entity; nothing changes shared HA states or persists an intent. Native card/control nodes remain mounted while callback/API leases rotate. Only bound definitive rejection allows rollback. Fresh genuine mode/base/day-night changes remain truthful; no cached target grants permission.
+
+During a source/readback gap, the last confirmed number remains a labelled inert private projection. The previous eight-second unmount is removed. Actual Off stays Off; offline/unqualified targets cannot send. The independently available six-mode path is not disabled by uncertain temperature presentation. Missing initial confirmed bounds never invents a dial range.

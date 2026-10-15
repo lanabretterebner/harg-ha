@@ -1,10 +1,10 @@
-/* Hargassner thermostat popup and dashboard card, v1.4.0.
+/* Hargassner thermostat popup and dashboard card, v1.4.2.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
- * existing preset handler. No data fetch, temperature command or mode guess.
+ * existing preset handler. Temperature gestures use guarded native climate.set_temperature only.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.1";
+const VERSION = "1.4.2";
 const SCHEMA = "configured_room_setpoint_v1";
 const PRESETS = Object.freeze(["Aus", "Auto", "Heizen", "Absenken", "1x Heizen", "1x Absenken"]);
 // Original SVG paths from @mdi/js 7.4.47, icon data Apache-2.0.
@@ -117,178 +117,83 @@ export function installHargassnerThermostatPopup(environment = window) {
       a.temperature, a.min_temp, a.max_temp, a.target_temp_step, a.supported_features,
       popupHass(host)?.config?.unit_system?.temperature]);
   }
-  function targetCurrent(record, epoch) {
+  function targetCurrent(record) {
     const state = record.host.stateObj;
     return running && !record.closed && targetRecords.get(record.host) === record &&
-      record.epoch === epoch && !record.held && record.host.isConnected && record.node.isConnected &&
+      record.host.isConnected && record.node.isConnected && popupConnected(record.host) && popupTarget(state) && record.presentation.allows(state) &&
       record.host.shadowRoot?.querySelectorAll("ha-state-control-climate-temperature").length === 1 &&
-      record.host.shadowRoot.querySelector("ha-state-control-climate-temperature") === record.node &&
-      state?.entity_id === record.entity && popupConnected(record.host) && popupTarget(state) &&
-      record.qualifiedContext === popupContext(state, record.host);
-  }
-  function rotateTarget(record) {
-    record.originalDebounce.cancel();
-    const epoch = ++record.epoch;
-    record.apiCache = null;
-    record.callWrapper = function (value) {
-      if (this !== record.node || !targetCurrent(record, epoch)) return;
-      const ticket = value && typeof value === "object" ? record.tickets.get(value) : null;
-      if (ticket && ticket.epoch !== epoch) return;
-      if (typeof value !== "string" && !ticket) return;
-      return record.originalCall.call(this, ticket ? ticket.value : value);
-    };
-    record.debounceWrapper = function (value) {
-      if (!targetCurrent(record, epoch) || typeof value !== "string") return;
-      const ticket = {};
-      record.tickets.set(ticket, { value, epoch });
-      record.originalDebounce(ticket);
-    };
-    record.debounceWrapper.cancel = () => record.originalDebounce.cancel();
-    Object.defineProperty(record.node, "_callService", { configurable: true, writable: true, value: record.callWrapper });
-    Object.defineProperty(record.node, "_debouncedCallService", { configurable: true, writable: true, value: record.debounceWrapper });
-  }
-  function ownsTarget(record) {
-    const own = Object.getOwnPropertyDescriptor(record.node, "_api");
-    return own?.get === record.apiGet && own?.set === record.apiSet &&
-      record.node._callService === record.callWrapper && record.node._debouncedCallService === record.debounceWrapper;
+      record.host.shadowRoot.querySelector("ha-state-control-climate-temperature") === record.node;
   }
   function clearTarget(host) {
-    const record = targetRecords.get(host);
-    if (!record) return;
-    record.closed = true; record.epoch++; record.originalDebounce.cancel();
-    environment.clearTimeout(record.timer); environment.clearTimeout(record.poll);
-    record.observer.disconnect(); record.note?.remove();
-    if (record.held) {
-      record.node.inert = record.inert;
-      if (record.aria === null) record.node.removeAttribute("aria-disabled");
-      else record.node.setAttribute("aria-disabled", record.aria);
-    }
-    for (const [key, value] of [["_api", record.apiGet], ["_callService", record.callWrapper], ["_debouncedCallService", record.debounceWrapper]]) {
-      const own = Object.getOwnPropertyDescriptor(record.node, key);
-      if ((key === "_api" ? own?.get : own?.value) !== value) continue;
-      const original = record.originals[key];
-      if (key === "_callService") {
-        // A cancelled debounce may already have queued a callback. Its opaque
-        // ticket must never become a native string target after disposal.
-        // This tiny shim retains no popup/state reference; normal native
-        // string targets keep the original method and API behavior.
-        const call = record.originalCall;
-        const shim = function (type) { if (typeof type === "string") return call.call(this, type); };
-        targetCallShims.set(shim, call);
-        Object.defineProperty(record.node, key, { configurable: true, writable: true,
-          enumerable: original?.enumerable ?? false, value: shim });
-      } else if (original) Object.defineProperty(record.node, key, original);
-      else delete record.node[key];
-    }
-    // Parent Lit still owns this exact child and continues its normal updates.
+    const record = targetRecords.get(host); if (!record) return;
+    record.closed = true; record.lease?.dispose(); record.unsubscribe?.(); record.observer.disconnect(); record.note?.remove();
+    record.node.inert = record.inert; if (record.node.style.opacity === "0.6" || record.node.style.opacity === record.opacity) record.node.style.opacity = record.opacity;
+    if (record.aria === null) record.node.removeAttribute("aria-disabled"); else record.node.setAttribute("aria-disabled", record.aria);
     if (host.stateObj && record.node.isConnected) record.node.stateObj = host.stateObj;
     targetRecords.delete(host);
   }
+  function applyTargetPresentation(record) {
+    const state = record.host.stateObj, hass = popupHass(record.host), unit = hass?.config?.unit_system?.temperature;
+    record.presentation.observe(state, unit, popupConnected(record.host));
+    const view = record.presentation.display(state, popupConnected(record.host));
+    record.held = view.inert ? { id: "presentation_only" } : null;
+    if (record.node.stateObj !== view.state) record.node.stateObj = view.state;
+    record.node.inert = view.inert; record.node.style.opacity = view.inert ? "0.6" : record.opacity;
+    if (view.inert) record.node.setAttribute("aria-disabled", "true");
+    else if (record.aria === null) record.node.removeAttribute("aria-disabled"); else record.node.setAttribute("aria-disabled", record.aria);
+    record.note.textContent = view.note;
+    if (view.note) { if (record.note.parentNode !== record.node.parentNode) record.node.insertAdjacentElement("afterend", record.note); }
+    else record.note.remove();
+    observe(record);
+  }
   function makeTargetRecord(host, node, state) {
-    const api = descriptor(node, "_api"), debounced = node._debouncedCallService;
-    if (!popupConnected(host) || !api?.get || !api.set || api.configurable === false ||
-        typeof node._callService !== "function" || typeof debounced !== "function" ||
-        typeof debounced.cancel !== "function" || !Object.isExtensible(node) ||
-        typeof node._api?.callService !== "function" ||
-        ["_api", "_callService", "_debouncedCallService"].some(key => Object.getOwnPropertyDescriptor(node, key)?.configurable === false)) return null;
-    const record = { host, node, entity: state.entity_id, epoch: 0, closed: false, held: null, previous: null, initial: true,
-      originalCall: targetCallShims.get(node._callService) || node._callService, originalDebounce: debounced, tickets: new WeakMap(),
-      originals: Object.fromEntries(["_api", "_callService", "_debouncedCallService"].map(key => [key, Object.getOwnPropertyDescriptor(node, key)])),
+    const hass = popupHass(host), presentation = sharedTargetPresentation(hass, state);
+    presentation.observe(state, hass?.config?.unit_system?.temperature, popupConnected(host));
+    const record = { host, node, entity: state.entity_id, closed: false, held: null, presentation,
+      unit: hass?.config?.unit_system?.temperature, context: popupContext(state, host), inert: node.inert, opacity: node.style.opacity || "", aria: node.getAttribute("aria-disabled"),
       observer: new MutationObserver(() => schedule(host)) };
-    record.apiGet = function () {
-      const raw = api.get.call(this), epoch = record.epoch;
-      if (!raw || typeof raw.callService !== "function") return raw;
-      if (record.apiCache?.raw === raw && record.apiCache.epoch === epoch) return record.apiCache.proxy;
-      const guarded = (...args) => {
-        const state = host.stateObj, temperature = args[2]?.temperature;
-        if (!targetCurrent(record, epoch) || api.get.call(node) !== raw ||
-            args[0] !== "climate" || args[1] !== "set_temperature" || args[2]?.entity_id !== record.entity ||
-            !Number.isFinite(temperature) || temperature < state.attributes.min_temp || temperature > state.attributes.max_temp) return Promise.resolve();
-        return raw.callService(...args);
-      };
-      const proxy = new Proxy(raw, { get: (value, key) => key === "callService" ? guarded :
-        typeof value[key] === "function" ? value[key].bind(value) : value[key] });
-      record.apiCache = { raw, epoch, proxy }; return proxy;
-    };
-    record.apiSet = function (value) { api.set.call(this, value); record.apiCache = null; };
-    try {
-      targetRecords.set(host, record);
-      Object.defineProperty(node, "_api", { configurable: true, get: record.apiGet, set: record.apiSet });
-      rotateTarget(record); observe(record);
-      return record;
-    } catch { clearTarget(host); return null; }
+    record.note = document.createElement("div"); record.note.dataset.hargassnerTargetUpdate = VERSION;
+    record.note.setAttribute("role", "status"); record.note.setAttribute("aria-live", "polite");
+    record.note.style.cssText = "text-align:center;color:var(--secondary-text-color);margin:8px 0;";
+    targetRecords.set(host, record);
+    record.lease = temperatureLease(node, {
+      current: () => targetCurrent(record), context: () => popupContext(host.stateObj, host),
+      allowed: data => data?.entity_id === record.entity && Number.isFinite(data.temperature) &&
+        popupTarget(host.stateObj) && data.temperature >= host.stateObj.attributes.min_temp && data.temperature <= host.stateObj.attributes.max_temp,
+      prepare: (target, submitted) => {
+        if (!targetCurrent(record)) return null;
+        const current = host.stateObj; let intent = presentation.intent;
+        if (!submitted || !intent || intent.target !== target || intent.basis !== current.attributes.Sollwertbasis)
+          intent = presentation.begin(current, record.unit, target);
+        if (submitted && intent) { intent.status = "pending"; intent.submitted = true; }
+        applyTargetPresentation(record); return intent;
+      },
+      intentCurrent: intent => !intent || presentation.intent === intent,
+      rejected: intent => { presentation.reject(intent); if (!record.closed) applyTargetPresentation(record); },
+      setTimeout: environment.setTimeout.bind(environment), clearTimeout: environment.clearTimeout.bind(environment),
+    });
+    if (!record.lease) { clearTarget(host); return null; }
+    record.unsubscribe = presentation.subscribe(() => {
+      if (!record.closed && record.unit === popupHass(host)?.config?.unit_system?.temperature) schedule(host);
+    });
+    return record;
   }
   function reconcileTarget(host) {
     const state = host.stateObj, children = host.shadowRoot?.querySelectorAll("ha-state-control-climate-temperature");
     let record = targetRecords.get(host);
-    if (!host.isConnected || !eligible(host) || !popupConnected(host) || !popupMode(state) || children?.length !== 1 ||
+    if (!host.isConnected || !eligible(host) || children?.length !== 1 ||
         children[0].parentElement?.classList.contains("controls") !== true) { clearTarget(host); return; }
-    const node = children[0];
-    if (record && (record.node !== node || record.entity !== state.entity_id || !ownsTarget(record))) {
+    const node = children[0], unit = popupHass(host)?.config?.unit_system?.temperature;
+    if (record && (record.node !== node || record.entity !== state.entity_id || record.unit !== unit)) {
       clearTarget(host); record = null;
     }
-    if (!record) {
-      if (!popupTarget(state)) return;
-      record = makeTargetRecord(host, node, state);
-      if (!record) return;
+    if (!record) { record = makeTargetRecord(host, node, state); if (!record) return; }
+    const context = popupContext(state, host);
+    if (context !== record.context) {
+      if (record.presentation.intent && !record.presentation.intent.submitted) record.presentation.reject(record.presentation.intent);
+      record.context = context; record.lease.rotate(context);
     }
-    if (popupTarget(state)) {
-      const context = popupContext(state, host);
-      const changed = record.qualifiedContext !== undefined && record.qualifiedContext !== context;
-      if (record.held) {
-        environment.clearTimeout(record.timer); environment.clearTimeout(record.poll);
-        record.node.inert = record.inert;
-        if (record.aria === null) record.node.removeAttribute("aria-disabled");
-        else record.node.setAttribute("aria-disabled", record.aria);
-        record.held = null; record.note?.remove(); rotateTarget(record);
-      } else if (changed) rotateTarget(record);
-      record.qualifiedContext = context;
-      const basis = state.attributes.Sollwertbasis;
-      record.previous = typeof basis === "string" && /^[a-f0-9]{32}$/.test(basis)
-        ? { basis, unit: popupHass(host)?.config?.unit_system?.temperature,
-          state: { ...state, attributes: { ...state.attributes } } } : null;
-      if (record.initial) {
-        node.stateObj = { ...state, attributes: { ...state.attributes } }; record.initial = false;
-      } else if (node.stateObj !== state) node.stateObj = state;
-      observe(record); return;
-    }
-    const previous = record.previous, marker = previous && popupMarker(state, previous);
-    if (!previous || previous.unit !== popupHass(host)?.config?.unit_system?.temperature ||
-        state.attributes["Zieltemperatur verfügbar"] !== false || !marker ||
-        !Number.isSafeInteger(state.attributes.supported_features) || state.attributes.supported_features < 0 ||
-        record.held && record.held.id !== marker.id) { clearTarget(host); return; }
-    if (!record.held) {
-      record.held = { id: marker.id, actual: null, display: null }; record.inert = node.inert; record.aria = node.getAttribute("aria-disabled");
-      rotateTarget(record);
-      const held = record.held;
-      record.timer = environment.setTimeout(() => {
-        if (targetRecords.get(host) === record && record.held === held) { clearTarget(host); schedule(host); }
-      }, 8000);
-      const poll = () => {
-        if (targetRecords.get(host) !== record || record.held !== held) return;
-        if (!popupConnected(host)) { clearTarget(host); schedule(host); return; }
-        record.poll = environment.setTimeout(poll, 250);
-      };
-      record.poll = environment.setTimeout(poll, 250);
-      record.note = document.createElement("div"); record.note.dataset.hargassnerTargetUpdate = VERSION;
-      record.note.setAttribute("role", "status"); record.note.setAttribute("aria-live", "polite");
-      record.note.textContent = "Wird aktualisiert · letzter bestätigter Sollwert";
-      record.note.style.cssText = "text-align:center;color:var(--secondary-text-color);margin:8px 0;";
-    }
-    // Keep reported mode/status current; only this inert native child's target
-    // presentation gets the last confirmed numeric fields and feature bit.
-    if (record.held.actual !== state) {
-      const frozen = { ...state.attributes };
-      for (const key of ["temperature", "min_temp", "max_temp", "target_temp_step"])
-        frozen[key] = previous.state.attributes[key];
-      frozen.supported_features = state.attributes.supported_features | (previous.state.attributes.supported_features & 1);
-      record.held.actual = state; record.held.display = { ...state, attributes: frozen };
-    }
-    if (node.stateObj !== record.held.display) node.stateObj = record.held.display;
-    if (!node.inert) node.inert = true;
-    if (node.getAttribute("aria-disabled") !== "true") node.setAttribute("aria-disabled", "true");
-    if (record.note.parentNode !== node.parentNode) node.insertAdjacentElement("afterend", record.note);
-    observe(record);
+    applyTargetPresentation(record);
   }
 
   function restore(record) {
@@ -426,6 +331,8 @@ export function installHargassnerThermostatPopup(environment = window) {
         const current = eligible(host);
         if (records.get(host) !== record || !current || record.entity !== current.state.entity_id ||
             !modus.isConnected || modus.disabled || selected === current.attributes.preset_mode) return;
+        const target = targetRecords.get(host);
+        if (target) { target.presentation.intent = null; target.presentation.notify(); }
         // HA's existing listener performs climate.set_preset_mode and its
         // ordinary resync/error behavior. The HVAC and temperature paths are
         // untouched. Do not optimistically replace the reported current value.
@@ -442,7 +349,7 @@ export function installHargassnerThermostatPopup(environment = window) {
         menu.style.setProperty("display", "none", "important");
     }
     if (record.modus.value !== context.attributes.preset_mode) record.modus.value = context.attributes.preset_mode;
-    const disabled = !!(hvac.disabled || preset.disabled || context.state.state === "unavailable" || targetRecords.get(host)?.held);
+    const disabled = !!(hvac.disabled || preset.disabled || !HVAC.includes(context.state.state) || !popupConnected(host));
     if (record.modus.disabled !== disabled) record.modus.disabled = disabled;
     observe(record);
   }
@@ -515,12 +422,257 @@ function operatingState(state, connected = true) {
 function validTarget(state) {
   const a = state?.attributes;
   return scopedClimate(state) && ["auto", "heat"].includes(state.state) &&
+    PRESETS.slice(1).includes(a.preset_mode) && state.state === (a.preset_mode === "Auto" ? "auto" : "heat") &&
     sameValues(a.hvac_modes, HVAC) &&
     a["Zieltemperatur verfügbar"] === true &&
     Number.isSafeInteger(a.supported_features) && (a.supported_features & 1) === 1 &&
     [a.temperature, a.min_temp, a.max_temp, a.target_temp_step].every(Number.isFinite) &&
     a.target_temp_step > 0 && a.max_temp > a.min_temp &&
     a.temperature >= a.min_temp && a.temperature <= a.max_temp;
+}
+
+/** Per-surface requested-value presentation. Never grants command authority. */
+export class HargassnerTargetPresentation {
+  constructor() { this.listeners = new Set(); this.retiredContexts = new Set(); this.reset(); }
+  subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); }
+  notify() {
+    if (this.notifying) return; this.notifying = true;
+    queueMicrotask(() => { this.notifying = false; for (const listener of [...this.listeners]) listener(); });
+  }
+  reset() { this.confirmed = null; this.intent = null; this.context = null; this.sequence = 0; this.revision = -1; this.serial = 0; this.entity = null; this.unit = null; this.failure = false; this.retiredContexts?.clear(); this.seenStates = new WeakSet(); this.actual = null; }
+  envelope(state) {
+    const value = state?.attributes?.Temperaturauftrag;
+    if (!value || typeof value !== "object" || value.schemaVersion !== 1 ||
+        typeof value.context !== "string" || !/^[a-f0-9]{32}$/.test(value.context) ||
+        !Number.isSafeInteger(value.sequence) || value.sequence < 0 || !Number.isSafeInteger(value.revision) || value.revision < 0 || !Array.isArray(value.records) || value.records.length > 8) return null;
+    if (value.temperatureUnit !== "°C" || !["°C", "°F"].includes(this.unit)) return null;
+    const records = [];
+    for (const row of value.records) {
+      if (!row || typeof row !== "object" || !Number.isSafeInteger(row.sequence) || row.sequence < 1 || row.sequence > value.sequence ||
+          typeof row.basis !== "string" || !/^[a-f0-9]{32}$/.test(row.basis) || !Number.isFinite(row.target) ||
+          !["pending", "confirmed", "rejected", "sent_unconfirmed"].includes(row.status)) return null;
+      records.push({ ...row, target: this.unit === "°F" ? Math.round((row.target * 9 / 5 + 32) * 1e8) / 1e8 : row.target });
+    }
+    if (new Set(records.map(row => row.sequence)).size !== records.length) return null;
+    return { context: value.context, sequence: value.sequence, revision: value.revision, records: records.sort((a, b) => a.sequence - b.sequence) };
+  }
+  scope(state, unit) {
+    if (this.entity !== state?.entity_id || this.unit !== unit || !scopedClimate(state)) {
+      this.reset(); this.entity = state?.entity_id; this.unit = unit;
+    }
+  }
+  coherent(state, unit = this.unit) {
+    const echo = state?.attributes?.Temperaturauftrag;
+    if (echo === undefined || echo === null) return true; // Exact old backend.
+    if (!this.envelope(state)) return false;
+    return echo.temperatureUnit === "°C" && Number.isFinite(echo.confirmedTarget) &&
+      Math.abs(state.attributes.temperature - (unit === "°F" ? echo.confirmedTarget * 1.8 + 32 : echo.confirmedTarget)) < 1e-7 &&
+      echo.confirmedBasis === state.attributes.Sollwertbasis && echo.confirmedPreset === state.attributes.preset_mode;
+  }
+  allows(state, unit = this.unit) {
+    const envelope = this.envelope(state);
+    return !(this.seenStates.has(state) && this.actual !== state) && !(envelope && (this.retiredContexts.has(envelope.context) ||
+      this.context !== null && envelope.context !== this.context ||
+      envelope.context === this.context && envelope.revision < this.revision)) && this.coherent(state, unit);
+  }
+  configuration(state, unit) {
+    const a = state?.attributes || {}, correction = Number(a.Raumkorrektur);
+    const base = Number.isFinite(a.temperature) && a.Raumkorrektur != null && Number.isFinite(correction)
+      ? Math.round((a.temperature - correction * (unit === "°F" ? 1.8 : 1)) * 1e8) / 1e8 : null;
+    return JSON.stringify([state?.state, a.preset_mode, a.Sollwertphase, a.Sollwertparameter, base]);
+  }
+  begin(state, unit, target) {
+    this.scope(state, unit);
+    if (!validTarget(state) || !this.allows(state, unit) || !Number.isFinite(target) || target < state.attributes.min_temp || target > state.attributes.max_temp) return null;
+    const envelope = this.envelope(state);
+    const intent = { serial: ++this.serial, target, basis: state.attributes.Sollwertbasis,
+      context: envelope?.context ?? this.context, afterSequence: envelope?.sequence ?? this.sequence,
+      boundSequence: null, status: "pending", local: true, submitted: false, createdAt: Date.now(), configuration: this.configuration(state, unit) };
+    this.intent = intent; this.failure = false; this.notify(); return intent;
+  }
+  reject(intent) {
+    if (intent && this.intent === intent) { this.intent = null; this.failure = true; this.notify(); }
+  }
+  unknown(intent) { if (intent && this.intent === intent) { intent.status = "sent_unconfirmed"; this.notify(); } }
+  observe(state, unit, connected = true) {
+    this.scope(state, unit);
+    if (!scopedClimate(state)) return;
+    const valid = connected && validTarget(state), envelope = this.envelope(state), previous = this.confirmed;
+    if (envelope && (this.retiredContexts.has(envelope.context) || envelope.context === this.context && (envelope.sequence < this.sequence || envelope.revision < this.revision))) return;
+    if (this.seenStates.has(state) && this.actual !== state) return;
+    this.seenStates.add(state); this.actual = state;
+    const before = JSON.stringify([this.intent?.serial, this.intent?.status, this.confirmed?.basis, this.confirmed?.state.attributes.temperature]);
+    if (envelope) {
+      const sameContext = this.context === envelope.context;
+      if (!sameContext && this.context) { this.retiredContexts.add(this.context); if (this.retiredContexts.size > 16) this.retiredContexts.delete(this.retiredContexts.values().next().value); }
+      if (!sameContext && this.intent) { this.intent.status = "sent_unconfirmed"; this.intent.boundSequence = null; }
+      // A newly mounted surface does not adopt old saved intent from a receipt.
+      if (sameContext && envelope.sequence >= this.sequence) {
+        const intent = this.intent;
+        if (intent?.local && intent.context === envelope.context) {
+          const matching = envelope.records.filter(row => row.sequence > intent.afterSequence &&
+            row.basis === intent.basis && row.target === intent.target);
+          const newest = matching.at(-1);
+          if (newest && ["pending", "sent_unconfirmed"].includes(newest.status)) {
+            intent.boundSequence = newest.sequence; intent.status = newest.status;
+          }
+          const cutoff = Math.max(intent.afterSequence, intent.boundSequence || 0, ...matching.map(row => row.sequence));
+          const later = cutoff > intent.afterSequence && envelope.records.filter(row => row.sequence > cutoff && row.status !== "rejected").at(-1);
+          if (later && previous && later.target >= previous.state.attributes.min_temp && later.target <= previous.state.attributes.max_temp) {
+            this.failure = false;
+            this.intent = { serial: ++this.serial, target: later.target, basis: later.basis, context: envelope.context,
+              afterSequence: cutoff, boundSequence: later.sequence, status: later.status === "confirmed" ? "pending" : later.status,
+              local: false, submitted: true, createdAt: Date.now(), configuration: this.configuration(previous.state, unit) };
+          }
+          const bound = envelope.records.find(row => row.sequence === intent.boundSequence);
+          if (this.intent === intent && bound?.status === "rejected") this.reject(intent);
+          else if (bound?.status === "sent_unconfirmed") intent.status = "sent_unconfirmed";
+          // Correction readback alone is not a qualified configured target.
+        } else if (!intent) {
+          const newest = envelope.records.filter(row => row.sequence > this.sequence).at(-1);
+          if (newest && previous?.basis === newest.basis && ["pending", "sent_unconfirmed", "confirmed"].includes(newest.status)) {
+            this.failure = false;
+            this.intent = { serial: ++this.serial, target: newest.target, basis: newest.basis, context: envelope.context,
+              afterSequence: this.sequence, boundSequence: newest.sequence, status: newest.status === "confirmed" ? "pending" : newest.status, local: false, submitted: true, createdAt: Date.now(), configuration: this.configuration(previous.state, unit) };
+          }
+        } else if (!intent.local && intent.context === envelope.context) {
+          const newer = envelope.records.filter(row => row.sequence > intent.boundSequence).at(-1);
+          if (newer && previous?.basis === newer.basis && ["pending", "sent_unconfirmed", "confirmed"].includes(newer.status)) {
+            this.failure = false;
+            this.intent = { serial: ++this.serial, target: newer.target, basis: newer.basis, context: envelope.context,
+              afterSequence: this.sequence, boundSequence: newer.sequence, status: newer.status === "confirmed" ? "pending" : newer.status, local: false, submitted: true, createdAt: Date.now(), configuration: this.configuration(previous.state, unit) };
+          } else {
+            const bound = envelope.records.find(row => row.sequence === intent.boundSequence);
+            if (bound?.status === "rejected") this.reject(intent);
+            else if (bound?.status === "sent_unconfirmed") intent.status = "sent_unconfirmed";
+          }
+        }
+      }
+      this.context = envelope.context; this.sequence = envelope.sequence; this.revision = envelope.revision;
+    }
+    if (this.intent && (!connected || Date.now() - this.intent.createdAt >= 8000)) this.intent.status = "sent_unconfirmed";
+    const echoed = this.coherent(state, unit);
+    if (valid && echoed) {
+      if (this.intent && this.intent.configuration !== this.configuration(state, unit)) this.intent = null;
+      const basis = state.attributes.Sollwertbasis;
+      if (typeof basis === "string" && /^[a-f0-9]{32}$/.test(basis))
+        this.confirmed = { basis, state: { ...state, attributes: { ...state.attributes } }, unit };
+      if (this.intent && state.attributes.temperature === this.intent.target) this.intent = null;
+    }
+    if (before !== JSON.stringify([this.intent?.serial, this.intent?.status, this.confirmed?.basis, this.confirmed?.state.attributes.temperature])) this.notify();
+  }
+  display(state, connected = true) {
+    if (!this.confirmed || state?.state === "off" || !scopedClimate(state)) return { state, note: "", inert: !connected || !validTarget(state) };
+    const intent = this.intent, valid = connected && validTarget(state) && this.allows(state);
+    if (!intent && valid) return { state, note: this.failure ? "Änderung abgelehnt · bestätigter Sollwert" : "", inert: false };
+    const old = this.confirmed.state.attributes, target = intent?.target ?? old.temperature;
+    const attributes = { ...state.attributes, temperature: target, min_temp: old.min_temp, max_temp: old.max_temp,
+      target_temp_step: old.target_temp_step, supported_features: (state.attributes.supported_features || 0) | (old.supported_features & 1) };
+    // Requested/last-confirmed numbers exist only in this inert/private display.
+    const status = intent ? intent.status === "pending" ? "Angefragt · Bestätigung ausstehend" : "Angefragt · Bestätigung unklar" :
+      connected && !["unknown", "unavailable"].includes(state.state) ? "Letzter bestätigter Sollwert · Rückmeldung ausstehend" : "Letzter bestätigter Sollwert · nicht verfügbar";
+    return { state: { ...state, attributes }, note: status, inert: !valid };
+  }
+}
+
+// Memory only, isolated by authenticated HA connection/user/entity. This lets a
+// later gesture in another surface supersede an older pending gesture without
+// persisting intent or modifying Home Assistant's shared states.
+const targetPresentationSessions = new WeakMap();
+function sharedTargetPresentation(hass, state, fallback) {
+  const connection = hass?.connection;
+  if (!connection || typeof connection !== "object" || !scopedClimate(state)) return fallback || new HargassnerTargetPresentation();
+  let entries = targetPresentationSessions.get(connection);
+  if (!entries) { entries = new Map(); targetPresentationSessions.set(connection, entries); }
+  const key = `${hass.user?.id || ""}::${state.entity_id}`;
+  let presentation = entries.get(key);
+  if (!presentation) {
+    presentation = new HargassnerTargetPresentation(); entries.set(key, presentation);
+    if (entries.size > 16) entries.delete(entries.keys().next().value);
+  }
+  return presentation;
+}
+
+function temperatureDescriptor(node, key) {
+  for (let current = node; current; current = Object.getPrototypeOf(current)) {
+    const value = Object.getOwnPropertyDescriptor(current, key); if (value) return value;
+  }
+}
+function findTemperatureControl(native) {
+  const found = [], seen = new Set();
+  function visit(root, depth = 0) {
+    if (!root || depth > 12 || seen.has(root)) return; seen.add(root);
+    for (const node of root.querySelectorAll?.("*") || []) {
+      if (node.localName === "ha-state-control-climate-temperature") found.push(node);
+      if (node.shadowRoot) visit(node.shadowRoot, depth + 1);
+    }
+  }
+  visit(native.shadowRoot); return found.length === 1 ? found[0] : null;
+}
+/** In-place native event/API leases; old references remain closed forever. */
+function temperatureLease(node, options) {
+  const api = temperatureDescriptor(node, "_api"), debounce = node._debouncedCallService;
+  if (!api?.get || !api.set || typeof node._callService !== "function" || typeof debounce?.cancel !== "function" ||
+      ["_api", "_callService", "_debouncedCallService"].some(key => Object.getOwnPropertyDescriptor(node, key)?.configurable === false)) return null;
+  const record = { node, epoch: 0, closed: false, context: null, tickets: new WeakMap(), originalCall: node._callService,
+    originalDebounce: debounce, originals: Object.fromEntries(["_api", "_callService", "_debouncedCallService"].map(key => [key, Object.getOwnPropertyDescriptor(node, key)])) };
+  const current = epoch => !record.closed && record.epoch === epoch && options.current() && options.context() === record.context;
+  record.get = function () {
+    const raw = api.get.call(this), epoch = record.epoch;
+    if (!raw || typeof raw.callService !== "function") return raw;
+    if (record.cache?.raw === raw && record.cache.epoch === epoch) return record.cache.proxy;
+    const guarded = (...args) => {
+      if (!current(epoch) || api.get.call(node) !== raw || args[0] !== "climate" || args[1] !== "set_temperature" || !options.allowed(args[2])) return Promise.resolve();
+      const intent = options.prepare(args[2].temperature, true);
+      let result;
+      try { result = raw.callService(...args); }
+      catch (error) { options.rejected(intent); return Promise.resolve(); }
+      return Promise.resolve(result).catch(() => { options.rejected(intent); });
+    };
+    const proxy = new Proxy(raw, { get: (value, key) => key === "callService" ? guarded : typeof value[key] === "function" ? value[key].bind(value) : value[key] });
+    record.cache = { raw, epoch, proxy }; return proxy;
+  };
+  record.set = function (value) { api.set.call(this, value); record.cache = null; };
+  record.rotate = function (context, freshApi) {
+    record.originalDebounce.cancel(); options.clearTimeout(record.timer); record.timer = undefined; record.context = context; const epoch = ++record.epoch; record.cache = null;
+    record.call = function (type) {
+      if (this !== node || !current(epoch)) return;
+      const ticket = type && typeof type === "object" ? record.tickets.get(type) : null;
+      if (ticket && (ticket.epoch !== epoch || !options.intentCurrent(ticket.intent))) return;
+      if (typeof type !== "string" && !ticket) return;
+      if (!ticket) {
+        options.prepare(node._targetTemperature?.value, false);
+        record.rotate(options.context(), options.freshApi?.());
+      }
+      return record.originalCall.call(node, ticket ? ticket.type : type);
+    };
+    record.debounce = function (type) {
+      if (this !== node || !current(epoch) || typeof type !== "string") return;
+      const intent = options.prepare(node._targetTemperature?.value, false), ticket = {};
+      record.rotate(options.context(), options.freshApi?.());
+      record.tickets.set(ticket, { type, epoch: record.epoch, intent });
+      const invoke = record.call;
+      record.timer = options.setTimeout(() => { record.timer = undefined; invoke.call(node, ticket); }, 1000);
+    };
+    record.debounce.cancel = () => { record.originalDebounce.cancel(); options.clearTimeout(record.timer); record.timer = undefined; };
+    Object.defineProperty(node, "_callService", { configurable: true, writable: true, value: record.call });
+    Object.defineProperty(node, "_debouncedCallService", { configurable: true, writable: true, value: record.debounce });
+    if (freshApi) record.set.call(node, freshApi);
+  };
+  record.dispose = function () {
+    record.closed = true; record.epoch++; record.originalDebounce.cancel();
+    for (const [key, expected] of [["_api", record.get], ["_callService", record.call], ["_debouncedCallService", record.debounce]]) {
+      const own = Object.getOwnPropertyDescriptor(node, key); if ((key === "_api" ? own?.get : own?.value) !== expected) continue;
+      const original = record.originals[key];
+      if (key === "_callService") {
+        const call = record.originalCall;
+        Object.defineProperty(node, key, { configurable: true, writable: true, value: function (type) { if (typeof type === "string") return call.call(this, type); } });
+      } else if (original) Object.defineProperty(node, key, original); else delete node[key];
+    }
+  };
+  try {
+    Object.defineProperty(node, "_api", { configurable: true, get: record.get, set: record.set }); record.rotate(options.context()); return record;
+  } catch { record.dispose(); return null; }
 }
 
 export function installHargassnerThermostatCard(environment = window) {
@@ -530,7 +682,7 @@ export function installHargassnerThermostatCard(environment = window) {
   if (!customElements.get(cardType)) {
     class HargassnerThermostatCard extends HTMLElement {
       constructor() {
-        super(); this.attachShadow({ mode: "open" }); this._generation = 0; this._retiredNative = new WeakSet(); this._guardedNative = new WeakSet();
+        super(); this.attachShadow({ mode: "open" }); this._generation = 0; this._retiredNative = new WeakSet(); this._guardedNative = new WeakSet(); this._presentation = new HargassnerTargetPresentation(); this._apiEpoch = 0;
       }
       static getStubConfig(hass, entities = [], fallback = []) {
         const ids = [...entities, ...fallback, ...Object.keys(hass?.states || {})];
@@ -556,7 +708,7 @@ export function installHargassnerThermostatCard(environment = window) {
       connectedCallback() { this._render(); }
       disconnectedCallback() { this._dispose(); }
       _cancelNative(force = false) {
-        this._clearHold(true);
+        this._controlLease?.dispose(); this._controlLease = null; this._controlObserver?.disconnect(); this._controlObserver = null; this._apiEpoch = (this._apiEpoch || 0) + 1;
         if (this._nativeContext) {
           this._ui?.nativeHost.removeEventListener("context-request", this._nativeContext);
           this._nativeContext = null;
@@ -566,7 +718,7 @@ export function installHargassnerThermostatCard(environment = window) {
         this._pending = false; this._native?.remove(); this._native = null;
       }
       _dispose() {
-        this._cancelNative(true);
+        this._cancelNative(true); this._presentationUnsubscribe?.(); this._presentationUnsubscribe = null; this._presentation = new HargassnerTargetPresentation();
         if (this._binding) this._binding.menu.removeEventListener("wa-select", this._binding.handler);
         this._binding = null; this._ui = null; this._failed = false; this._busy = false;
         this.shadowRoot.replaceChildren();
@@ -613,66 +765,6 @@ export function installHargassnerThermostatCard(environment = window) {
         catch { text = String(value); }
         return `${text} ${unit}`;
       }
-      _clearHold(dropConfirmed = false) {
-        if (this._holdTimer !== undefined) environment.clearTimeout(this._holdTimer);
-        this._holdTimer = undefined; this._held = null;
-        if (dropConfirmed) this._lastConfirmed = null;
-        if (this._native) { this._native.inert = false; this._native.removeAttribute("aria-disabled"); }
-        if (this._ui) this._ui.updateNote.hidden = true;
-      }
-      _rememberTarget(state) {
-        const basis = state.attributes.Sollwertbasis;
-        this._lastConfirmed = typeof basis === "string" && /^[a-f0-9]{32}$/.test(basis)
-          ? { basis, unit: this._hass?.config?.unit_system?.temperature, state: { ...state, attributes: { ...state.attributes } } } : null;
-      }
-      _markerModes(marker, state, previous) {
-        const from = previous.state, keys = Object.keys(marker).sort().join(",");
-        if (keys === "basis,id,phase") return state.state === from.state &&
-          state.attributes.preset_mode === from.attributes.preset_mode;
-        if (keys !== "basis,id,nextPreset,phase,previousPreset,reason,version" || marker.version !== 2 ||
-            !["mode_report", "parameter_report", "phase_report", "pending_change"].includes(marker.reason) ||
-            marker.previousPreset !== from.attributes.preset_mode || marker.nextPreset !== state.attributes.preset_mode ||
-            !PRESETS.slice(1).includes(marker.previousPreset) || !PRESETS.slice(1).includes(marker.nextPreset)) return false;
-        return from.state === (marker.previousPreset === "Auto" ? "auto" : "heat") &&
-          state.state === (marker.nextPreset === "Auto" ? "auto" : "heat");
-      }
-      _holdTarget(state) {
-        const previous = this._lastConfirmed, marker = state?.attributes?.Sollwertaktualisierung;
-        if (!this._native || !this._guardedNative.has(this._native) || !previous || previous.unit !== this._hass?.config?.unit_system?.temperature || !this._connectedHA() || !scopedClimate(state) ||
-            !["auto", "heat"].includes(state.state) || !sameValues(state.attributes.hvac_modes, HVAC) ||
-            state.attributes["Zieltemperatur verfügbar"] !== false ||
-            state.entity_id !== previous.state.entity_id ||
-            !marker || typeof marker !== "object" || Array.isArray(marker) ||
-            !this._markerModes(marker, state, previous) || marker.basis !== previous.basis ||
-            typeof marker.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(marker.id) ||
-            !["pending", "readback"].includes(marker.phase) ||
-            this._held && this._held.id !== marker.id) return false;
-        if (!this._held) {
-          this._held = { id: marker.id };
-          this._retiredNative.add(this._native);
-          const generation = this._generation, held = this._held;
-          this._holdTimer = environment.setTimeout(() => {
-            if (this._generation === generation && this._held === held) {
-              this._cancelNative(true); this._render();
-            }
-          }, 8000);
-        }
-        // Presentation-only frozen confirmed state; never updates HA states or
-        // qualifies a command. The scoped native API guard reads latest HA state.
-        const target = previous.state.attributes;
-        const currentFeatures = Number.isSafeInteger(state.attributes.supported_features) ? state.attributes.supported_features : 0;
-        const oldTargetFeature = Number.isSafeInteger(target.supported_features) ? target.supported_features & 1 : 0;
-        const frozen = { ...state, attributes: { ...state.attributes,
-          temperature: target.temperature, min_temp: target.min_temp,
-          max_temp: target.max_temp, target_temp_step: target.target_temp_step,
-          // HA TARGET_TEMPERATURE=1 controls the native handle. Preserve only
-          // that old single-target display bit, never live HA capabilities.
-          supported_features: currentFeatures | oldTargetFeature } };
-        this._native.hass = { ...this._hass, states: { ...this._hass.states, [state.entity_id]: frozen } };
-        this._native.inert = true; this._native.setAttribute("aria-disabled", "true");
-        this._ui.updateNote.hidden = false; this._ui.placeholder.hidden = true;
-        return true;
-      }
       _targetContext(state) {
         if (!scopedClimate(state)) return null;
         const a = state.attributes;
@@ -683,38 +775,98 @@ export function installHargassnerThermostatCard(environment = window) {
           a.target_temp_step, a.supported_features, a.hvac_modes,
           this._hass?.config?.unit_system?.temperature]);
       }
-      _guardNativeApi(native, generation) {
-        const targetContext = this._targetContext(this._hass?.states?.[this._config?.entity]);
-        this._nativeTargetContext = targetContext;
+      _makeNativeApi(native, generation) {
+        const epoch = this._apiEpoch || 0, targetContext = this._targetContext(this._hass?.states?.[this._config?.entity]);
         const current = () => this.isConnected && this._generation === generation && this._native === native &&
-          !this._held && !this._retiredNative.has(native) && this._connectedHA() &&
-          validTarget(this._hass?.states?.[this._config?.entity]) &&
+          (this._apiEpoch || 0) === epoch && this._connectedHA() && validTarget(this._hass?.states?.[this._config?.entity]) && this._presentation.allows(this._hass?.states?.[this._config?.entity]) &&
           targetContext === this._targetContext(this._hass?.states?.[this._config?.entity]);
         const guarded = (...args) => {
           if (!current() || args[0] !== "climate" || args[1] !== "set_temperature" ||
               args[2]?.entity_id !== this._config?.entity) return Promise.resolve();
           return this._hass.callService(...args);
         };
-        const api = new Proxy({}, { get: (_, key) => key === "callService" ? guarded :
+        return new Proxy({}, { get: (_, key) => key === "callService" ? guarded :
           typeof this._hass?.[key] === "function" ? this._hass[key].bind(this._hass) : this._hass?.[key] });
+      }
+      _guardNativeApi(native, generation) {
+        this._nativeTargetContext = this._targetContext(this._hass?.states?.[this._config?.entity]);
         this._nativeContext = event => {
-          // Official HA20260930.3 climate control consumes apiContext "hassApi";
-          // this local provider also guards already-debounced native callbacks.
           if (event.context !== "hassApi" || typeof event.callback !== "function") return;
-          event.stopPropagation(); this._guardedNative.add(native); event.callback(api, () => {});
+          event.stopPropagation(); this._guardedNative.add(native); event.callback(this._makeNativeApi(native, generation), () => {});
+          environment.queueMicrotask?.(() => this._refreshControlLease());
         };
         this._ui.nativeHost.addEventListener("context-request", this._nativeContext);
+      }
+      _prepareTarget(target, submitted = false) {
+        const state = this._hass?.states?.[this._config?.entity], unit = this._hass?.config?.unit_system?.temperature;
+        if (!this._connectedHA() || !validTarget(state)) return null;
+        let intent = this._presentation.intent;
+        if (!submitted || !intent || intent.target !== target || intent.basis !== state.attributes.Sollwertbasis) {
+          intent = this._presentation.begin(state, unit, target); if (this._ui) this._ui.error.textContent = "";
+        }
+        if (submitted && intent) { intent.status = "pending"; intent.submitted = true; }
+        this._render(); return intent;
+      }
+      _refreshControlLease() {
+        if (!this._native || !this._ui || !this.isConnected) return;
+        const node = findTemperatureControl(this._native);
+        if (this._controlLease && this._controlLease.node !== node) { this._controlLease.dispose(); this._controlLease = null; }
+        if (!node) return;
+        if (!this._controlLease) {
+          const native = this._native, generation = this._generation;
+          this._controlLease = temperatureLease(node, {
+            current: () => this.isConnected && node.isConnected && findTemperatureControl(native) === node && this._native === native && this._generation === generation && this._connectedHA() &&
+              validTarget(this._hass?.states?.[this._config?.entity]) && this._presentation.allows(this._hass?.states?.[this._config?.entity]),
+            context: () => this._targetContext(this._hass?.states?.[this._config?.entity]),
+            allowed: data => { const state = this._hass?.states?.[this._config?.entity]; return data?.entity_id === this._config?.entity &&
+              Number.isFinite(data.temperature) && validTarget(state) && data.temperature >= state.attributes.min_temp && data.temperature <= state.attributes.max_temp; },
+            setTimeout: environment.setTimeout.bind(environment), clearTimeout: environment.clearTimeout.bind(environment),
+            freshApi: () => { this._apiEpoch = (this._apiEpoch || 0) + 1; return this._makeNativeApi(native, generation); },
+            prepare: (target, submitted) => this._prepareTarget(target, submitted),
+            intentCurrent: intent => !intent || this._presentation.intent === intent,
+            rejected: intent => { if (this._presentation.intent !== intent) return; this._presentation.reject(intent); if (this._ui) this._ui.error.textContent = "Temperaturänderung fehlgeschlagen."; this._render(); },
+          });
+          if (this._controlLease) this._controlLease.rotate(this._nativeTargetContext, this._makeNativeApi(native, generation));
+        }
+        if (this._native.shadowRoot && typeof environment.MutationObserver === "function" && !this._controlObserver) {
+          this._controlObserver = new environment.MutationObserver(() => this._refreshControlLease());
+          this._controlObserver.observe(this._native.shadowRoot, { childList: true, subtree: true });
+        }
+      }
+      _renderNative(state) {
+        const context = this._targetContext(state);
+        if (this._nativeTargetContext !== context) {
+          if (this._presentation.intent && !this._presentation.intent.submitted) this._presentation.reject(this._presentation.intent);
+          this._apiEpoch = (this._apiEpoch || 0) + 1; this._nativeTargetContext = context;
+          this._controlLease?.rotate(context, this._makeNativeApi(this._native, this._generation));
+        }
+        const view = this._presentation.display(state, this._connectedHA());
+        this._held = view.inert ? { id: "presentation_only" } : null;
+        this._native.hass = view.state === state ? this._hass : { ...this._hass, states: { ...this._hass.states, [state.entity_id]: view.state } };
+        this._native.inert = view.inert; if (this._native.style) this._native.style.opacity = view.inert ? "0.6" : "";
+        if (view.inert) this._native.setAttribute("aria-disabled", "true"); else this._native.removeAttribute("aria-disabled");
+        this._ui.updateNote.textContent = view.note; this._ui.updateNote.hidden = !view.note;
+        this._ui.placeholder.hidden = true;
+        this._refreshControlLease();
+        Promise.resolve(this._native.updateComplete).then(() => this._refreshControlLease());
       }
       _render() {
         if (!this.isConnected || !this._config || !this._hass) return;
         if (!this._ui) this._build();
         const ui = this._ui, state = this._hass.states?.[this._config.entity];
-        const scoped = scopedClimate(state), connected = this._connectedHA();
+        const scoped = scopedClimate(state) && state.entity_id === this._config.entity, connected = this._connectedHA();
+        const presentation = sharedTargetPresentation(this._hass, state, this._presentation);
+        if (presentation !== this._presentation || !this._presentationUnsubscribe) {
+          this._presentationUnsubscribe?.(); this._presentation = presentation;
+          this._presentationUnsubscribe = presentation.subscribe(() => {
+            if (this.isConnected && this._hass?.config?.unit_system?.temperature === presentation.unit) this._render();
+          });
+        }
         ui.title.textContent = this._config.name || state?.attributes?.friendly_name || this._config.entity;
         ui.footer.hidden = !scoped;
         ui.retry.hidden = !this._failed || !scoped;
         if (!scoped) {
-          this._cancelNative(true); ui.placeholder.hidden = false;
+          this._presentation.scope(state, this._hass?.config?.unit_system?.temperature); this._cancelNative(true); ui.placeholder.hidden = false;
           ui.placeholder.textContent = !state || ["unknown", "unavailable"].includes(state.state)
             ? "Heizkreis nicht verfügbar." : "Diese Entität ist kein unterstützter Hargassner-Heizkreis.";
           if (this._binding) {
@@ -728,32 +880,18 @@ export function installHargassnerThermostatCard(environment = window) {
         ui.correction.textContent = `Raumkorrektur: ${this._format(available ? state.attributes.Raumkorrektur : null, true, "°C")}`;
         ui.statusValue.textContent = operatingState(state, connected);
         if (customElements.get("ha-control-select-menu")) this._renderMenu(state);
+        this._presentation.observe(state, this._hass?.config?.unit_system?.temperature, connected);
+        if (this._native) {
+          this._renderNative(state); this._renderMenu(state); return;
+        }
         if (!connected || !validTarget(state)) {
-          if (this._holdTarget(state)) { this._renderMenu(state); return; }
-          this._cancelNative(); ui.placeholder.hidden = false;
-          ui.placeholder.textContent = "Zieltemperatur nicht verfügbar.";
-          // Load the native menu even when a target is currently unqualified.
+          ui.placeholder.hidden = false; ui.placeholder.textContent = state.state === "off" ? "Aus · kein aktiver Sollwert." : "Zieltemperatur nicht verfügbar.";
           if (!this._failed && !customElements.get("ha-control-select-menu")) this._load(false);
           return;
         }
-        // A fully qualified update can arrive without an intermediate null.
-        // Retire callbacks bound to the old basis before showing the new one.
-        if (this._native && this._nativeTargetContext !== this._targetContext(state))
-          this._retiredNative.add(this._native);
-        this._clearHold(); this._rememberTarget(state);
-        if (customElements.get("ha-control-select-menu")) this._renderMenu(state);
-        if (this._native) {
-          if (this._retiredNative.has(this._native)) {
-            try { this._attachNative(this._helpers, this._generation); }
-            catch { this._cancelNative(true); this._failed = true; this._render(); return; }
-          }
-          this._native.hass = this._hass; ui.placeholder.hidden = true;
-        }
-        else {
-          ui.placeholder.hidden = false;
-          ui.placeholder.textContent = this._failed ? "Thermostat derzeit nicht verfügbar." : "Thermostat wird geladen …";
-          if (!this._failed) this._load(true);
-        }
+        ui.placeholder.hidden = false;
+        ui.placeholder.textContent = this._failed ? "Thermostat derzeit nicht verfügbar." : "Thermostat wird geladen …";
+        if (!this._failed) this._load(true);
       }
       _renderMenu(state) {
         if (!this._binding) {
@@ -766,7 +904,7 @@ export function installHargassnerThermostatCard(environment = window) {
         }
         const context = eligible({ stateObj: state }), menu = this._binding.menu;
         menu.value = context ? state.attributes.preset_mode : undefined;
-        menu.disabled = this._busy || Boolean(this._held) || !this._connectedHA() || !context || !HVAC.includes(state.state);
+        menu.disabled = this._busy || !this._connectedHA() || !context || !HVAC.includes(state.state);
       }
       async _selectMode(event, binding) {
         event.stopPropagation();
@@ -775,7 +913,7 @@ export function installHargassnerThermostatCard(environment = window) {
             !binding.menu.isConnected || binding.menu.disabled || binding.entity !== this._config?.entity || this._busy ||
             !this._connectedHA() || !eligible({ stateObj: state }) || !HVAC.includes(state.state) ||
             !PRESETS.includes(value) || value === state.attributes.preset_mode) return;
-        this._busy = true; this._ui.error.textContent = ""; this._render();
+        this._presentation.intent = null; this._presentation.notify(); this._busy = true; this._ui.error.textContent = ""; this._render();
         try {
           await this._hass.callService("climate", "set_preset_mode", { entity_id: binding.entity, preset_mode: value });
         } catch {
@@ -801,8 +939,7 @@ export function installHargassnerThermostatCard(environment = window) {
         if (this._nativeContext) this._ui.nativeHost.removeEventListener("context-request", this._nativeContext);
         native.className = "native"; native.hass = this._hass; this._native = native;
         this._guardNativeApi(native, generation);
-        // Replace synchronously from cached helpers after recovery: old debounced
-        // API callbacks remain retired forever, without a readback-time blank.
+        // Initial mount only. Later context changes rotate event/API leases in place.
         this._ui.nativeHost.replaceChildren(native);
       }
       async _load(wantTarget) {

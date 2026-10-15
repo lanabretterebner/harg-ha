@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.2
+
+- Keep existing native card/control nodes during target changes; rotate only guarded callback/API leases.
+- Capture desired targets before debounce and retain them through pending or uncertain readback, with explicit status. Revert only on a bound rejection; never retry automatically.
+- Share memory-only ordered intent between card/popup surfaces; reconcile genuine mode/base changes and keep independent mode controls usable.
+- Preserve last confirmed inert targets for other-circuit/source gaps without an eight-second unmount. The ingress app remains1.4.0 unchanged.
+
 ## 1.4.1
 
 - Keep the last confirmed target visibly inert during qualified mode, base, offset and phase readback, with a fixed eight-second limit.

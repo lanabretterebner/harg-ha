@@ -1,0 +1,25 @@
+/** Scoped DOM/API model, not a browser or heating test. */
+import fs from 'node:fs';import assert from 'node:assert/strict';import crypto from 'node:crypto';
+import{installHargassnerThermostatCard,HargassnerTargetPresentation}from'../dist/hargassner-thermostat-popup.js';
+const bodyBytes=fs.readFileSync(new URL('./ha-native-bodies.json',import.meta.url));assert.equal(crypto.createHash('sha256').update(bodyBytes).digest('hex'),'0cda1154ba86bfd4c12f4023b2a181705f2767beb0661a8bc52a82931163d970');const bodies=JSON.parse(bodyBytes);
+const nativeCall=new Function('type',bodies.native_call_service_body.replaceAll('stateObj!','stateObj'));
+const nativeDebounce=new Function('func','wait','immediate','window',bodies.native_debounce_body.replace('let timeout: number | undefined;','let timeout;').replace('let trailingArgs: T | undefined;','let trailingArgs;').replace('(...args: T): void =>','(...args) =>'));
+const BASIS='a'.repeat(32),FRESH='b'.repeat(32),CONTEXT='c'.repeat(32),ENTITY='climate.synthetic_hc1';
+function envelope(records=[],extra={}){return{schemaVersion:1,temperatureUnit:'°C',context:CONTEXT,sequence:records.at(-1)?.sequence||0,revision:records.length?records.at(-1).sequence*2+(records.at(-1).status==='pending'?0:1):0,records,confirmedTarget:19,confirmedBasis:BASIS,confirmedPreset:'Auto',...extra}}
+function state(temp=19,qualified=true,extra={}){return{entity_id:ENTITY,state:'auto',attributes:{hargassner_control_schema:'configured_room_setpoint_v1',supported_features:385,hvac_modes:['off','auto','heat'],preset_modes:['none','Aus','Auto','Heizen','Absenken','1x Heizen','1x Absenken'],preset_mode:'Auto',temperature:qualified?temp:null,min_temp:16,max_temp:22,target_temp_step:.5,'Zieltemperatur verfügbar':qualified,Sollwertbasis:qualified?BASIS:null,Sollwertphase:qualified?'night':'unbekannt',Sollwertparameter:qualified?'5':null,Raumkorrektur:0,Temperaturauftrag:envelope(),...extra}}}
+function operation(sequence=1,status='pending',target=19.5){return{sequence,basis:BASIS,target,status,reason:null,origin:'HA_TARGET',updatedAt:'2026-10-15T00:00:00Z',startedAt:'2026-10-15T00:00:00Z'}}
+function fixture(initial=state()){
+ const entity=initial.entity_id;
+ const timers=new Map(),calls=[],targets=[];let timer=0;const registry=new Map([['ha-control-select-menu',class{}]]);
+ const env={customElements:{get:n=>registry.get(n),define:(n,v)=>registry.set(n,v)},document:{},HTMLElement:class{},queueMicrotask,setTimeout(fn){timers.set(++timer,fn);return timer},clearTimeout(id){timers.delete(id)}};
+ const Card=installHargassnerThermostatCard(env),card=Object.create(Card.prototype);Object.defineProperty(card,'isConnected',{value:true});
+ card._generation=1;card._apiEpoch=0;card._presentation=new HargassnerTargetPresentation();card._retiredNative=new WeakSet();card._guardedNative=new WeakSet();card._config={entity};
+ card._hass={connected:true,connection:{connected:true},config:{unit_system:{temperature:'°C'}},states:{[entity]:initial},callService:async(...args)=>calls.push(structuredClone(args))};
+ class Control{constructor(){this.localName='ha-state-control-climate-temperature';this.isConnected=true;this._debouncedCallService=nativeDebounce(type=>this._callService(type),1000,false,env)}get _api(){return this.raw}set _api(value){this.raw=value}set stateObj(value){this.obj=value;this._targetTemperature={value:value.attributes.temperature};targets.push(value.attributes.temperature)}get stateObj(){return this.obj}_callService(type){return nativeCall.call(this,type)}}
+ const node=new Control();const native={localName:'hui-thermostat-card',shadowRoot:{querySelectorAll:()=>[node]},updateComplete:Promise.resolve(),setAttribute(k,v){this[k]=v},removeAttribute(k){delete this[k]},remove(){this.removed=true},set hass(hass){this.value=hass;node.stateObj=hass.states[entity]},get hass(){return this.value}};
+ const host=new EventTarget();host.replaceChildren=()=>{throw Error('Unexpected remount')};card._ui=Object.fromEntries(['title','footer','retry','current','correction','statusValue','placeholder','updateNote','error'].map(k=>[k,{hidden:true}]));card._ui.nativeHost=host;card._native=native;card._renderMenu=()=>{};
+ card._guardNativeApi(native,1);const event=new Event('context-request');event.context='hassApi';event.callback=api=>{node._api=api};host.dispatchEvent(event);card._render();
+ return{card,node,native,calls,timers,targets,update(next){card._hass.states[entity]=next;card._render()},input(value){node._targetTemperature={value};node._debouncedCallService('value')},flush(){const pending=[...timers.values()];timers.clear();pending.forEach(fn=>fn())}};
+}
+
+export { fixture, state, envelope, operation, BASIS, FRESH, CONTEXT, ENTITY };
