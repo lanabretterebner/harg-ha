@@ -261,4 +261,112 @@ await test('removing popup releases lifecycle listeners during reconciliation', 
   f.popup.remove(); f.popup.updated(); await settle(); assert.equal(connection.listenerCount(), 0); f.controller.stop();
 });
 
+
+// New tests model synchronous provider callbacks BEFORE any Lit updated() pass.
+async function contextFixture() {
+ const dom=environment(),controller=module.installHargassnerThermostatPopup(dom.env);await controller.ready;
+ const popup=new dom.Popup(),hass=popup.hass;hass.user={id:'context_user'};hass.connection=connectionFixture();
+ const app=new dom.env.HTMLElement('home-assistant');app.hass=hass;delete popup.hass;
+ const callbacks={},unsubscribed={},disposers={};
+ popup.addEventListener('context-request',event=>{
+  if(!['hassConnection','hassConfig'].includes(event.context))return;
+  event.stopPropagation();callbacks[event.context]=event.callback;
+  const dispose=()=>{unsubscribed[event.context]=(unsubscribed[event.context]||0)+1};disposers[event.context]=dispose;
+  event.callback(event.context==='hassConnection'?{connection:hass.connection,connected:true}:{user:hass.user,config:hass.config},dispose);
+ });
+ const entity='climate.synthetic_hc1';popup.stateObj=state(entity,'Auto');hass.states[entity]=popup.stateObj;
+ dom.doc.append(app,popup);popup.render();await settle();
+ return {...dom,controller,popup,app,hass,callbacks,unsubscribed,disposers,entity};
+}
+for(const change of ['connection','user'])for(const observed of [false,true])await test(`popup existing hass ${change} ABA retires before ${observed?'and after':'without'} a Lit update`,async()=>{
+ const f=await fixture(),p=f.popup,n=p.node;p.hass={...p.hass,user:{id:'initial'}};p.updated();await settle();const original=p.hass;
+ n._targetTemperature.value=19.5;n._debouncedCallService('value');const api=n._api,call=n._callService,debounce=n._debouncedCallService;
+ const queued=[...f.env.timers.values()].find(t=>t.delay===250).fn;
+ p.hass={...original,...(change==='connection'?{connection:connectionFixture()}:{user:{id:'other'}})};
+ if(observed){p.updated();await settle()}
+ p.hass=original;if(observed){p.updated();await settle()}
+ await api.callService('climate','set_temperature',{entity_id:f.entity,temperature:19.5});queued();call.call(n,'value');debounce.call(n,'value');fireTimers(f.env,250);
+ assert.equal(p.requests.length,0);await settle();assert.equal(p.node,n);
+ n._targetTemperature.value=20;n._debouncedCallService('value');fireTimers(f.env,250);assert.equal(p.requests.length,1);f.controller.stop();
+});
+for(const change of ['connection','user'])await test(`popup native ${change} context ABA retires before Lit without inventing hass property`,async()=>{
+ const f=await contextFixture(),p=f.popup,n=p.node;
+ assert.equal(Object.hasOwn(p,'hass'),false);assert.equal(Object.getOwnPropertyDescriptor(p,'_api').get,undefined);
+ n._targetTemperature.value=19.5;n._debouncedCallService('value');const api=n._api,call=n._callService,debounce=n._debouncedCallService;
+ const queued=[...f.env.timers.values()].find(t=>t.delay===250).fn;
+ const key=change==='connection'?'hassConnection':'hassConfig',original=change==='connection'?{connection:f.hass.connection,connected:true}:{user:f.hass.user,config:f.hass.config};
+ f.callbacks[key](change==='connection'?{connection:connectionFixture(),connected:true}:{user:{id:'other'},config:f.hass.config},f.disposers[key]);
+ await api.callService('climate','set_temperature',{entity_id:f.entity,temperature:19.5});assert.equal(p.requests.length,0);
+ f.callbacks[key](original,f.disposers[key]);
+ queued();call.call(n,'value');debounce.call(n,'value');await api.callService('climate','set_temperature',{entity_id:f.entity,temperature:19.5});fireTimers(f.env,250);
+ assert.equal(p.requests.length,0);await settle();assert.equal(p.node,n);assert.equal(n.stateObj.attributes.temperature,19);
+ n._targetTemperature.value=20;n._debouncedCallService('value');fireTimers(f.env,250);assert.equal(p.requests.length,1);
+ f.controller.stop();assert.equal(f.unsubscribed.hassConnection,1);assert.equal(f.unsubscribed.hassConfig,1);assert.equal(Object.hasOwn(p,'hass'),false);
+});
+await test('same identity hass telemetry preserves the250ms draft and native node',async()=>{
+ const f=await fixture(),p=f.popup,n=p.node;const descriptor=Object.getOwnPropertyDescriptor(p,'hass');
+ n._targetTemperature.value=19.5;n._debouncedCallService('value');p.hass={...p.hass,states:{...p.hass.states},user:{id:p.hass.user?.id}};
+ p.updated();await settle();assert.equal(p.node,n);assert.equal(n.stateObj.attributes.temperature,19.5);assert.equal([...f.env.timers.values()].filter(t=>t.delay===250).length,1);
+ fireTimers(f.env,250);assert.equal(p.requests.length,1);f.controller.stop();const restored=Object.getOwnPropertyDescriptor(p,'hass');assert.equal(restored.get,undefined);assert.equal(restored.writable,true);assert.equal(restored.configurable,true);
+});
+await test('same identity native connection/config callbacks preserve draft and delivery',async()=>{
+ const f=await contextFixture(),n=f.popup.node;n._targetTemperature.value=19.5;n._debouncedCallService('value');
+ f.callbacks.hassConnection({connection:f.hass.connection,connected:true},f.disposers.hassConnection);
+ f.callbacks.hassConfig({user:{...f.hass.user},config:{...f.hass.config},userData:{unrelated:true}},f.disposers.hassConfig);await settle();
+ assert.equal(n.stateObj.attributes.temperature,19.5);fireTimers(f.env,250);assert.equal(f.popup.requests.length,1);f.controller.stop();
+});
+await test('native connection disconnect/ready callbacks coalesced before render retire captured timer',async()=>{
+ const f=await contextFixture(),n=f.popup.node;n._targetTemperature.value=19.5;n._debouncedCallService('value');const queued=[...f.env.timers.values()].find(t=>t.delay===250).fn;
+ f.callbacks.hassConnection({connection:f.hass.connection,connected:false},f.disposers.hassConnection);
+ f.callbacks.hassConnection({connection:f.hass.connection,connected:true},f.disposers.hassConnection);queued();fireTimers(f.env,250);assert.equal(f.popup.requests.length,0);await settle();assert.equal(n.stateObj.attributes.temperature,19);f.controller.stop();
+});
+await test('announced native scope mismatch is visibly inert and cannot grant authority',async()=>{
+ const f=await contextFixture(),n=f.popup.node,api=n._api;f.callbacks.hassConnection({connection:connectionFixture(),connected:true},f.disposers.hassConnection);await settle();
+ assert.equal(n.inert,true);await api.callService('climate','set_temperature',{entity_id:f.entity,temperature:19.5});assert.equal(f.popup.requests.length,0);
+ f.callbacks.hassConnection({connection:f.hass.connection,connected:true},f.disposers.hassConnection);await settle();assert.equal(n.inert,false);f.controller.stop();
+});
+await test('late native callbacks after stop are inert and owned unsubscribe runs once',async()=>{
+ const f=await contextFixture(),n=f.popup.node,callback=f.callbacks.hassConnection,dispose=f.disposers.hassConnection;
+ f.controller.stop();callback({connection:connectionFixture(),connected:true},dispose);await settle();assert.equal(f.unsubscribed.hassConnection,1);assert.equal(f.unsubscribed.hassConfig,1);assert.equal(f.popup.requests.length,0);assert.equal(f.popup.node,n);
+});
+await test('existing accessor hass keeps native setter and restores descriptor/latest value',async()=>{
+ const f=await fixture();f.controller.stop();const p=f.popup;let value=p.hass,sets=0;
+ const get=function(){return value},set=function(next){sets++;value=next};Object.defineProperty(p,'hass',{get,set,configurable:true,enumerable:true});
+ const controller=module.installHargassnerThermostatPopup(f.env);await controller.ready;p.render();await settle();
+ const next={...value,user:{id:'other'}};p.hass=next;assert.equal(sets,1);assert.equal(p.hass,next);controller.stop();
+ const descriptor=Object.getOwnPropertyDescriptor(p,'hass');assert.equal(descriptor.get,get);assert.equal(descriptor.set,set);assert.equal(p.hass,next);
+});
+await test('another owner replacing hass descriptor is not overwritten on stop',async()=>{
+ const f=await fixture(),value={...f.popup.hass,user:{id:'foreign_owner'}};
+ Object.defineProperty(f.popup,'hass',{value,writable:true,configurable:true,enumerable:true});f.controller.stop();assert.equal(f.popup.hass,value);assert.equal(Object.getOwnPropertyDescriptor(f.popup,'hass').get,undefined);
+});
+
+await test('moving popup consumer unsubscribes old provider and late old callback cannot retire a fresh draft',async()=>{
+ const f=await contextFixture(),p=f.popup,n=p.node,oldCallback=f.callbacks.hassConnection,oldDispose=f.disposers.hassConnection,oldApi=n._api;
+ const parent=new f.env.HTMLElement('div');f.doc.append(parent);parent.append(p);p.updated();await settle();
+ assert.equal(p.node,n);assert.equal(f.unsubscribed.hassConnection,1);assert.equal(f.unsubscribed.hassConfig,1);
+ await oldApi.callService('climate','set_temperature',{entity_id:f.entity,temperature:19.5});assert.equal(p.requests.length,0);
+ n._targetTemperature.value=20;n._debouncedCallService('value');oldCallback({connection:connectionFixture(),connected:true},oldDispose);await settle();
+ fireTimers(f.env,250);assert.equal(p.requests.length,1);assert.equal(f.unsubscribed.hassConnection,1);f.controller.stop();assert.equal(f.unsubscribed.hassConnection,2);assert.equal(f.unsubscribed.hassConfig,2);
+});
+await test('provider callback arriving after stop releases a newly supplied owned subscription without mutation',async()=>{
+ const f=await contextFixture(),callback=f.callbacks.hassConnection;f.controller.stop();let disposed=0;const unsubscribe=()=>disposed++;
+ callback({connection:connectionFixture(),connected:true},unsubscribe);callback({connection:connectionFixture(),connected:true},unsubscribe);await settle();assert.equal(disposed,1);assert.equal(f.popup.requests.length,0);
+});
+
+await test('inherited writable hass data retains ordinary assignment semantics after cleanup',async()=>{
+ const f=await fixture();f.controller.stop();const p=f.popup,original=p.hass;delete p.hass;
+ Object.defineProperty(f.Popup.prototype,'hass',{value:original,writable:true,configurable:true,enumerable:true});
+ const controller=module.installHargassnerThermostatPopup(f.env);await controller.ready;p.render();await settle();
+ const next={...original,user:{id:'replacement'}};p.hass=next;controller.stop();
+ const descriptor=Object.getOwnPropertyDescriptor(p,'hass');assert.equal(descriptor.value,next);assert.equal(descriptor.writable,true);assert.equal(f.Popup.prototype.hass,original);
+});
+
+for(const flag of ['hass','connection'])await test(`legacy same-identity ${flag} connectivity false to true before Lit retires queued draft`,async()=>{
+ const f=await fixture(),p=f.popup,n=p.node,original=p.hass;n._targetTemperature.value=19.5;n._debouncedCallService('value');const api=n._api,queued=[...f.env.timers.values()].find(t=>t.delay===250).fn;
+ if(flag==='hass'){p.hass={...original,connected:false};p.hass={...original,connected:true}}
+ else{original.connection.connected=false;p.hass={...original};original.connection.connected=true;p.hass={...original}}
+ queued();await api.callService('climate','set_temperature',{entity_id:f.entity,temperature:19.5});fireTimers(f.env,250);assert.equal(p.requests.length,0);await settle();assert.equal(p.node,n);
+ n._targetTemperature.value=20;n._debouncedCallService('value');fireTimers(f.env,250);assert.equal(p.requests.length,1);f.controller.stop();
+});
 console.log(JSON.stringify({tests:results.length,passed:results.filter(r=>r.passed).length,failed:results.filter(r=>!r.passed).length,results},null,2));if(results.some(r=>!r.passed))process.exitCode=1;

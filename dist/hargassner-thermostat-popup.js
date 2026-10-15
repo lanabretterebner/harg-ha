@@ -1,10 +1,10 @@
-/* Hargassner thermostat popup and dashboard card, v1.4.3.
+/* Hargassner thermostat popup and dashboard card, v1.4.4.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. Temperature gestures use guarded native climate.set_temperature only.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.3";
+const VERSION = "1.4.4";
 // Coalesce rapid native +/- gestures while reducing the avoidable send delay.
 const TEMPERATURE_BUTTON_DEBOUNCE_MS = 250;
 const SCHEMA = "configured_room_setpoint_v1";
@@ -110,6 +110,7 @@ export function installHargassnerThermostatPopup(environment = window) {
   // more-info stateObj and Home Assistant states are never replaced.
   const targetRecords = new Map();
   const connections = new Map();
+  const popupScopes = new Map();
   const targetCallShims = new WeakMap();
   function popupHass(host) {
     let node = host;
@@ -121,10 +122,91 @@ export function installHargassnerThermostatPopup(environment = window) {
   }
   function popupConnected(host) {
     const hass = popupHass(host);
-    return haConnected(hass) && connections.get(host)?.connected !== false;
+    return haConnected(hass) && connections.get(host)?.connected !== false &&
+      popupScopes.get(host)?.connected !== false && popupScopeMatches(host);
+  }
+  function retirePopupScope(host) {
+    const target = targetRecords.get(host);
+    target?.lease?.rotate(target.context);
+    retireTargetIntent(target?.presentation);
+    schedule(host);
+  }
+  function popupScopeMatches(host) {
+    const scope = popupScopes.get(host), hass = popupHass(host);
+    return (!scope?.connectionSeen || scope.connection === hass?.connection) &&
+      (!scope?.userSeen || scope.user === hass?.user?.id);
+  }
+  function clearPopupScope(host) {
+    const scope = popupScopes.get(host); if (!scope) return;
+    scope.live = false; popupScopes.delete(host);
+    for (const unsubscribe of Object.values(scope.unsubscribe)) scope.disposeSubscription(unsubscribe);
+    const own = Object.getOwnPropertyDescriptor(host, "hass");
+    if (scope.hass && own?.get === scope.hass.get && own?.set === scope.hass.set) {
+      if (scope.hass.original) Object.defineProperty(host, "hass", scope.hass.data ?
+        { ...scope.hass.original, value: scope.hass.value } : scope.hass.original);
+      else if (scope.hass.data && scope.hass.written) Object.defineProperty(host, "hass", {
+        value: scope.hass.value, writable: true, configurable: true, enumerable: true });
+      else delete host.hass;
+    }
+  }
+  function syncPopupScope(host) {
+    let scope = popupScopes.get(host);
+    const root = host.getRootNode?.();
+    if (scope && (scope.parent !== host.parentNode || scope.root !== root)) {
+      retirePopupScope(host); clearPopupScope(host); scope = null;
+    }
+    if (scope) return;
+    scope = { live: true, parent: host.parentNode, root, unsubscribe: {}, disposed: new WeakSet(), connectionSeen: false, userSeen: false };
+    scope.disposeSubscription = unsubscribe => {
+      if (typeof unsubscribe !== "function" || scope.disposed.has(unsubscribe)) return;
+      scope.disposed.add(unsubscribe);
+      try { unsubscribe(); } catch { /* Only this consumer's subscription. */ }
+    };
+    popupScopes.set(host, scope);
+    // Legacy/full-hass hosts can receive A -> B -> A before Lit updated().
+    // Intercept ONLY an existing writable property, preserving its native setter.
+    const original = Object.getOwnPropertyDescriptor(host, "hass"), inherited = descriptor(host, "hass");
+    if (inherited && (!original || original.configurable !== false) &&
+        (typeof inherited.get === "function" && typeof inherited.set === "function" ||
+          Object.hasOwn(inherited, "value") && inherited.writable === true)) {
+      const data = Object.hasOwn(inherited, "value");
+      const binding = { original, data, written: false, value: data ? host.hass : undefined, session: haSession(host.hass), connected: haConnected(host.hass) };
+      binding.get = function () { return data ? binding.value : inherited.get.call(this); };
+      binding.set = function (value) {
+        if (scope.live && (!sameHaSession(binding.session, value) || binding.connected && !haConnected(value))) retirePopupScope(host);
+        if (data) { binding.value = value; binding.written = true; } else inherited.set.call(this, value);
+        binding.session = haSession(binding.get.call(this));
+        binding.connected = haConnected(binding.get.call(this));
+      };
+      try {
+        Object.defineProperty(host, "hass", { configurable: true, enumerable: original?.enumerable ?? inherited.enumerable,
+          get: binding.get, set: binding.set }); scope.hass = binding;
+      } catch { /* Unsupported property retains the context/current-state guards. */ }
+    }
+    // Native2026 popup consumes separate API context, not a full hass property.
+    // These public Lit context callbacks run synchronously before render batching.
+    for (const name of ["hassConnection", "hassConfig"]) {
+      const callback = (value, unsubscribe) => {
+        if (!scope.live) { scope.disposeSubscription(unsubscribe); return; }
+        if (typeof unsubscribe === "function" && !scope.unsubscribe[name]) scope.unsubscribe[name] = unsubscribe;
+        if (name === "hassConnection") {
+          const connection = value?.connection, connected = value?.connected !== false && connection?.connected !== false;
+          const changed = scope.connectionSeen && (scope.connection !== connection || scope.connected !== false && !connected);
+          scope.connectionSeen = true; scope.connection = connection; scope.connected = connected;
+          if (changed) retirePopupScope(host); else schedule(host);
+        } else {
+          const user = value?.user?.id, changed = scope.userSeen && scope.user !== user;
+          scope.userSeen = true; scope.user = user;
+          if (changed) retirePopupScope(host); else schedule(host);
+        }
+      };
+      const event = new environment.CustomEvent("context-request", { bubbles: true, composed: true });
+      Object.assign(event, { context: name, callback, subscribe: true });
+      host.dispatchEvent(event);
+    }
   }
   function clearPopupConnection(host) {
-    connections.get(host)?.dispose?.(); connections.delete(host);
+    connections.get(host)?.dispose?.(); connections.delete(host); clearPopupScope(host);
   }
   function syncPopupConnection(host) {
     const hass = popupHass(host);
@@ -132,6 +214,7 @@ export function installHargassnerThermostatPopup(environment = window) {
     if (!host.isConnected || !scopedClimate(host.stateObj)) {
       clearPopupConnection(host); return;
     }
+    syncPopupScope(host);
     if (record && !sameHaSession(record.session, hass)) {
       record.dispose?.(); connections.delete(host); record = null;
     }
@@ -187,7 +270,7 @@ export function installHargassnerThermostatPopup(environment = window) {
   function targetCurrent(record) {
     const state = record.host.stateObj;
     return running && !record.closed && targetRecords.get(record.host) === record &&
-      record.host.isConnected && record.node.isConnected && sameHaSession(record.session, popupHass(record.host)) && popupConnected(record.host) && popupTarget(state) && record.presentation.allowsRequest(state) &&
+      record.host.isConnected && record.node.isConnected && sameHaSession(record.session, popupHass(record.host)) && popupScopeMatches(record.host) && popupConnected(record.host) && popupTarget(state) && record.presentation.allowsRequest(state) &&
       record.host.shadowRoot?.querySelectorAll("ha-state-control-climate-temperature").length === 1 &&
       record.host.shadowRoot.querySelector("ha-state-control-climate-temperature") === record.node;
   }
@@ -449,7 +532,9 @@ export function installHargassnerThermostatPopup(environment = window) {
       for (const host of [...statusRecords.keys()]) { try { clearStatus(host); } catch { /* Keep stopping other records. */ } }
       for (const host of [...targetRecords.keys()]) { try { clearTarget(host); } catch { /* Keep stopping other records. */ } }
       for (const connection of connections.values()) connection.dispose?.();
-      connections.clear(); queued.clear();
+      connections.clear();
+      for (const host of [...popupScopes.keys()]) clearPopupScope(host);
+      queued.clear();
       if (prototype && prototype.updated === wrapped) {
         if (originalDescriptor) Object.defineProperty(prototype, "updated", originalDescriptor);
         else delete prototype.updated;

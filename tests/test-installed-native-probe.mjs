@@ -54,13 +54,13 @@ function fixture({ slider = true, extraContext, callDelayMs = 0, dropCall = fals
   class Observer { constructor(fn) { this.fn = fn; this.disconnected = false; observers.push(this); } observe() {} disconnect() { this.disconnected = true; } }
   const body = new Element("body"); body.isConnected = true;
   const document = { body, createElement: name => new Element(name), querySelector: () => { denied.push("real-document-query"); throw Error("No real HA lookup allowed"); } };
-  const window = { hargassnerThermostatPopup: { version: "1.4.3", running: true } };
+  const window = { hargassnerThermostatPopup: { version: "1.4.4", running: true } };
   const context = vm.createContext({ window, document, customElements: { get: () => class {} }, MutationObserver: Observer,
     CustomEvent: class { constructor(type, options) { this.type = type; Object.assign(this, options); } },
     setTimeout, clearTimeout, Date, Symbol, WeakSet, Map, Set, Object, Number, String, Promise,
     requestAnimationFrame() { throw Error("RAF is forbidden"); } });
   vm.runInContext(source, context);
-  const start = options => context.startHargassnerNativeProbeV2({ installedVersion: "1.4.3", verifiedResourceSha256: "d".repeat(64), timeoutMs: 300, ...options });
+  const start = options => context.startHargassnerNativeProbeV2({ installedVersion: "1.4.4", verifiedResourceSha256: "d".repeat(64), timeoutMs: 300, ...options });
   return { start, window, body, contexts, denied, observers };
 }
 const results = [];
@@ -127,6 +127,25 @@ await test("missing fake receipt remains a bounded timeout", async () => {
 await test("unsupported gesture is refused before attaching a component", () => {
   const f = fixture(); assert.throws(() => f.start({ gesture: "unknown" }), /gesture path/); assert.equal(f.body.children.length, 0);
 });
+for (const scenario of ["submitted_inert", "qualified_uncertain"]) {
+  await test(`${scenario} refuses unguarded native/stock kinds before attachment`, () => {
+    for (const kind of ["native", "stock"]) {
+      const f = fixture(); assert.throws(() => f.start({ kind, scenario, exercise: true }), /guarded card or popup/); assert.equal(f.body.children.length, 0);
+    }
+  });
+  for (const kind of ["card", "popup"]) await test(`${scenario}/${kind} incomplete synthetic component is refused or times out with cleanup`, async () => {
+    const f = fixture(); f.start({ kind, scenario, exercise: true, timeoutMs: 200 }); await wait(260);
+    const r = f.window.hargassnerNativeProbeV2; assert.equal(r.status, kind === "card" ? "failed" : "timeout"); assert.equal(r.fakeServiceCalls.length, 0); assert.equal(f.body.children.length, 0);
+  });
+}
+await test("native popup context probe never invents a hass property and supplies ancestor context", () => {
+  const f = fixture(); f.start({kind:"popup", exercise:false}); const wrapper=f.body.children[0], host=wrapper.children[0];
+  assert.equal(Object.hasOwn(host,"hass"),false); assert.equal(typeof wrapper.hass.callService,"function"); assert.equal(f.window.hargassnerNativeProbeV2.lifecycleSource,"native_context");f.window.hargassnerNativeProbeV2.stop();
+});
+await test("explicit legacy popup probe keeps its existing full hass path", () => {
+  const f=fixture();f.start({kind:"popup",lifecycleSource:"legacy_hass",exercise:false});const wrapper=f.body.children[0],host=wrapper.children[0];assert.equal(typeof host.hass.callService,"function");assert.equal(Object.hasOwn(wrapper,"hass"),false);f.window.hargassnerNativeProbeV2.stop();
+});
+await test("unknown lifecycle source is refused before attachment", () => {const f=fixture();assert.throws(()=>f.start({lifecycleSource:"unknown"}),/lifecycle source/);assert.equal(f.body.children.length,0)});
 console.log(JSON.stringify({ scope: "portable protocol/cleanup model only", tests: results.length, passed: results.filter(row => row.passed).length,
   failed: results.filter(row => !row.passed).length, results }, null, 2));
 process.exitCode = results.some(row => !row.passed) ? 1 : 0;

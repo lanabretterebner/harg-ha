@@ -61,3 +61,20 @@ Recovery cases keep the unknown requested label while admitting a deliberate
 new gesture after a bound backend `sent_unconfirmed` receipt and a new coherent
 qualified basis. Old basis, split echoes, pending/unbound receipts and offline
 state remain blocked. Local timeout or transport status alone is insufficient.
+
+
+The1.4.4 popup scope cases additionally deliver connection/user A→B→A and
+connected→disconnected→ready synchronously before a Lit render. Existing
+writable hass descriptors and native hassConnection/hassConfig providers are
+both covered. Repeated connected identities preserve250ms drafts; owner-scoped
+subscriptions/descriptors release on stop/reparent, and captured old APIs/timers
+stay closed without replacing native controls.
+
+`npm run test:browser` also runs eight new popup scope assertions with real
+CustomEvent context propagation/DOM and synthetic native handlers. These are
+separate from actual HA Lit acceptance. The maintained installed-native probe
+now defaults to lifecycleSource native_context (synthetic provider ancestor, no
+full hass property invented on the native popup); legacy_hass remains explicit.
+It retains mount/cleanup and all former cases, and adds submitted-inert, qualified
+uncertainty, reconnect/ABA, lost-response and external-operation scenarios for
+root's separately recorded installed verification.

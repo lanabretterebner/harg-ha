@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "version": "1.4.3",
+  "version": "1.4.4",
   "supervisor_app_version": "1.5.0",
-  "prepared_at": "2026-10-15T09:55:13.282865+00:00",
+  "prepared_at": "2026-10-15T10:30:53.808523+00:00",
   "source_only": true,
   "hacs_installation_verified": false,
   "supervisor_app_installation_verified": false,
@@ -11,85 +11,92 @@
   "physical_commands": 0,
   "real_ha_service_calls": 0,
   "real_notification_deliveries": 0,
-  "frontend_source_sha256": "e76318c155d5d2a149ee94eede6d6924867e707d3813939168140093737c3ce1",
-  "frontend_functional_change_at_promotion": false,
-  "ingress_source_sha256": "1358fe2754e20f5519cbe106093a080c3508b3b8ed5f6cecbea3ae168e56271b",
-  "accepted_health_helper_sha256": "8f81aa20024f15032ae32a8103787ce5900cfb02457a2142a9f463cfd25f604c",
+  "frontend_source_sha256": "3f47e2c1d4d429b3366814270adb95a0deb24489ef2a30709f140b69d2d0e018",
+  "independent_functional_review_sha256": "d22cf0b94e090de8ed3598cf315b70652025fbc8cf898338c2398a47fe5a4baa",
+  "functional_source_freeze_sha256": "e9bdbb7c8c92aa52a1dfe60ef8b28fdf8dba9bdbb64583202d71ef69063a8b6b",
+  "promotion_version_header_only": true,
+  "popup_function_only_change_from_1_4_3": true,
+  "app_payload_unchanged_from_1_5_0": true,
+  "app_files_sha256": {
+    "CHANGELOG.md": "b63cc4a3c299d1f4b93e9e1ed606f069e0e90ec695a6a520ceff47d6c6a3d6ec",
+    "DOCS.md": "67e2c67eb2e55799077da596f3a54406f4ee284d73e6df6d7c5c0d076753ec2c",
+    "Dockerfile": "f83e7e153432ea92959e5a0848b3a45eebcc3bb465015305f8060b2a65830796",
+    "LICENSE": "f5eee63fb76b6585d82d7c3e7e7c5136331316c3256e72cb6bdf587f234d20de",
+    "README.md": "ed34515ee3379b3f9e7f94bce60b66ae82ff39530b3c1251396963cd14b95ab5",
+    "app_monitor.py": "3b2605b913bf016bf65d5498c54104ae954cc4e3911e2afc3b7f4e48fd121020",
+    "config.yaml": "40770b4b04fb6217e97d7d907e3eac388847e22c944cb13812109bd8b166b4b2",
+    "health_alerts.py": "8f81aa20024f15032ae32a8103787ce5900cfb02457a2142a9f463cfd25f604c",
+    "ingress_proxy.py": "1358fe2754e20f5519cbe106093a080c3508b3b8ed5f6cecbea3ae168e56271b",
+    "run_app.py": "78048786f195603e99cac5f9fb873611fc45ff619c5c20411b5bfe69144ae5be",
+    "test_app_monitor.py": "71f7933bb173820df5ec19f687ac44ef46d9c41e16c2d6e3c3f8c66f7f93384a",
+    "test_health_alerts.py": "1042986d605d48e52b49aa0b69e1dd9ebe6ce97af904dd97a41fba9e4ebbb884",
+    "test_ingress_proxy.py": "f51d2f1c3409d978d1a374cba84a4ed54feba44b90c9d7368811baff9ccca720",
+    "test_monitor_wire.py": "1594c6d05288b1a889579972ed2de261c2b80ebbf91dacb26d6d41f4a3bb5825"
+  },
   "node_syntax_passed": true,
   "package_tests": {
     "passed": 7,
     "failed": 0
   },
-  "node_model_tests": {
-    "passed": 743,
+  "node_model_suites": [
+    {
+      "tests": 22,
+      "passed": 22,
+      "failed": 0
+    },
+    {
+      "tests": 35,
+      "passed": 35,
+      "failed": 0
+    },
+    {
+      "tests": 68,
+      "passed": 68,
+      "failed": 0
+    },
+    {
+      "tests": 288,
+      "passed": 288,
+      "failed": 0
+    },
+    {
+      "tests": 348,
+      "passed": 348,
+      "failed": 0
+    },
+    {
+      "tests": 24,
+      "passed": 24,
+      "failed": 0
+    }
+  ],
+  "node_model_tests_passed": 761,
+  "maintained_native_probe_model_tests_passed": 24,
+  "npm_total_tests_passed": 785,
+  "standalone_browser": {
+    "retained_popup": 59,
+    "retained_card": 113,
+    "retained_groups": 22,
+    "new_popup_scope": 8,
+    "total": 202,
     "failed": 0,
-    "suites": [
-      {
-        "name": "response_time_card",
-        "tests": 22
-      },
-      {
-        "name": "optimistic_card",
-        "tests": 35
-      },
-      {
-        "name": "authority",
-        "tests": 68
-      },
-      {
-        "name": "both_circuit_mode_matrix",
-        "tests": 288
-      },
-      {
-        "name": "popup",
-        "tests": 330
-      }
-    ]
-  },
-  "maintained_native_probe_model_tests": {
-    "passed": 15,
-    "failed": 0
-  },
-  "standalone_browser_tests": {
-    "passed": 194,
-    "failed": 0,
-    "popup": 59,
-    "card": 113,
-    "groups": 22,
-    "scope": "Synthetic standalone local Chromium DOM fixtures, not installed Home Assistant Lit components"
+    "scope": "Local Chromium realDOM/contextevents with synthetic nativehandlers; not actual HA Lit or installed acceptance"
   },
   "browser_runner_negative_tests": {
     "passed": 10,
     "failed": 0
   },
-  "app_tests": {
+  "unchanged_app_tests": {
     "passed": 135,
     "failed": 0,
-    "monitor_and_runner": 24,
-    "wire_loopback": 8,
-    "ingress": 30,
-    "accepted_helper": 73
+    "source": "Exact prior app1.5.0 source-owner/packaged tests; no unchanged app retest or new build needed for frontend-only release"
   },
-  "test_network_scope": "Disposable loopback fixtures only; no real HA, controller, broker, manufacturer or observed VM requests",
-  "monitor_defaults": {
-    "enabled": false,
-    "poll_interval": 30,
-    "range_seconds": [
-      15,
-      60
-    ],
-    "max_response_bytes": 65536,
-    "request_deadline_seconds": 5,
-    "notification_limit_per_poll": 1
-  },
-  "monitor_permission": "homeassistant_api solely for Supervisor-provided notification credential; no user long-lived token, Supervisor-management, host, Docker or public ports",
-  "monitor_transport": "Verified HTTPS to dedicated health-only endpoint using original SNI/Host and optional connect IP; fixed internal Supervisor HA persistent_notification endpoint only",
-  "outbox": "Private durable bounded64-event at-least-once stable-ID queue; healthy first baseline silent; corrupt/full state refuses without erasure",
+  "native_probe_migration": "All former15 protocol cases retained,9additional preflight/cleanup cases; prepared scenarios nativecontext/legacyhass, coalescedABA, reconnect, lostresponse, externaloperation, submittedinert and coherent uncertainty. Actual scenario execution is separate.",
+  "test_network_scope": "Disposable loopback synthetic fixtures only; no real HA, controller, broker, manufacturer or observed VM requests",
   "limits": [
-    "Actual new-version container build, Supervisor permission/token delivery, app upgrade, notification commissioning and authenticated installed-native HA frontend acceptance are not established by these tests",
-    "Missing heartbeat evidence means unknown, not heater outage",
-    "HA-host/Core outage prevents its own notifications",
-    "Physical or end-to-end heating response is not established by model/loopback tests"
-  ],
-  "coverage_migration": "tests/COVERAGE-MIGRATION.md; all advertised model/browser entrypoints executed; existing combined tests README preserved"
+    "Installed served1.4.4 native acceptance remains separate and unverified at this source checkpoint",
+    "API/debounce retirement changes presentation lifecycle only; backend freshness/basis/correction-only authority unchanged",
+    "Supervisor app1.5.0 is byte-identical and independently installed; publication of this frontend does not imply a new app build/update",
+    "No heating or real persistent_notification delivery performed by source owner"
+  ]
 }

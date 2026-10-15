@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.4
+
+- Retire popup temperature API and debounce leases synchronously for coalesced connection/user and connectivity changes before Lit renders.
+- Subscribe only to owned native connection/config contexts; preserve existing hass setters and clean up on stop/reparent. Keep native nodes mounted and repeated-session drafts intact.
+- Add portable lifecycle regressions and eight real-DOM/context checks; extend maintained bounded installed-native probes.
+- Keep the separately versioned Supervisor ingress/monitor app1.5.0 byte-identical.
+
 ## 1.4.3
 
 - Preserve connection/user-scoped temperature API and debounce leases across reconnect and ABA, retaining uncertain requests without false rejection.
