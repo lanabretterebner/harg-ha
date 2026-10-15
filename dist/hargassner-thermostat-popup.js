@@ -1,10 +1,10 @@
-/* Hargassner thermostat popup and dashboard card, v1.3.0.
+/* Hargassner thermostat popup and dashboard card, v1.4.0.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. No data fetch, temperature command or mode guess.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.3.0";
+const VERSION = "1.4.0";
 const SCHEMA = "configured_room_setpoint_v1";
 const PRESETS = Object.freeze(["Aus", "Auto", "Heizen", "Absenken", "1x Heizen", "1x Absenken"]);
 // Original SVG paths from @mdi/js 7.4.47, icon data Apache-2.0.
@@ -296,7 +296,7 @@ export function installHargassnerThermostatCard(environment = window) {
   if (!customElements.get(cardType)) {
     class HargassnerThermostatCard extends HTMLElement {
       constructor() {
-        super(); this.attachShadow({ mode: "open" }); this._generation = 0;
+        super(); this.attachShadow({ mode: "open" }); this._generation = 0; this._retiredNative = new WeakSet(); this._guardedNative = new WeakSet();
       }
       static getStubConfig(hass, entities = [], fallback = []) {
         const ids = [...entities, ...fallback, ...Object.keys(hass?.states || {})];
@@ -322,6 +322,11 @@ export function installHargassnerThermostatCard(environment = window) {
       connectedCallback() { this._render(); }
       disconnectedCallback() { this._dispose(); }
       _cancelNative(force = false) {
+        this._clearHold(true);
+        if (this._nativeContext) {
+          this._ui?.nativeHost.removeEventListener("context-request", this._nativeContext);
+          this._nativeContext = null;
+        }
         if (!force && !this._native && (!this._pending || !this._wantTarget)) return;
         this._generation++; this._cancelWait?.(); this._cancelWait = null;
         this._pending = false; this._native?.remove(); this._native = null;
@@ -346,6 +351,9 @@ export function installHargassnerThermostatCard(environment = window) {
           button{font:inherit;color:var(--primary-color);background:none;border:1px solid var(--divider-color);border-radius:8px;padding:8px;cursor:pointer}`;
         const card = document.createElement("ha-card"), title = document.createElement("h3");
         const nativeHost = document.createElement("div"), placeholder = document.createElement("div");
+        const updateNote = document.createElement("div"); updateNote.className = "placeholder"; updateNote.hidden = true;
+        updateNote.setAttribute("role", "status"); updateNote.setAttribute("aria-live", "polite");
+        updateNote.textContent = "Wird aktualisiert · letzter bestätigter Sollwert";
         placeholder.className = "placeholder";
         const retry = document.createElement("button"); retry.textContent = "Erneut versuchen";
         retry.addEventListener("click", () => { this._failed = false; this._render(); });
@@ -359,9 +367,9 @@ export function installHargassnerThermostatCard(environment = window) {
         statusLabel.className = "status-label"; statusLabel.textContent = "Heizkreisstatus";
         status.append(statusLabel, statusValue);
         const error = document.createElement("div"); error.className = "error"; error.setAttribute("role", "alert");
-        footer.append(readings, menuHost, status, error); card.append(title, nativeHost, placeholder, retry, footer);
+        footer.append(readings, menuHost, status, error); card.append(title, nativeHost, updateNote, placeholder, retry, footer);
         this.shadowRoot.append(style, card);
-        this._ui = { card, title, nativeHost, placeholder, retry, footer, current, correction, menuHost, statusValue, error };
+        this._ui = { card, title, nativeHost, updateNote, placeholder, retry, footer, current, correction, menuHost, statusValue, error };
       }
       _format(value, allowString = false, unit = this._hass?.config?.unit_system?.temperature || "°C") {
         if (allowString && typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value)) value = Number(value);
@@ -370,6 +378,66 @@ export function installHargassnerThermostatCard(environment = window) {
         let text; try { text = new Intl.NumberFormat(language, { maximumFractionDigits: 1 }).format(value); }
         catch { text = String(value); }
         return `${text} ${unit}`;
+      }
+      _clearHold(dropConfirmed = false) {
+        if (this._holdTimer !== undefined) environment.clearTimeout(this._holdTimer);
+        this._holdTimer = undefined; this._held = null;
+        if (dropConfirmed) this._lastConfirmed = null;
+        if (this._native) { this._native.inert = false; this._native.removeAttribute("aria-disabled"); }
+        if (this._ui) this._ui.updateNote.hidden = true;
+      }
+      _rememberTarget(state) {
+        const basis = state.attributes.Sollwertbasis;
+        this._lastConfirmed = typeof basis === "string" && /^[a-f0-9]{32}$/.test(basis)
+          ? { basis, state: { ...state, attributes: { ...state.attributes } } } : null;
+      }
+      _holdTarget(state) {
+        const previous = this._lastConfirmed, marker = state?.attributes?.Sollwertaktualisierung;
+        if (!this._native || !this._guardedNative.has(this._native) || !previous || !this._connectedHA() || !scopedClimate(state) ||
+            !["auto", "heat"].includes(state.state) || !sameValues(state.attributes.hvac_modes, HVAC) ||
+            state.attributes["Zieltemperatur verfügbar"] !== false ||
+            state.entity_id !== previous.state.entity_id || state.state !== previous.state.state ||
+            state.attributes.preset_mode !== previous.state.attributes.preset_mode ||
+            !marker || typeof marker !== "object" || Array.isArray(marker) ||
+            Object.keys(marker).sort().join(",") !== "basis,id,phase" || marker.basis !== previous.basis ||
+            typeof marker.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(marker.id) ||
+            !["pending", "readback"].includes(marker.phase) ||
+            this._held && this._held.id !== marker.id) return false;
+        if (!this._held) {
+          this._held = { id: marker.id };
+          this._retiredNative.add(this._native);
+          const generation = this._generation, held = this._held;
+          this._holdTimer = environment.setTimeout(() => {
+            if (this._generation === generation && this._held === held) {
+              this._cancelNative(true); this._render();
+            }
+          }, 8000);
+        }
+        // Presentation-only frozen confirmed state; never updates HA states or
+        // qualifies a command. The scoped native API guard reads latest HA state.
+        const frozen = { ...previous.state, attributes: { ...previous.state.attributes } };
+        this._native.hass = { ...this._hass, states: { ...this._hass.states, [state.entity_id]: frozen } };
+        this._native.inert = true; this._native.setAttribute("aria-disabled", "true");
+        this._ui.updateNote.hidden = false; this._ui.placeholder.hidden = true;
+        return true;
+      }
+      _guardNativeApi(native, generation) {
+        const current = () => this.isConnected && this._generation === generation && this._native === native &&
+          !this._held && !this._retiredNative.has(native) && this._connectedHA() && validTarget(this._hass?.states?.[this._config?.entity]);
+        const guarded = (...args) => {
+          if (!current() || args[0] !== "climate" || args[1] !== "set_temperature" ||
+              args[2]?.entity_id !== this._config?.entity) return Promise.resolve();
+          return this._hass.callService(...args);
+        };
+        const api = new Proxy({}, { get: (_, key) => key === "callService" ? guarded :
+          typeof this._hass?.[key] === "function" ? this._hass[key].bind(this._hass) : this._hass?.[key] });
+        this._nativeContext = event => {
+          // Official HA20260930.3 climate control consumes apiContext "hassApi";
+          // this local provider also guards already-debounced native callbacks.
+          if (event.context !== "hassApi" || typeof event.callback !== "function") return;
+          event.stopPropagation(); this._guardedNative.add(native); event.callback(api, () => {});
+        };
+        this._ui.nativeHost.addEventListener("context-request", this._nativeContext);
       }
       _render() {
         if (!this.isConnected || !this._config || !this._hass) return;
@@ -395,13 +463,22 @@ export function installHargassnerThermostatCard(environment = window) {
         ui.statusValue.textContent = operatingState(state, connected);
         if (customElements.get("ha-control-select-menu")) this._renderMenu(state);
         if (!connected || !validTarget(state)) {
+          if (this._holdTarget(state)) { this._renderMenu(state); return; }
           this._cancelNative(); ui.placeholder.hidden = false;
           ui.placeholder.textContent = "Zieltemperatur nicht verfügbar.";
           // Load the native menu even when a target is currently unqualified.
           if (!this._failed && !customElements.get("ha-control-select-menu")) this._load(false);
           return;
         }
-        if (this._native) { this._native.hass = this._hass; ui.placeholder.hidden = true; }
+        this._clearHold(); this._rememberTarget(state);
+        if (customElements.get("ha-control-select-menu")) this._renderMenu(state);
+        if (this._native) {
+          if (this._retiredNative.has(this._native)) {
+            try { this._attachNative(this._helpers, this._generation); }
+            catch { this._cancelNative(true); this._failed = true; this._render(); return; }
+          }
+          this._native.hass = this._hass; ui.placeholder.hidden = true;
+        }
         else {
           ui.placeholder.hidden = false;
           ui.placeholder.textContent = this._failed ? "Thermostat derzeit nicht verfügbar." : "Thermostat wird geladen …";
@@ -419,7 +496,7 @@ export function installHargassnerThermostatCard(environment = window) {
         }
         const context = eligible({ stateObj: state }), menu = this._binding.menu;
         menu.value = context ? state.attributes.preset_mode : undefined;
-        menu.disabled = this._busy || !this._connectedHA() || !context || !HVAC.includes(state.state);
+        menu.disabled = this._busy || Boolean(this._held) || !this._connectedHA() || !context || !HVAC.includes(state.state);
       }
       async _selectMode(event, binding) {
         event.stopPropagation();
@@ -447,6 +524,17 @@ export function installHargassnerThermostatCard(environment = window) {
           });
         });
       }
+      _attachNative(helpers, generation) {
+        const native = helpers.createCardElement({ type: "thermostat", entity: this._config.entity,
+          name: "Zieltemperatur", show_current_as_primary: false, features: [] });
+        if (native?.localName !== "hui-thermostat-card") throw new Error("native_card_unavailable");
+        if (this._nativeContext) this._ui.nativeHost.removeEventListener("context-request", this._nativeContext);
+        native.className = "native"; native.hass = this._hass; this._native = native;
+        this._guardNativeApi(native, generation);
+        // Replace synchronously from cached helpers after recovery: old debounced
+        // API callbacks remain retired forever, without a readback-time blank.
+        this._ui.nativeHost.replaceChildren(native);
+      }
       async _load(wantTarget) {
         if (this._pending) return;
         this._pending = true; this._wantTarget = wantTarget;
@@ -460,10 +548,7 @@ export function installHargassnerThermostatCard(environment = window) {
           if (!current()) return;
           const state = this._hass.states?.[entity];
           if (wantTarget && this._connectedHA() && validTarget(state)) {
-            const native = helpers.createCardElement({ type: "thermostat", entity, name: "Zieltemperatur", show_current_as_primary: false, features: [] });
-            if (native?.localName !== "hui-thermostat-card") throw new Error("native_card_unavailable");
-            native.className = "native"; native.hass = this._hass; this._native = native;
-            this._ui.nativeHost.replaceChildren(native);
+            this._helpers = helpers; this._attachNative(helpers, generation);
           }
           this._pending = false; this._render();
         } catch {
@@ -493,7 +578,7 @@ if (typeof window !== "undefined") {
  * Pinned native contract: frontend20260930.3 ha-device-entities-card.
  * No discovery, entity/device registry, data fetch or service changes.
  */
-const DEVICE_GROUP_VERSION = "1.3.0";
+const DEVICE_GROUP_VERSION = "1.4.0";
 const DEVICE_GROUP_KEY = Symbol.for("hargassner.device.groups.v1");
 const DEVICE_GROUP_LABELS = Object.freeze({
   "heizkreis_1": "Heizkreis 1",

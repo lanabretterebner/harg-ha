@@ -1,93 +1,26 @@
 {
-  "schema_version": 2,
-  "version": "1.3.0",
-  "resource_sha256": "b06a5fe42b37eeb28d4e7ef10e666e20d2b4c30feb2b3fef683c24e96ed44d51",
-  "home_assistant_reference": "https://raw.githubusercontent.com/home-assistant/frontend/20260930.3/src/dialogs/more-info/controls/more-info-climate.ts",
-  "source_browser_fixture": {
-    "engine": "Native collaborative Chromium",
-    "tests_passed": 112,
-    "resource_exact_copy": true,
-    "fixture_adjustment": "Only the three canonical module imports point to ../dist/; sibling fixture imports remain unchanged.",
-    "source_validation_sha256": "379be9a3aa5e7df42d687eb413e6a47b3a00be757e9ceac3f26fb8bde3db4a0c",
-    "independent_source_reviewed": true,
-    "popup_cases": 59,
-    "card_cases": 31,
-    "device_group_cases": 22,
-    "combined_fixture_receipt_sha256": "bb89d657d509e741cd17493778eb251afa3ee6ae4f28ec88cc4566d5b5cfa25d"
-  },
-  "visible_mode_control": "Modus",
-  "choices": [
-    "Aus",
-    "Auto",
-    "Heizen",
-    "Absenken",
-    "1x Heizen",
-    "1x Absenken"
-  ],
-  "both_native_mode_selectors_replaced": true,
-  "automatic_commands": false,
-  "explicit_choice_uses_native_preset_handler": true,
-  "status_attributes": [
-    "Heizkreisstatus",
-    "Heizkreisstatus-Code",
-    "Heizkreisstatus verfügbar"
-  ],
-  "status_fallback": "Nicht verfügbar",
-  "status_independent_of_preset": true,
-  "offline_icon_paths": {
-    "source": "@mdi/js7.4.47",
-    "source_sha256": "0edde73c83c07bc4d8675e96aba3a853a1fc8fa2b251e3f5f6dede4d0332ab3f",
-    "all_five_paths_exact": true,
-    "runtime_downloads": false,
-    "license": "Apache-2.0"
-  },
-  "supervisor_app": {
-    "version": "1.3.0",
-    "proxy_runtime_unchanged_from_local_0_1_0": true,
-    "loopback_https_tests_passed": 16,
-    "package_metadata_tests_passed": 7,
-    "base_image_index_verified": true,
-    "base_image_record": "validation/base-image.json",
-    "container_build_performed": false,
-    "actual_installation_verified": false
-  },
-  "actual_home_assistant_instance_tested": true,
+  "schema_version": 1,
+  "version": "1.4.0",
+  "prepared_at": "2026-10-15T00:24:35.928361+00:00",
+  "source_only": true,
   "hacs_installation_verified": false,
-  "previous_release_installation": {
-    "version": "1.2.0",
-    "home_assistant": "2026.9.3",
-    "hacs": "2.0.5",
-    "download_resource_and_both_native_single_modus_verified": true,
-    "new_version_installation_not_implied": true
+  "supervisor_app_installation_verified": false,
+  "frontend_source": "independently reviewed continuity candidate; root actual native HA synthetic-state check passed without heating writes",
+  "ingress_source": "30 synthetic TLS, SNI, retry, identity and log-secrecy cases passed",
+  "private_backend_included": false,
+  "package_tests_passed": 7,
+  "ingress_tests_passed": 30,
+  "browser_fixture": {
+    "browser": "T3 Code collaborative browser",
+    "popup": 59,
+    "card": 46,
+    "groups": 22,
+    "all_passed": true
   },
-  "limits": [
-    "Native browser fixtures use synthetic entities and record service payloads; no live heating actions.",
-    "Actual temporary-module card/device-page acceptance does not establish the published HACS1.3 download/update; that receipt is separate.",
-    "App source and inherited unchanged-runtime loopback tests do not establish a container build or commissioned HA ingress session."
-  ],
-  "actual_candidate_validation": {
-    "method": "Exact temporary source module in authenticated HA; this is separate from published HACS download/update.",
-    "native_control_rows": 12,
-    "native_sensor_rows": 28,
-    "unchanged_registry_entities": 40,
-    "unchanged_devices": 1,
-    "registry_names_ids_associations_unchanged": true,
-    "heating_commands": 0,
-    "receipt_sha256": "39ca7c6d3c1b97a938f0dee3e667773e69ba0cede54ff0f212034ceaccf5965a"
-  },
-  "thermostat_card": {
-    "type": "custom:hargassner-thermostat-card",
-    "picker_name": "Hargassner Thermostat",
-    "visual_editor": true,
-    "native_target_dial": true,
-    "measured_room_separate_from_target": true
-  },
-  "one_device_groups": {
-    "groups": 8,
-    "reference_entries": 90,
-    "classification": "Immutable MQTT identity suffix and entity domain",
-    "backend_or_registry_changes": false,
-    "native_rows_and_actions_retained": true,
-    "integration_reload_required": false
+  "native_component_review": {
+    "scope": "real HA native card and climate dial, synthetic state and service spy only",
+    "same_dial_inert_during_hold": true,
+    "stale_debounced_calls_blocked": true,
+    "physical_commands": 0
   }
 }

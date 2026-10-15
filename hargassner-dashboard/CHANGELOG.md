@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.0 (candidate)
+
+- Make the Ingress sidebar panel available to all authenticated HA users.
+- Add optional literal upstream_connect_host for LAN TCP routing while preserving
+  the original HTTPS hostname, SNI, certificate verification and Host header.
+- Add fixed, rate-limited diagnostic categories without secrets or request data.
+- Reconnect once only for bodyless GET/HEAD transient failures before response
+  headers; never replay writes, TLS failures, HTTP errors or failed response bodies.
+- Keep this app update independent of the installed thermostat frontend version.
+
 ## 1.3.0
 
 Track the combined HA client release. App proxy runtime, required options,

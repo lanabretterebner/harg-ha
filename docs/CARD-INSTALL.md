@@ -1,6 +1,6 @@
 # Add Hargassner thermostat cards without YAML
 
-1. Download/update this repository to1.3.0 in HACS and verify its existing module
+1. Download/update this repository to1.4.0 in HACS and verify its existing module
    resource. Reload the frontend and open a dashboard so the resource loads.
 2. Choose **Edit dashboard → Add card**. Search for **Hargassner Thermostat**
    in the custom cards list and select it.
@@ -26,7 +26,7 @@ compact alternative that opens the corrected popup. The separate Supervisor
 Ingress app opens the existing web dashboard and does not create these cards.
 
 If the card is absent from Add Card, confirm the exact module URL returns200,
-the HACS installed version is1.3.0 and the dashboard has loaded the resource.
+the HACS installed version is1.4.0 and the dashboard has loaded the resource.
 A full frontend reload is required when upgrading an already registered custom
 card class; clearing HTTP cache alone cannot replace an existing class in memory.
 For direct Settings/device-page loading use the documented global loader.
@@ -34,3 +34,5 @@ For direct Settings/device-page loading use the documented global loader.
 The module also groups rows inside the existing Hargassner device's native
 Control/Sensor lists. It changes presentation only, preserving the device,
 entity IDs and native actions; no registry/device migration or MQTT reload.
+
+During a qualified local room-offset write, the card briefly keeps the last confirmed dial visible and inert with a readback note. It never invents a new target. A fresh target replaces it; offline, changed context or an eight-second deadline removes the hold. This requires the matching backend display marker. Native target authority and separate day/setback controls are unchanged.

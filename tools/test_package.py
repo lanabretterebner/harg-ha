@@ -31,12 +31,12 @@ class PackageTests(unittest.TestCase):
         app = load("hargassner-dashboard/config.yaml")
         self.assertIs(app["ingress"], True)
         self.assertEqual(app["ingress_port"], 8099)
-        self.assertIs(app["panel_admin"], True)
+        self.assertIs(app["panel_admin"], False)
         for field in ("host_network", "host_pid", "hassio_api", "homeassistant_api",
                       "docker_api", "full_access", "privileged", "ports", "map"):
             self.assertFalse(app.get(field), field)
         self.assertEqual(app["options"], {"upstream_url": None, "ingress_token": None})
-        self.assertEqual(app["schema"], {"upstream_url": "url", "ingress_token": "password"})
+        self.assertEqual(app["schema"], {"upstream_url": "url", "upstream_connect_host": "str?", "ingress_token": "password"})
 
     def test_dockerfile_uses_verified_multiarch_index_and_only_proxy_source(self):
         image = json.loads((ROOT / "validation/base-image.json").read_text())

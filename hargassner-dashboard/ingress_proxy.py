@@ -1,14 +1,18 @@
 """Small, bounded HTTPS proxy reachable only through Home Assistant Ingress."""
 
 from dataclasses import dataclass
+import errno
 import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import ipaddress
 from pathlib import Path
 import re
 import ssl
+import socket
 import sys
 import threading
+import time
 from urllib.parse import urlsplit
 
 
@@ -28,6 +32,63 @@ RESPONSE_HEADERS = frozenset({
 USER_PATTERN = re.compile(r"[A-Za-z0-9_-]{1,128}")
 PATH_PATTERN = re.compile(r"/api/hassio_ingress/[A-Za-z0-9_-]{16,256}/?")
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{43,128}")
+DIAGNOSTIC_CATEGORIES = frozenset({
+    "tls_verification", "tls_handshake", "dns", "timeout", "connection_refused",
+    "connection_reset", "transport", "http_protocol", "configuration_or_response",
+    "response_policy", "internal",
+})
+
+
+def failure_category(exc):
+    """Return fixed labels only; never format the exception or request."""
+    if isinstance(exc, ssl.SSLCertVerificationError):
+        return "tls_verification"
+    if isinstance(exc, ssl.SSLError):
+        return "tls_handshake"
+    if isinstance(exc, socket.gaierror):
+        return "dns"
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    if isinstance(exc, ConnectionRefusedError):
+        return "connection_refused"
+    if isinstance(exc, (ConnectionResetError, http.client.RemoteDisconnected)):
+        return "connection_reset"
+    if isinstance(exc, OSError):
+        return "transport"
+    if isinstance(exc, http.client.HTTPException):
+        return "http_protocol"
+    return "configuration_or_response"
+
+
+def transient_connection_failure(exc):
+    if isinstance(exc, ssl.SSLError):
+        return False
+    if isinstance(exc, socket.gaierror):
+        return exc.errno == socket.EAI_AGAIN
+    return isinstance(exc, (TimeoutError, http.client.RemoteDisconnected)) or (
+        isinstance(exc, OSError) and exc.errno in {
+            errno.ECONNRESET, errno.ECONNREFUSED, errno.ECONNABORTED,
+            errno.ETIMEDOUT, errno.EHOSTUNREACH, errno.ENETUNREACH, errno.EPIPE,
+        })
+
+
+class Diagnostics:
+    """Bounded fixed-key rate limit shared by all request threads."""
+    def __init__(self, clock=time.monotonic):
+        self.clock = clock
+        self.last = {}
+        self.lock = threading.Lock()
+
+    def emit(self, category, event="failure"):
+        if category not in DIAGNOSTIC_CATEGORIES or event not in ("failure", "retry"):
+            return
+        key = (category, event)
+        with self.lock:
+            now = self.clock()
+            if key in self.last and now - self.last[key] < 30:
+                return
+            self.last[key] = now
+            print(f"Ingress upstream {event}: category={category}.", file=sys.stderr)
 
 
 class Rejected(Exception):
@@ -42,6 +103,7 @@ class Settings:
     port: int
     authority: str
     token: str
+    connect_host: str | None = None
 
     @classmethod
     def load(cls, filename="/data/options.json"):
@@ -62,7 +124,28 @@ class Settings:
             raise ValueError("Invalid upstream port")
         if not isinstance(token, str) or not TOKEN_PATTERN.fullmatch(token):
             raise ValueError("A random URL-safe ingress token is required")
-        return cls(parsed.hostname, port, parsed.netloc, token)
+        connect_host = options.get("upstream_connect_host")
+        if connect_host is not None:
+            if not isinstance(connect_host, str) or "%" in connect_host:
+                raise ValueError("The optional connection host must be a literal IP address")
+            address = ipaddress.ip_address(connect_host)
+            if address.is_unspecified or address.is_multicast:
+                raise ValueError("The optional connection host must be a unicast address")
+            connect_host = str(address)
+        return cls(parsed.hostname, port, parsed.netloc, token, connect_host)
+
+
+def upstream_connection(settings, context, timeout):
+    connection = http.client.HTTPSConnection(
+        settings.host, settings.port, timeout=timeout, context=context,
+    )
+    if settings.connect_host is not None:
+        # Replace only the stdlib's TCP factory. HTTPSConnection still owns
+        # the TLS handshake, original-host SNI and hostname verification.
+        def connect_to_ip(address, *args, **kwargs):
+            return socket.create_connection((settings.connect_host, address[1]), *args, **kwargs)
+        connection._create_connection = connect_to_ip
+    return connection
 
 
 def one_header(headers, name, required=False):
@@ -92,6 +175,7 @@ class ProxyServer(ThreadingHTTPServer):
     def __init__(self, address, settings, *, context=None):
         self.settings = settings
         self.tls = context or ssl.create_default_context()
+        self.diagnostics = Diagnostics()
         self.slots = threading.BoundedSemaphore(32)
         super().__init__(address, ProxyHandler)
 
@@ -113,7 +197,7 @@ class ProxyServer(ThreadingHTTPServer):
 
     def handle_error(self, request, client_address):
         # Tracebacks and request logs can contain authenticated ingress paths.
-        print("Ingress request failed.", file=sys.stderr)
+        self.diagnostics.emit("internal")
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -186,12 +270,24 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 "X-Hargassner-User": user,
                 "X-Ingress-Path": prefix,
             })
-            upstream = http.client.HTTPSConnection(
-                settings.host, settings.port, timeout=SOCKET_TIMEOUT,
-                context=self.server.tls,
-            )
-            upstream.request(self.command, target, body=body, headers=headers)
-            response = upstream.getresponse()
+            # Only bodyless read methods may reconnect once, before response
+            # headers exist. Both attempts share the original connection budget.
+            deadline = time.monotonic() + SOCKET_TIMEOUT
+            for attempt in range(2):
+                remaining = max(0.001, deadline - time.monotonic())
+                upstream = upstream_connection(settings, self.server.tls, remaining)
+                try:
+                    upstream.request(self.command, target, body=body, headers=headers)
+                    response = upstream.getresponse()
+                    break
+                except (OSError, http.client.HTTPException) as exc:
+                    upstream.close()
+                    upstream = None
+                    if (attempt != 0 or self.command not in ("GET", "HEAD") or size != 0
+                            or time.monotonic() >= deadline
+                            or not transient_connection_failure(exc)):
+                        raise
+                    self.server.diagnostics.emit(failure_category(exc), "retry")
             redirect = None
             if 300 <= response.status < 400 and response.status != 304:
                 redirect = one_header(response.headers, "Location", required=True)
@@ -214,8 +310,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 response_headers.append(("Location", redirect))
             self.reply(response.status, content, response_headers)
         except Rejected as exc:
+            if exc.status == 502:
+                self.server.diagnostics.emit("response_policy")
             self.error(exc.status, exc.message)
-        except (OSError, http.client.HTTPException, ValueError):
+        except (OSError, http.client.HTTPException, ValueError) as exc:
+            self.server.diagnostics.emit(failure_category(exc))
             self.error(502, "Cannot reach the local dashboard securely.")
         finally:
             if upstream is not None:

@@ -75,7 +75,8 @@ Find **Hargassner Dashboard**, choose **Install**, and wait for the local image
 build. This needs Home Assistant OS or a Supervisor installation, `amd64` or
 `aarch64`, and registry network access during installation. A HACS installation
 of the popup does not install this app; the two stores use the same repository
-URL independently. Container/HA app installation has not yet been verified.
+URL independently. The 1.3.1 change is a source candidate; actual upgrade and nonadministrator
+acceptance remain separate from earlier 1.3.0 installation evidence.
 
 For an offline source transfer, copy this entire folder to the HA local apps
 share (`/local_apps/hargassner-dashboard`), then refresh the App store and
@@ -105,6 +106,21 @@ there is no option to disable verification. The app uses the image's system
 trust store, so a private certificate authority needs to be installed into a
 custom image before it can be used.
 
+If the hostname resolves intermittently or to a public router address inside
+Home Assistant, an administrator may set the optional literal TCP destination:
+
+```yaml
+upstream_connect_host: 192.0.2.57
+```
+
+Use the actual dashboard server LAN IP, not this example. IPv4 and unscoped
+IPv6 unicast literals are supported; hostnames, URLs, ports and zone IDs are
+rejected. Omit this option to retain normal DNS. Keep `upstream_url` unchanged:
+its hostname still supplies TLS SNI, certificate hostname verification and the
+HTTP Host header. This option changes only where the TCP socket connects; it
+never weakens certificate validation. A moved dashboard needs this IP updated.
+No DNS fallback to a different server is attempted.
+
 `ingress_token` is the exact secret from the backend token file. This is not
 your dashboard password and not a Home Assistant API token. It is stored in
 the app's private options, never in browser URLs or frontend JavaScript. Protect
@@ -115,27 +131,45 @@ Home Assistant will open the dashboard inside its authenticated interface.
 Use that sidebar entry or Open Web UI for access; do not hardcode the temporary
 `/api/hassio_ingress/...` address in a website card.
 
-The default `panel_admin: true` restricts this panel to Home Assistant
-administrators. The backend applies the same existing dashboard control
+`panel_admin: false` makes the sidebar panel available to all authenticated
+Home Assistant users, including nonadministrators. Ingress authentication is
+still required; this does not expose an anonymous or LAN port. The backend applies the same existing dashboard control
 permissions to every admitted Home Assistant user. The app does not map Home
 Assistant entity permissions onto individual boiler controls.
 
 ## 3. Verify after installation
 
-1. While logged into Home Assistant as an administrator, open the app and
-   confirm that the dashboard loads without its separate login prompt.
+1. While logged into Home Assistant, open the app and confirm that the
+   dashboard loads without its separate login prompt. Repeat with a
+   nonadministrator account to verify sidebar and ingress access.
 2. Confirm telemetry and page navigation work, including a browser refresh.
 3. Open the original dashboard address directly in a private browser window;
    it should still require the local dashboard login.
 4. Confirm an unauthenticated Home Assistant browser cannot open the app.
 5. A permitted operator can verify an intended setting change through the
    normal dashboard workflow. A real HA ingress session and control through
-   this app have not yet been tested.
+   this candidate remain separate acceptance steps.
 
-A `502` usually indicates DNS, routing, certificate verification, or an
-unreachable backend. An authentication failure can indicate a
-mismatched token or source address. A write rejected after successful reads
-can indicate an unlisted browser origin. Reopen the app if the Home Assistant
+A `502` can indicate DNS, routing, certificate verification, or an unreachable
+backend. The app now logs a fixed diagnostic category such as `dns`, `timeout`,
+`connection_refused`, `connection_reset`, `tls_verification`, `tls_handshake`,
+`transport`, `http_protocol`, `response_policy` or `configuration_or_response`.
+Each failure/retry category is limited to one line per 30 seconds. Logs contain
+no URL, ingress path, IP address, user ID, token, header or raw exception text.
+A category identifies a failure class; it does not establish the cause of an
+earlier intermittent failure.
+
+Bodyless GET and HEAD requests may reconnect once after a transient DNS or
+transport failure before response headers are available. A retry is
+allowed only within the initial 15-second retry window and uses a fresh socket
+with its timeout reduced to the remaining window. Socket timeouts do not impose
+a total deadline on a slowly streamed response. Other
+methods, GET/HEAD with a body, TLS failures, HTTP status responses, response
+policy failures and response-body failures are never retried. In particular,
+POST/PUT/PATCH/DELETE operations are sent at most once by this proxy; a read
+retry is not evidence that an earlier control operation failed or completed.
+An authentication failure can indicate a mismatched token or source address.
+A write rejected after successful reads can indicate an unlisted browser origin. Reopen the app if the Home Assistant
 session expired. No fallback credentials are sent to the upstream dashboard.
 
 To remove password-free Home Assistant access, stop the app, then run on the
@@ -178,7 +212,8 @@ These tests need Python 3 and OpenSSL. They create a temporary local HTTPS
 server and certificate, and check peer enforcement, header replacement,
 request/response bounds, duplicate header rejection, redirect handling, and
 certificate/hostname verification. They make no live Home Assistant or
-controller requests. The container build and installation remain unverified.
+controller requests. The 1.3.1 container build, upgrade and actual nonadministrator access remain
+unverified by these synthetic tests.
 
 The separately installed backend has its own ingress and browser verification.
 This source package does not contain a controller identity, credential, live

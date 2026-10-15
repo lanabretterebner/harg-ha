@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.0
+
+- Preserve the last confirmed thermostat dial during a bounded, qualified room-offset readback. Block stale and already-debounced service calls while it reconciles.
+- Admit all authenticated HA users to the ingress panel.
+- Support a fixed LAN TCP address with original TLS hostname verification; add bounded read reconnect and credential-free diagnostics.
+
 ## 1.3.0
 
 Add a discoverable Hargassner Thermostat dashboard card with native visual
