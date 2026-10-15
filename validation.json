@@ -39,5 +39,12 @@
   ],
   "node_model_tests_passed": 678,
   "browser_fixture_execution": "Not executed by this owner; root owns actual browser/native acceptance",
-  "coverage_migration": "tests/COVERAGE-MIGRATION.md explicitly replaces incompatible8s/remount assertions while retaining mode/authority and exact native-body coverage"
+  "coverage_migration": "tests/COVERAGE-MIGRATION.md explicitly replaces incompatible8s/remount assertions while retaining mode/authority and exact native-body coverage",
+  "browser_fixture_correction": {
+    "reason": "Synthetic hass helper incorrectly replaced authenticated Connection on every state callback, resetting scoped presentation by design",
+    "runtime_js_changed": false,
+    "corrected_card_browser_cases": 113,
+    "browser_execution": "Pending root rerun",
+    "source_scope_cases_passed": 4
+  }
 }

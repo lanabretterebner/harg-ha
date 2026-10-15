@@ -5,6 +5,9 @@ const PRESETS = ["Aus", "Auto", "Heizen", "Absenken", "1x Heizen", "1x Absenken"
 const BASIS = "a".repeat(32), OTHER = "b".repeat(32);
 const fixtures = document.querySelector("#fixtures");
 let requests = [], created = [], helperCalls = 0;
+// HA emits new hass/state objects on one authenticated Connection. A new
+// Connection means a different session and must deliberately discard intent.
+let fixtureConnection = { connected: true };
 class TemperatureControl extends HTMLElement {
   constructor(){ super(); this._debouncedCallService=type=>{clearTimeout(this.timer);this.timer=setTimeout(()=>this._callService(type),1000)};this._debouncedCallService.cancel=()=>clearTimeout(this.timer); }
   get _api(){return this.rawApi} set _api(value){this.rawApi=value}
@@ -35,7 +38,7 @@ const state = (changes = {}, attrs = {}) => ({ entity_id: "climate.synthetic_one
     temperature: 19, min_temp: 16, max_temp: 22, target_temp_step: 0.5, current_temperature: null,
     "Zieltemperatur verfügbar": true, Sollwertbasis: BASIS, Sollwertphase:"night", Sollwertparameter:"5", Raumkorrektur: "0", "Heizkreisstatus": "Tag/Nacht Abschaltung",
     "Heizkreisstatus-Code": 4, "Heizkreisstatus verfügbar": true, ...attrs } });
-const hass = (value = state()) => ({ connected: true, connection: { connected: true }, states: { [value.entity_id]: value },
+const hass = (value = state()) => ({ connected: true, connection: fixtureConnection, states: { [value.entity_id]: value },
   config: { unit_system: { temperature: "°C" } }, locale: { language: "de" },
   callService: async (domain, service, data) => { requests.push({ domain, service, data: { ...data } }); } });
 const assert = (v, m = "Assertion failed") => { if (!v) throw new Error(m); };
@@ -52,7 +55,7 @@ function mount(value = hass(), config = { entity: "climate.synthetic_one" }) {
 }
 const results = [];
 async function test(name, run) {
-  fixtures.replaceChildren(); requests = []; created = []; helperCalls = 0; window.loadCardHelpers = load;
+  fixtures.replaceChildren(); fixtureConnection = { connected: true }; requests = []; created = []; helperCalls = 0; window.loadCardHelpers = load;
   try { await run(); results.push({ name, passed: true }); }
   catch (e) { results.push({ name, passed: false, error: e.message }); }
 }
@@ -220,6 +223,11 @@ await test('draft survives old report and no native node is replaced',async()=>{
  const h=hass(),card=mount(h);await settle();const old=native(card),node=old.control;old.syntheticTemperature(19.5);await settle();
  equal(node.stateObj.attributes.temperature,19.5);card.hass=h;await settle();equal(node.stateObj.attributes.temperature,19.5);equal(native(card),old);equal(requests.length,1);
  card.hass=modeHass('Auto',{temperature:null,'Zieltemperatur verfügbar':false});await settle();equal(native(card),old);equal(node.stateObj.attributes.temperature,19.5);assert(old.inert);
+});
+await test('a genuinely replaced HA session never inherits old requested value or confirmed range',async()=>{
+ const h=hass(),card=mount(h);await settle();const old=native(card);old.syntheticTemperature(19.5);await settle();equal(old.control.stateObj.attributes.temperature,19.5);
+ const replacement=modeHass('Auto',{temperature:null,'Zieltemperatur verfügbar':false});replacement.connection={connected:true};card.hass=replacement;await settle();
+ equal(native(card),old);equal(old.control.stateObj.attributes.temperature,null);assert(old.inert);equal(card._presentation.intent,null);equal(card._presentation.confirmed,null);
 });
 fixtures.replaceChildren();delete window.loadCardHelpers;
 window.cardTestResults={passed:results.every(x=>x.passed),tests:results.length,results,scope:'Real browser custom elements/lifecycle with synthetic native/control/helper/service handlers; no HA connection.'};

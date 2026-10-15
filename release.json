@@ -50,14 +50,14 @@
     "tests/test-optimistic-matrix.mjs": "99baae88ddc5b5e7f00684aa3542860aac40b33028ef9b1ca4ad020d9543b25a",
     "tests/test-optimistic-popup.mjs": "870f93f9eebc622507a7dafad64b2f9197f7a95bb284eb2b85a37893ca9fa0f2",
     "tests/test-popup-continuity.mjs": "6bee55342030d5510744ba6acd8cd319d242b0292a033200672d55a2b9efc41f",
-    "tests/test-thermostat-card.js": "3f8ed6cbe5c4b8b164d397ecb7f5d134e50b4f97d19b5ce96525294cf8bdcacb",
+    "tests/test-thermostat-card.js": "be0939d4c2ac3b225aebac637690a20184475f7cbd8f6d26347f36224c58d835",
     "tests/test-thermostat-popup.html": "52b717a6fdbbacbb879a9871aa5a31c97a79675c68fadba9eb684417fb824bf0",
     "tests/test-thermostat-popup.js": "7f08463d9e442ff11112b8475201fa519c8bea83a3115e8b87224d34cbbb9b18",
     "tools/requirements.txt": "865bbefc83398c2d53d4d494e8c0ad2302c93e657b78b860a1eba3ac71044309",
     "tools/test_package.py": "b891c33442945b0e52a5ecacd84df9cfa2a31214fc74b8bef2474bfd9e65ca8b",
     "tools/validate.py": "f4b40993e5625d0243b38493936fb8ced15ab7101706d7560be7811aeb2ad8ed",
     "validation/base-image.json": "b9be0d45366d2bfe1c8928fcb0681383f7023c8587ef123afb290fe46db7234c",
-    "validation.json": "ff7e3216636578e88b3e93892db02a667b4b6bb71577fc687816df4d552687ac"
+    "validation.json": "52ab3ed63fca90cfbe6fadbec36727376c6e65e4867fb7e83833123fec0eacd6"
   },
   "supervisor_app_version": "1.4.0"
 }
