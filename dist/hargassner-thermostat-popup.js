@@ -1,11 +1,11 @@
-/* Hargassner thermostat popup and dashboard card, v1.4.7.
+/* Hargassner thermostat popup and dashboard card, v1.4.8.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. Qualified target gestures use guarded climate.set_temperature.
  * Unknown-target correction controls use the separately commissioned number.set_value.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.7";
+const VERSION = "1.4.8";
 // Coalesce rapid native +/- gestures while reducing the avoidable send delay.
 const TEMPERATURE_BUTTON_DEBOUNCE_MS = 250;
 const SCHEMA = "configured_room_setpoint_v1";
@@ -452,8 +452,44 @@ export function installHargassnerThermostatPopup(environment = window) {
     if (record.node.dataset.available !== String(available)) record.node.dataset.available = String(available);
     observe(record);
   }
+  // Lease only the proven native target region while its correction replacement
+  // is visible. Keep the native nodes and all command/API leases mounted.
+  function correctionLayout(record, shown) {
+    const target = record.target, region = target?.parentElement;
+    const note = targetRecords.get(record.host)?.note;
+    const dedicated = region?.classList.contains("controls") &&
+      [...region.children].every(child => child === target || child === note);
+    const desired = shown && target ? [[target, "display", "none"]] : [];
+    if (shown && dedicated) {
+      desired.push([region, "display", "none"], [record.host, "flex-grow", "0"],
+        [record.host, "flex-shrink", "0"], [record.host, "flex-basis", "auto"],
+        [record.host, "justify-content", "flex-start"]);
+      const current = record.host.shadowRoot.querySelectorAll(".current");
+      if (current.length === 1 && current[0].parentNode === record.host.shadowRoot)
+        desired.push([current[0], "margin-bottom", "8px"]);
+    }
+    const leases = record.layout || [];
+    for (const lease of leases) {
+      if (desired.some(([node, key]) => node === lease.node && key === lease.key)) continue;
+      if (lease.node.style.getPropertyValue(lease.key) === lease.value &&
+          lease.node.style.getPropertyPriority(lease.key) === "important") {
+        if (lease.original) lease.node.style.setProperty(lease.key, lease.original, lease.priority);
+        else lease.node.style.removeProperty(lease.key);
+      }
+    }
+    record.layout = desired.map(([node, key, value]) => {
+      const lease = leases.find(old => old.node === node && old.key === key) || {
+        node, key, original: node.style.getPropertyValue(key), priority: node.style.getPropertyPriority(key),
+      };
+      lease.value = value;
+      if (node.style.getPropertyValue(key) !== value || node.style.getPropertyPriority(key) !== "important")
+        node.style.setProperty(key, value, "important");
+      return lease;
+    });
+  }
   function clearCorrection(host) {
     const record = correctionRecords.get(host); if (!record) return;
+    correctionLayout(record, false);
     record.control.dispose();
     if (record.target) record.target.hidden = record.hidden;
     const note = targetRecords.get(host)?.note; if (note) note.hidden = false;
@@ -476,10 +512,11 @@ export function installHargassnerThermostatPopup(environment = window) {
         hass: popupHass(host), state: host.stateObj,
         connected: running && host.isConnected && popupConnected(host),
       }));
-      record = { control, anchor: anchors[0], target, hidden: target?.hidden || false, entity: state.entity_id };
-      correctionRecords.set(host, record); anchors[0].insertAdjacentElement("afterend", control.node);
+      record = { host, control, anchor: anchors[0], target, hidden: target?.hidden || false, entity: state.entity_id };
+      correctionRecords.set(host, record); anchors[0].insertAdjacentElement("beforebegin", control.node);
     }
     record.control.render();
+    correctionLayout(record, !record.control.node.hidden);
     if (target && target.hidden !== (!record.control.node.hidden || record.hidden)) target.hidden = !record.control.node.hidden || record.hidden;
     const note = targetRecords.get(host)?.note;
     if (note && note.hidden !== !record.control.node.hidden) note.hidden = !record.control.node.hidden;
@@ -1163,10 +1200,10 @@ export function installHargassnerThermostatCard(environment = window) {
           h3{font-size:16px;line-height:22px;font-weight:500;margin:16px 16px 6px;text-align:center;overflow-wrap:anywhere}
           .native{--ha-card-border-width:0;--ha-card-box-shadow:none;--ha-card-border-radius:0;--ha-card-background:transparent;display:block;height:260px}
           .placeholder{text-align:center;padding:28px 16px;color:var(--secondary-text-color)}
-          .footer{padding:4px 16px 14px;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;align-items:center;text-align:left}
+          .footer{padding:4px 16px 14px;display:grid;grid-template-columns:minmax(0,1fr);gap:6px;align-items:center;justify-items:center;text-align:center}
           .readings{grid-column:1/-1;display:flex;flex-wrap:wrap;justify-content:center;gap:2px 10px;font-size:12px;line-height:18px;color:var(--secondary-text-color)}
           .status-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
-          .mode{min-width:0}.mode ha-control-select-menu{max-width:100%}.status{max-width:150px;text-align:right;font-size:13px;line-height:18px;overflow-wrap:anywhere}.error{grid-column:1/-1;font-size:12px;line-height:18px;color:var(--error-color)}.error:empty{display:none}[hidden]{display:none!important}
+          .mode{min-width:0;width:100%;max-width:240px}.mode ha-control-select-menu{max-width:100%}.status{max-width:100%;text-align:center;font-size:13px;line-height:18px;overflow-wrap:anywhere}.error{grid-column:1/-1;font-size:12px;line-height:18px;color:var(--error-color)}.error:empty{display:none}[hidden]{display:none!important}
           button{font:inherit;color:var(--primary-color);background:none;border:1px solid var(--divider-color);border-radius:8px;padding:8px;cursor:pointer}`;
         const card = document.createElement("ha-card"), title = document.createElement("h3");
         const nativeHost = document.createElement("div"), placeholder = document.createElement("div");

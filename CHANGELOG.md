@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.8
+
+- Collapse the unavailable native target region only while the independent room-correction fallback is shown; restore native spacing when the configured target is available.
+- Show popup correction controls before Modus and status; stack card Modus and status vertically with centered spacing.
+- Keep native controls mounted, preserve command/readback behavior and retain separately rounded minus/plus buttons.
+- Keep the independently versioned ingress/monitor app1.5.2 byte-identical.
+
 ## 1.4.7
 
 - Give minus and plus separate rounded, filled, subtly bordered buttons with a visible gap and 44-pixel touch targets.

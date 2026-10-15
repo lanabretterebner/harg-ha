@@ -15,7 +15,7 @@ const ALLOWED = new Set([
   "/tests/test-correction-fallback.html", "/tests/test-correction-fallback.js",
 ]);
 const SUITES = [
-  { path: "/tests/test-correction-fallback.html", global: "correctionFallbackTests", groups: { correction: 26 } },
+  { path: "/tests/test-correction-fallback.html", global: "correctionFallbackTests", groups: { correction: 29 } },
   { path: "/tests/test-thermostat-popup.html", global: "hargassnerFrontendTests", groups: { popup: 59, card: 113 } },
   { path: "/tests/test-device-groups.html", global: "deviceGroupTestResults", groups: { groups: 22 } },
 ];

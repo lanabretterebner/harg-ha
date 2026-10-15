@@ -55,6 +55,30 @@ for(const kind of ['card','popup']){
 }
 await test('card/popup share one requested correction and do not mutate global number or target',async()=>{const f=await fixture('card'),p=document.createElement('more-info-climate');p.hass=f.h;p.stateObj=f.c;fixtures.append(p);p.render();await settle();plus(f).click();await delay();await settle();equal(p.shadowRoot.querySelector('[role=slider]').getAttribute('aria-valuenow'),'0.5');equal(f.calls.length,1);equal(f.h.states[f.n.entity_id].state,'0');equal(f.c.attributes.temperature,null)});
 await test('pending correction retains exact node across unrelated room/status updates',async()=>{const f=await fixture('card'),node=f.control();plus(f).click();await delay();f.update({...f.c,attributes:{...f.c.attributes,current_temperature:21,'Heizkreisstatus':'Frostschutz'}});await settle();equal(f.control(),node);equal(dial(f).getAttribute('aria-valuenow'),'0.5');equal(f.calls.length,1)});
+// Model native mobile CSS that reserves a260px control region and overrides
+// the hidden attribute on its target host. Only the owned fallback may collapse it.
+function popupLayout(f){
+ const style=document.createElement('style');style.textContent=':host{display:flex;flex:1 1 0%;flex-direction:column;justify-content:space-between;width:322px}.current{margin-bottom:40px}.controls{display:flex;min-height:260px;align-items:center;justify-content:center}ha-state-control-climate-temperature{display:block;height:260px;width:260px}ha-more-info-control-select-container{display:block;min-height:40px}';
+ const room=document.createElement('div');room.className='current';room.textContent='21.5 °C';room.style.cssText='height:32px;line-height:32px';
+ const frame=document.createElement('div');frame.style.cssText='display:flex;flex-direction:column;height:680px';f.host.before(frame);frame.append(f.host);f.host.shadowRoot.prepend(style,room);return{room,target:f.host.temperature,region:f.host.controls,control:f.control()};
+}
+await test('popup mobile unknown/known qualification and mode transitions collapse only fallback space and preserve nodes',async()=>{
+ const f=await fixture('popup');f.update(climate(1,true));await settle();const {room,target,region,control}=popupLayout(f);
+ region.style.setProperty('display','flex','important');target.style.setProperty('display','inline-flex','important');f.update(climate());await settle();
+ const compact=()=>{assert(getComputedStyle(region).display==='none','Native260px region still reserves space');assert(getComputedStyle(target).display==='none','Native target hidden attribute overridden');equal(region.getBoundingClientRect().height,0);equal(getComputedStyle(f.host).flexGrow,'0');equal(getComputedStyle(f.host).justifyContent,'flex-start');assert(f.host.getBoundingClientRect().height<400,'Popup still stretches to mobile parent');assert(control.getBoundingClientRect().top-room.getBoundingClientRect().bottom<=16,'Blank space above correction');assert(control.compareDocumentPosition(f.host.container)&Node.DOCUMENT_POSITION_FOLLOWING,'Mode is before correction');assert(f.host.container.compareDocumentPosition(f.host.shadowRoot.querySelector('[data-hargassner-operating-state]'))&Node.DOCUMENT_POSITION_FOLLOWING,'Status is before mode');equal(f.host.temperature,target);equal(f.control(),control)};
+ compact();const known=climate(1,true);f.update(known);await settle();assert(control.hidden);equal(region.style.getPropertyValue('display'),'flex');equal(region.style.getPropertyPriority('display'),'important');equal(target.style.getPropertyValue('display'),'inline-flex');equal(target.style.getPropertyPriority('display'),'important');assert(region.getBoundingClientRect().height>=260);equal(getComputedStyle(f.host).flexGrow,'1');equal(getComputedStyle(f.host).justifyContent,'space-between');equal(getComputedStyle(room).marginBottom,'40px');equal(f.host.temperature,target);
+ f.update(climate());await settle();compact();f.h.connected=false;f.refresh();await settle();assert(control.hidden);equal(region.style.getPropertyValue('display'),'flex');f.h.connected=true;f.refresh();await settle();compact();
+ const off=climate();off.state='off';off.attributes.preset_mode='Aus';f.update(off);await settle();assert(control.hidden);equal(region.style.getPropertyValue('display'),'flex');f.update(climate());await settle();compact();equal(f.calls,[]);
+});
+await test('popup fallback layout restores original inline styles and hidden state on stop or correction removal',async()=>{
+ const f=await fixture('popup'),{target,region}=popupLayout(f);f.refresh();await settle();equal(getComputedStyle(region).display,'none');delete f.h.states[f.n.entity_id];f.refresh();await settle();equal(region.style.getPropertyValue('display'),'');equal(target.style.getPropertyValue('display'),'');assert(!target.hidden);equal(getComputedStyle(region).display,'flex');
+ f.update(number());await settle();equal(getComputedStyle(region).display,'none');window.hargassnerThermostatPopup.stop();equal(region.style.getPropertyValue('display'),'');equal(target.style.getPropertyValue('display'),'');assert(!target.hidden);equal(f.calls,[]);
+ // Keep the following synthetic fixtures under their own active controller.
+ installHargassnerThermostatPopup(window);await window.hargassnerThermostatPopup.ready;
+});
+await test('popup fallback never hides a native control region with an unrelated child',async()=>{
+ const f=await fixture('popup'),{target,region}=popupLayout(f),other=document.createElement('button');other.textContent='Unrelated native control';region.append(other);f.refresh();await settle();assert(getComputedStyle(region).display!=='none','Unrelated native controls hidden');assert(other.getBoundingClientRect().height>0);equal(getComputedStyle(target).display,'none');equal(f.calls,[]);
+});
 const report={tests:results.length,passed:results.every(r=>r.passed),results,scope:'Loopback browser synthetic number services only; no HA/controller/network calls'};
 window.correctionFallbackTests=report;document.querySelector('#results').textContent=JSON.stringify(report,null,2);
 

@@ -82,7 +82,7 @@ root's separately recorded installed verification.
 
 Correction fallback coverage: `node tests/test-correction-resolver.mjs` checks
 the opaque backend marker, renamed IDs, duplicate/foreign device refusal and
-exact bounds. `node tools/test_browser.mjs` additionally runs 26 synthetic
+exact bounds. `node tools/test_browser.mjs` additionally runs 29 synthetic
 card/popup cases and two real pointer drags through the correction dial.
 Services are local recording stand-ins; these tests never connect to HA or a
 controller. Set `HARG_TEST_ARTIFACT_DIR` to save optional dial screenshots.
@@ -101,3 +101,10 @@ labels. The page uses local themed stand-ins, synthetic entity states and
 recorded number services. It does not establish actual HA theme/native visual
 acceptance. Set `HARG_TEST_ARTIFACT_DIR` to save screenshots. Existing control
 regressions still exercise the unchanged service and pending/readback routes.
+
+Popup layout regressions model a680-pixel mobile flex container, native
+space-between layout and a260-pixel target region. Unknown/known qualification,
+connectivity and mode changes preserve the same native and correction nodes,
+restore original inline values/priorities, and keep correction before mode/status.
+Correction removal and stop release owned styles; unrelated native control
+children prevent the dedicated-region collapse. All services remain synthetic.
