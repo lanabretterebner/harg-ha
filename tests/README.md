@@ -78,3 +78,15 @@ full hass property invented on the native popup); legacy_hass remains explicit.
 It retains mount/cleanup and all former cases, and adds submitted-inert, qualified
 uncertainty, reconnect/ABA, lost-response and external-operation scenarios for
 root's separately recorded installed verification.
+
+
+Correction fallback coverage: `node tests/test-correction-resolver.mjs` checks
+the opaque backend marker, renamed IDs, duplicate/foreign device refusal and
+exact bounds. `node tools/test_browser.mjs` additionally runs 26 synthetic
+card/popup cases and two real pointer drags through the correction dial.
+Services are local recording stand-ins; these tests never connect to HA or a
+controller. Set `HARG_TEST_ARTIFACT_DIR` to save optional dial screenshots.
+The generated runner failure fixtures disable only the extra correction suite;
+the public CLI always includes it. Pending correction confirms only against a
+matching, later HA number receipt; client/server clock skew can keep that
+readback honestly uncertain. No elapsed timer proves success or resends a write.

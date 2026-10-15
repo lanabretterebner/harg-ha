@@ -19,7 +19,7 @@ async function fixture(before = "", after = "", options = {}) {
     const html = `<script>${before}</script><script type="module">${complete}${after}</script>`;
     await writeFile(join(root, "tests/test-thermostat-popup.html"), html);
     await writeFile(join(root, "tests/test-device-groups.html"), html);
-    return await runBrowserFixtures({ root, timeoutMs: 5_000, ...options });
+    return await runBrowserFixtures({ root, timeoutMs: 5_000, includeCorrection: false, ...options });
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 

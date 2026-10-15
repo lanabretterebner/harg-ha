@@ -1,6 +1,6 @@
 /** Execute the shipped synthetic DOM fixtures; never connect to HA or a controller. */
 import assert from "node:assert/strict";
-import { readFile, realpath } from "node:fs/promises";
+import { readFile, realpath, mkdir } from "node:fs/promises";
 import { createServer } from "node:http";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -12,8 +12,10 @@ const ALLOWED = new Set([
   "/tests/test-thermostat-card.js", "/tests/test-device-groups.html",
   "/tests/test-device-groups.js", "/tests/device-group-fixture-data.js",
   "/dist/hargassner-thermostat-popup.js", "/favicon.ico",
+  "/tests/test-correction-fallback.html", "/tests/test-correction-fallback.js",
 ]);
 const SUITES = [
+  { path: "/tests/test-correction-fallback.html", global: "correctionFallbackTests", groups: { correction: 26 } },
   { path: "/tests/test-thermostat-popup.html", global: "hargassnerFrontendTests", groups: { popup: 59, card: 113 } },
   { path: "/tests/test-device-groups.html", global: "deviceGroupTestResults", groups: { groups: 22 } },
 ];
@@ -59,13 +61,13 @@ function validateGroup(name, group, minimum) {
 
 // The optional root is solely for synthetic runner fault-injection checks. CLI
 // execution always serves the packaged files above; no remote URL is accepted.
-export async function runBrowserFixtures({ root = ROOT, executablePath = process.env.HARG_BROWSER_EXECUTABLE, timeoutMs = 120_000 } = {}) {
+export async function runBrowserFixtures({ root = ROOT, executablePath = process.env.HARG_BROWSER_EXECUTABLE, timeoutMs = 120_000, includeCorrection = true } = {}) {
   const { server, origin } = await fixtureServer(root);
   let browser;
   const report = { schemaVersion: 1, scope: "Standalone synthetic HA DOM fixtures; no installed-native or physical acceptance", suites: [] };
   try {
     browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
-    for (const suite of SUITES) {
+    for (const suite of SUITES.filter(suite => includeCorrection || suite.global !== "correctionFallbackTests")) {
       const errors = [];
       const context = await browser.newContext({ serviceWorkers: "block" });
       try {
@@ -84,8 +86,27 @@ export async function runBrowserFixtures({ root = ROOT, executablePath = process
         page.on("response", response => { if (response.status() >= 400) errors.push(`HTTP ${response.status()}: ${new URL(response.url()).pathname}`); });
         await page.goto(origin + suite.path, { waitUntil: "load", timeout: 30_000 });
         await page.waitForFunction(name => window[name] !== undefined, suite.global, { timeout: timeoutMs });
+        if (suite.global === "correctionFallbackTests") {
+          for (const kind of ["card", "popup"]) {
+            await page.evaluate(kind => window.prepareCorrectionPointerProbe(kind), kind);
+            const slider = page.locator('[data-hargassner-correction] [role="slider"]');
+            const box = await slider.boundingBox(); assert(box, "Correction dial missing");
+            await page.mouse.move(box.x + box.width / 2, box.y + box.height * 15 / 190);
+            await page.mouse.down();
+            await page.mouse.move(box.x + box.width * 195 / 220, box.y + box.height * 100 / 190, { steps: 5 });
+            await page.mouse.up();
+            await page.waitForFunction(() => window.readCorrectionPointerProbe().calls.length === 1);
+            const probe = await page.evaluate(() => window.readCorrectionPointerProbe());
+            assert.deepEqual(probe.calls, [["number", "set_value", { entity_id: "number.renamed_1", value: 2 }]]);
+            assert.equal(probe.correction, "2"); assert.equal(probe.target, null);
+            if (process.env.HARG_TEST_ARTIFACT_DIR) {
+              await mkdir(process.env.HARG_TEST_ARTIFACT_DIR, { recursive: true });
+              await page.screenshot({ path: resolve(process.env.HARG_TEST_ARTIFACT_DIR, `${kind}-correction.png`) });
+            }
+          }
+        }
         const result = await page.evaluate(name => window[name], suite.global);
-        const groups = suite.global === "deviceGroupTestResults" ? { groups: result } : result;
+        const groups = suite.global === "deviceGroupTestResults" ? { groups: result } : suite.global === "correctionFallbackTests" ? { correction: result } : result;
         if (suite.global === "hargassnerFrontendTests") {
           const packageMetadata = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"));
           assert.equal(result.version, packageMetadata.version, "Fixture/module version mismatch");

@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.5
+
+- Keep a separately qualified room-correction control available in the card and popup when Auto has no qualified configured target basis.
+- Preserve unknown configured targets, missing room readings, independent mode availability and backend command qualification.
+- Keep the separately versioned Supervisor ingress/monitor app1.5.1 unchanged.
+
 ## App1.5.1 checkpoint (frontend1.4.4 unchanged)
 
 Preserve the Supervisor environment through S6's with-contenv wrapper so enabled

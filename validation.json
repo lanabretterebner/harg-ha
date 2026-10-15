@@ -1,27 +1,32 @@
 {
-  "actual_pinned_image_init_smoke_performed": true,
-  "app_image_smoke_sha256": "383fb015aea167294361a6bc9679d55107dc5e9097675194457d14aebaa0479e",
-  "app_source_freeze_sha256": "4dba491f950f45e3188ca405589726bf64591313702505deca5f34d83adb0a8c",
-  "app_unittest_methods": 141,
-  "component_checkpoint": "frontend-1.4.4-app-1.5.1",
+  "app_bytes_unchanged_from_1_5_1": true,
+  "backend_contract_tests": 484,
+  "backend_maintained_tests": 310,
+  "browser_assertions": 228,
+  "browser_pointer_gestures": 2,
+  "browser_runner_negative_cases": 10,
+  "component_checkpoint": "frontend-1.4.5-app-1.5.1",
   "container_build_performed": false,
-  "frontend_bytes_unchanged_from_published_1_4_4": true,
-  "frontend_source_sha256": "3f47e2c1d4d429b3366814270adb95a0deb24489ef2a30709f140b69d2d0e018",
-  "frontend_test_evidence_inherited_by_exact_byte_identity": {
-    "browser_cases": 202,
-    "model_and_probe_cases": 785,
-    "runner_negative_cases": 10
-  },
+  "frontend_source_sha256": "77917f9879331ad4fcf018ab05be450b4ca65d92e9bfc30ce1d5b236c27ae46e",
+  "frontend_validation_pending": false,
   "hacs_installation_verified": false,
+  "independent_resolver_adversarial_checks": 6,
+  "independent_source_review": true,
+  "node_checks": 804,
   "physical_commands": 0,
-  "prepared_at": "2026-10-15T11:21:06.633101+00:00",
   "private_backend_included": false,
   "real_ha_service_calls": 0,
   "real_notification_deliveries": 0,
   "schema_version": 2,
-  "scope": "App-only source checkpoint on default branch. Oldfrontendv1.4.4tag/assets unchanged; actual installed-host acceptance recorded separately.",
+  "scope": "Final frontend1.4.5 correction fallback source; synthetic/loopback validation, installation separately recorded.",
   "source_only": true,
   "supervisor_app_installation_verified": false,
   "supervisor_app_version": "1.5.1",
-  "version": "1.4.4"
+  "unchanged_app_prior_evidence": {
+    "actual_pinned_image_init_smoke_performed": true,
+    "app_image_smoke_sha256": "383fb015aea167294361a6bc9679d55107dc5e9097675194457d14aebaa0479e",
+    "app_source_freeze_sha256": "4dba491f950f45e3188ca405589726bf64591313702505deca5f34d83adb0a8c",
+    "app_unittest_methods": 141
+  },
+  "version": "1.4.5"
 }

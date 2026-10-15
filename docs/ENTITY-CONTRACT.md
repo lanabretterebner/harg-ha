@@ -49,7 +49,7 @@ also leaves one existing MQTT device and all registry/discovery identities intac
 
 `Sollwertbasis` identifies the currently qualified configured target context. The backend remains the only command authority. Legacy `Sollwertaktualisierung` markers are display hints; they never authorize a temperature command.
 
-Frontend1.4.4 also understands additive `Temperaturauftrag` schemaVersion1: controller-unit `temperatureUnit: °C`, opaque `context`, monotonic operation `sequence` and full-envelope `revision`, bounded last8 `records`, plus same-snapshot `confirmedTarget`, `confirmedBasis` and `confirmedPreset` echoes. A record contains its sequence, original basis/requested target, status (`pending`, `confirmed`, `rejected`, `sent_unconfirmed`), safe reason/origin and timestamps. A confirmed correction record alone is insufficient: the displayed actual target/basis/preset must match the coherent echoes before settling. HA Fahrenheit display converts the Celsius metadata explicitly.
+Frontend1.4.5 also understands additive `Temperaturauftrag` schemaVersion1: controller-unit `temperatureUnit: °C`, opaque `context`, monotonic operation `sequence` and full-envelope `revision`, bounded last8 `records`, plus same-snapshot `confirmedTarget`, `confirmedBasis` and `confirmedPreset` echoes. A record contains its sequence, original basis/requested target, status (`pending`, `confirmed`, `rejected`, `sent_unconfirmed`), safe reason/origin and timestamps. A confirmed correction record alone is insufficient: the displayed actual target/basis/preset must match the coherent echoes before settling. HA Fahrenheit display converts the Celsius metadata explicitly.
 
 The client captures a local draft before native debounce, keeps it pending/uncertain without automatic retry, and rejects stale snapshots/outcomes. An older rejected request cannot undo newer input. Memory-only intent is scoped to the authenticated HA connection/user/entity; nothing changes shared HA states or persists an intent. Native card/control nodes remain mounted while callback/API leases rotate. Only bound definitive rejection allows rollback. Fresh genuine mode/base/day-night changes remain truthful; no cached target grants permission.
 
@@ -81,3 +81,30 @@ If none of these qualified settlement or recovery conditions arrives, an
 uncertain request can keep temperature control inert indefinitely. Its requested number
 and uncertainty note remain visible; independently qualified mode control stays
 available.
+
+
+## Independent correction fallback (frontend1.4.5)
+
+When no active target basis is qualified, including Auto during summer shutdown,
+the card and popup offer a separately labelled Raumkorrektur dial instead of
+inventing a day/setback target. It writes only the commissioned number entity,
+−3…+3°C in0.5°C steps; day/setback targets remain separately editable.
+
+The adapter passes an opaque `hargassner_correction_id` on both climate and its
+correction number. The number also advertises `hargassner_control_schema:
+room_correction_v1` and exact bounds. The frontend requires exactly one matching
+number, validates metadata and same-device registry information when present,
+and follows its actual entity ID after renaming. Missing, duplicated, excluded,
+foreign-device or unavailable entities cannot be substituted by name guessing.
+This requires the matching backend marker update; the frontend alone cannot
+create the control. Existing global offline/metadata/source command fences apply.
+
+Requested correction is shared in memory across card/popup for the same
+connection, authenticated user and entity. Rapid unsubmitted gestures coalesce;
+submitted writes become inert until matching newer number readback, definitive
+predispatch service rejection, or explicit recovery. Old echoes never roll the
+number back. Timeout, disconnect or lost service response remain honestly
+uncertain, retaining requested presentation without automatic resend. Client/
+server clock skew can prevent receipt confirmation; it never grants success.
+A normal qualified target restores its existing target-dial behavior. Unknown
+active target and missing actual room sensors remain labelled unknown.

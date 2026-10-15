@@ -1,14 +1,14 @@
 {
-  "name": "harg-ha",
-  "version": "1.4.4",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "check": "node --check dist/hargassner-thermostat-popup.js && node --check tests/installed-native-probe.js",
-    "test": "node tests/test-card-continuity.mjs && node tests/test-popup-continuity.mjs && node tests/test-installed-native-probe.mjs",
-    "test:browser": "node --test tests/test-browser-runner.mjs && node tools/test_browser.mjs && node tools/test_popup_scope_browser.mjs"
-  },
   "devDependencies": {
     "playwright": "1.64.1"
-  }
+  },
+  "name": "harg-ha",
+  "private": true,
+  "scripts": {
+    "check": "node --check dist/hargassner-thermostat-popup.js && node --check tests/installed-native-probe.js",
+    "test": "node tests/test-card-continuity.mjs && node tests/test-popup-continuity.mjs && node tests/test-installed-native-probe.mjs && node tests/test-correction-resolver.mjs",
+    "test:browser": "node --test tests/test-browser-runner.mjs && node tools/test_browser.mjs && node tools/test_popup_scope_browser.mjs"
+  },
+  "type": "module",
+  "version": "1.4.5"
 }

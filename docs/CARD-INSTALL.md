@@ -1,6 +1,6 @@
 # Add Hargassner thermostat cards without YAML
 
-1. Download/update this repository to1.4.4 in HACS and verify its existing module
+1. Download/update this repository to1.4.5 in HACS and verify its existing module
    resource. Reload the frontend and open a dashboard so the resource loads.
 2. Choose **Edit dashboard → Add card**. Search for **Hargassner Thermostat**
    in the custom cards list and select it.
@@ -26,7 +26,7 @@ compact alternative that opens the corrected popup. The separate Supervisor
 Ingress app opens the existing web dashboard and does not create these cards.
 
 If the card is absent from Add Card, confirm the exact module URL returns200,
-the HACS installed version is1.4.4 and the dashboard has loaded the resource.
+the HACS installed version is1.4.5 and the dashboard has loaded the resource.
 A full frontend reload is required when upgrading an already registered custom
 card class; clearing HTTP cache alone cannot replace an existing class in memory.
 For direct Settings/device-page loading use the documented global loader.
@@ -36,3 +36,8 @@ Control/Sensor lists. It changes presentation only, preserving the device,
 entity IDs and native actions; no registry/device migration or MQTT reload.
 
 The native card/control nodes stay mounted during target changes. Requested values remain labelled pending or uncertain until coherent qualified readback; only a definitive rejection rolls back. There is no automatic retry. External dashboard/controller changes and unaffected-circuit readback gaps retain a truthful read-only presentation. Actual mode/status and fresh command eligibility remain separate, including legitimate day/setback transitions. The Modus selector follows its own availability.
+
+If Auto reports an unknown target basis, use the separately available
+Raumkorrektur control. It changes only correction (−3 to +3°C in0.5°C steps),
+not an inferred day/setback target. Missing or unavailable correction entities
+remain read-only; the unknown configured target stays explicitly unknown.
