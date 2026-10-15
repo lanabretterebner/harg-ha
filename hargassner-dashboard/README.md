@@ -15,6 +15,12 @@ App store repositories, then install this app. This is separate from adding
 the same URL to HACS for the thermostat popup.
 
 See [DOCS.md](DOCS.md) for installation and configuration. The app and backend
-must both be configured before first use. Version 1.3.1 is a source candidate; its build and actual installation remain
-separate acceptance steps. Earlier version 1.3.0 installation evidence does not
-establish this candidate has been installed.
+must both be configured before first use. Current container build, app upgrade
+and monitor commissioning are separate acceptance steps; source tests do not
+establish an installed app or real notification delivery.
+
+
+App1.5.0 adds an optional independent VM-health monitor, disabled by default.
+It uses the dedicated VM health token and Supervisor-provided HA API token,
+never a long-lived user credential. See DOCS.md for permission/state/commissioning
+limits. HACS frontend installation and this Supervisor app update are separate.

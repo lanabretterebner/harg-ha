@@ -14,11 +14,11 @@ def validate():
     assert hacs == {"name": "Hargassner Thermostat Popup",
                     "filename": "hargassner-thermostat-popup.js"}
     assert package["name"] == "harg-ha"
-    assert package["version"] == release["version"] == "1.4.2"
+    assert package["version"] == release["version"] == "1.4.3"
     assert package["type"] == "module"
     script = ROOT / "dist" / hacs["filename"]
     text = script.read_text()
-    assert 'const VERSION = "1.4.2";' in text
+    assert 'const VERSION = "1.4.3";' in text
     assert 'const LABEL = "Modus";' in text
     assert "configured_room_setpoint_v1" in text
     assert "hargassner-thermostat-card" in text
@@ -39,7 +39,7 @@ def validate():
         assert re.fullmatch(r"[0-9a-f]{64}", expected)
         assert hashlib.sha256(target.read_bytes()).hexdigest() == expected, name
     actual = {str(path.relative_to(ROOT)) for path in ROOT.rglob("*")
-              if path.is_file() and ".git" not in path.parts and "__pycache__" not in path.parts}
+              if path.is_file() and ".git" not in path.parts and "__pycache__" not in path.parts and "node_modules" not in path.parts}
     assert actual == set(release["files"]) | {"release.json"}
     assert release["hacs_installation_verified"] is False
     assert release["supervisor_app_installation_verified"] is False

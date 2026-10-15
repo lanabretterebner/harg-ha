@@ -49,8 +49,35 @@ also leaves one existing MQTT device and all registry/discovery identities intac
 
 `Sollwertbasis` identifies the currently qualified configured target context. The backend remains the only command authority. Legacy `Sollwertaktualisierung` markers are display hints; they never authorize a temperature command.
 
-Frontend1.4.2 also understands additive `Temperaturauftrag` schemaVersion1: controller-unit `temperatureUnit: °C`, opaque `context`, monotonic operation `sequence` and full-envelope `revision`, bounded last8 `records`, plus same-snapshot `confirmedTarget`, `confirmedBasis` and `confirmedPreset` echoes. A record contains its sequence, original basis/requested target, status (`pending`, `confirmed`, `rejected`, `sent_unconfirmed`), safe reason/origin and timestamps. A confirmed correction record alone is insufficient: the displayed actual target/basis/preset must match the coherent echoes before settling. HA Fahrenheit display converts the Celsius metadata explicitly.
+Frontend1.4.3 also understands additive `Temperaturauftrag` schemaVersion1: controller-unit `temperatureUnit: °C`, opaque `context`, monotonic operation `sequence` and full-envelope `revision`, bounded last8 `records`, plus same-snapshot `confirmedTarget`, `confirmedBasis` and `confirmedPreset` echoes. A record contains its sequence, original basis/requested target, status (`pending`, `confirmed`, `rejected`, `sent_unconfirmed`), safe reason/origin and timestamps. A confirmed correction record alone is insufficient: the displayed actual target/basis/preset must match the coherent echoes before settling. HA Fahrenheit display converts the Celsius metadata explicitly.
 
 The client captures a local draft before native debounce, keeps it pending/uncertain without automatic retry, and rejects stale snapshots/outcomes. An older rejected request cannot undo newer input. Memory-only intent is scoped to the authenticated HA connection/user/entity; nothing changes shared HA states or persists an intent. Native card/control nodes remain mounted while callback/API leases rotate. Only bound definitive rejection allows rollback. Fresh genuine mode/base/day-night changes remain truthful; no cached target grants permission.
 
 During a source/readback gap, the last confirmed number remains a labelled inert private projection. The previous eight-second unmount is removed. Actual Off stays Off; offline/unqualified targets cannot send. The independently available six-mode path is not disabled by uncertain temperature presentation. Missing initial confirmed bounds never invents a dial range.
+
+Native +/- gestures update the private requested number immediately and coalesce
+into one send 250 ms after the last gesture. Continuous slider movement remains
+native local feedback; slider release sends immediately. Neither requested
+feedback nor service response substitutes for qualified controller confirmation.
+
+Once a temperature request is submitted, its requested number stays visible and
+all temperature surfaces for the same HA session/entity become inert until
+qualified coherent matching readback, a bound definitive rejection, or a genuine
+qualified mode/base/day-night replacement settles it. A bound terminal backend
+uncertainty plus a new coherent qualified basis also permits a new explicit
+gesture, even when the actual target differs from the uncertain requested one. Old repeated state,
+service promise resolution/error, elapsed time and reconnect alone do not
+release this lock. Further gestures are not queued or retried. This deliberately
+replaces the earlier ability to supersede a submitted request using its still
+cached basis; unsubmitted gestures still coalesce. The six-mode selector remains
+independently available.
+
+A terminal uncertain request with a new coherent qualified basis remains
+labelled with its uncertain requested number until another deliberate gesture
+replaces it; this never claims that the old requested target was confirmed.
+Local timeout/connection/service errors alone do not prove backend termination.
+
+If none of these qualified settlement or recovery conditions arrives, an
+uncertain request can keep temperature control inert indefinitely. Its requested number
+and uncertainty note remain visible; independently qualified mode control stays
+available.

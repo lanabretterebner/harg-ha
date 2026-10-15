@@ -1,6 +1,6 @@
 # Add Hargassner thermostat cards without YAML
 
-1. Download/update this repository to1.4.2 in HACS and verify its existing module
+1. Download/update this repository to1.4.3 in HACS and verify its existing module
    resource. Reload the frontend and open a dashboard so the resource loads.
 2. Choose **Edit dashboard → Add card**. Search for **Hargassner Thermostat**
    in the custom cards list and select it.
@@ -26,7 +26,7 @@ compact alternative that opens the corrected popup. The separate Supervisor
 Ingress app opens the existing web dashboard and does not create these cards.
 
 If the card is absent from Add Card, confirm the exact module URL returns200,
-the HACS installed version is1.4.2 and the dashboard has loaded the resource.
+the HACS installed version is1.4.3 and the dashboard has loaded the resource.
 A full frontend reload is required when upgrading an already registered custom
 card class; clearing HTTP cache alone cannot replace an existing class in memory.
 For direct Settings/device-page loading use the documented global loader.

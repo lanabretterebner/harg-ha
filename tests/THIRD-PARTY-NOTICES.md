@@ -15,3 +15,8 @@ Extraction was checked against the pinned complete source files locally. Running
 the test uses only bundled fixtures and Node built-ins; it fetches no upstream
 files and has no browser, HA or controller connection. Native Lit rendering and
 actual integration acceptance remain separate.
+
+`ha-native-gesture-bodies.json` also redistributes the same pinned climate
+component's `_handleButton`, `_valueChanging`, and `_valueChanged` bodies under
+the same Apache License 2.0. These tests mechanically remove TypeScript casts
+and exercise the unchanged native gesture logic with a deterministic clock.

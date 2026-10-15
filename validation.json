@@ -1,50 +1,95 @@
 {
-  "schema_version": 1,
-  "version": "1.4.2",
-  "supervisor_app_version": "1.4.0",
-  "prepared_at": "2026-10-15T03:13:33.759747+00:00",
+  "schema_version": 2,
+  "version": "1.4.3",
+  "supervisor_app_version": "1.5.0",
+  "prepared_at": "2026-10-15T09:55:13.282865+00:00",
   "source_only": true,
   "hacs_installation_verified": false,
   "supervisor_app_installation_verified": false,
+  "container_build_performed": false,
   "private_backend_included": false,
   "physical_commands": 0,
-  "frontend_source_sha256": "bed63c1907f9d83688dee21e1d073ec66220e6a2a556ca9093f6da2b23c9d704",
-  "ingress_source": "Every app subtree byte unchanged from published1.4.0; no rebuild or app update required",
-  "package_tests_passed": 7,
-  "node_model_tests": [
-    {
-      "file": "test-optimistic-card.mjs",
-      "tests": 17,
-      "passed": 17,
-      "failed": 0
-    },
-    {
-      "file": "test-optimistic-popup.mjs",
-      "tests": 305,
-      "passed": 305,
-      "failed": 0
-    },
-    {
-      "file": "test-optimistic-matrix.mjs",
-      "tests": 288,
-      "passed": 288,
-      "failed": 0
-    },
-    {
-      "file": "test-optimistic-authority.mjs",
-      "tests": 68,
-      "passed": 68,
-      "failed": 0
-    }
+  "real_ha_service_calls": 0,
+  "real_notification_deliveries": 0,
+  "frontend_source_sha256": "e76318c155d5d2a149ee94eede6d6924867e707d3813939168140093737c3ce1",
+  "frontend_functional_change_at_promotion": false,
+  "ingress_source_sha256": "1358fe2754e20f5519cbe106093a080c3508b3b8ed5f6cecbea3ae168e56271b",
+  "accepted_health_helper_sha256": "8f81aa20024f15032ae32a8103787ce5900cfb02457a2142a9f463cfd25f604c",
+  "node_syntax_passed": true,
+  "package_tests": {
+    "passed": 7,
+    "failed": 0
+  },
+  "node_model_tests": {
+    "passed": 743,
+    "failed": 0,
+    "suites": [
+      {
+        "name": "response_time_card",
+        "tests": 22
+      },
+      {
+        "name": "optimistic_card",
+        "tests": 35
+      },
+      {
+        "name": "authority",
+        "tests": 68
+      },
+      {
+        "name": "both_circuit_mode_matrix",
+        "tests": 288
+      },
+      {
+        "name": "popup",
+        "tests": 330
+      }
+    ]
+  },
+  "maintained_native_probe_model_tests": {
+    "passed": 15,
+    "failed": 0
+  },
+  "standalone_browser_tests": {
+    "passed": 194,
+    "failed": 0,
+    "popup": 59,
+    "card": 113,
+    "groups": 22,
+    "scope": "Synthetic standalone local Chromium DOM fixtures, not installed Home Assistant Lit components"
+  },
+  "browser_runner_negative_tests": {
+    "passed": 10,
+    "failed": 0
+  },
+  "app_tests": {
+    "passed": 135,
+    "failed": 0,
+    "monitor_and_runner": 24,
+    "wire_loopback": 8,
+    "ingress": 30,
+    "accepted_helper": 73
+  },
+  "test_network_scope": "Disposable loopback fixtures only; no real HA, controller, broker, manufacturer or observed VM requests",
+  "monitor_defaults": {
+    "enabled": false,
+    "poll_interval": 30,
+    "range_seconds": [
+      15,
+      60
+    ],
+    "max_response_bytes": 65536,
+    "request_deadline_seconds": 5,
+    "notification_limit_per_poll": 1
+  },
+  "monitor_permission": "homeassistant_api solely for Supervisor-provided notification credential; no user long-lived token, Supervisor-management, host, Docker or public ports",
+  "monitor_transport": "Verified HTTPS to dedicated health-only endpoint using original SNI/Host and optional connect IP; fixed internal Supervisor HA persistent_notification endpoint only",
+  "outbox": "Private durable bounded64-event at-least-once stable-ID queue; healthy first baseline silent; corrupt/full state refuses without erasure",
+  "limits": [
+    "Actual new-version container build, Supervisor permission/token delivery, app upgrade, notification commissioning and authenticated installed-native HA frontend acceptance are not established by these tests",
+    "Missing heartbeat evidence means unknown, not heater outage",
+    "HA-host/Core outage prevents its own notifications",
+    "Physical or end-to-end heating response is not established by model/loopback tests"
   ],
-  "node_model_tests_passed": 678,
-  "browser_fixture_execution": "Not executed by this owner; root owns actual browser/native acceptance",
-  "coverage_migration": "tests/COVERAGE-MIGRATION.md explicitly replaces incompatible8s/remount assertions while retaining mode/authority and exact native-body coverage",
-  "browser_fixture_correction": {
-    "reason": "Synthetic hass helper incorrectly replaced authenticated Connection on every state callback, resetting scoped presentation by design",
-    "runtime_js_changed": false,
-    "corrected_card_browser_cases": 113,
-    "browser_execution": "Pending root rerun",
-    "source_scope_cases_passed": 4
-  }
+  "coverage_migration": "tests/COVERAGE-MIGRATION.md; all advertised model/browser entrypoints executed; existing combined tests README preserved"
 }

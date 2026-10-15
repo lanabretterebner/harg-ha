@@ -2,3 +2,4 @@
 import './test-optimistic-card.mjs';
 import './test-optimistic-matrix.mjs';
 import './test-optimistic-authority.mjs';
+import './test-temperature-responsiveness.mjs';

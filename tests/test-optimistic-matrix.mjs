@@ -19,4 +19,4 @@ for(const entity of['climate.synthetic_hc1','climate.synthetic_hc2'])for(const f
   results.push({name,passed:true});
  }catch(error){results.push({name,passed:false,error:error.stack})}
 }
-console.log(JSON.stringify({tests:results.length,passed:results.filter(r=>r.passed).length,failed:results.filter(r=>!r.passed).length,failures:results.filter(r=>!r.passed)},null,2));process.exitCode=results.some(r=>!r.passed)?1:0;
+console.log(JSON.stringify({tests:results.length,passed:results.filter(r=>r.passed).length,failed:results.filter(r=>!r.passed).length,failures:results.filter(r=>!r.passed)},null,2));if(results.some(r=>!r.passed))process.exitCode=1;

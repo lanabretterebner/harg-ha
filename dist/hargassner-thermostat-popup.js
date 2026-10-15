@@ -1,10 +1,12 @@
-/* Hargassner thermostat popup and dashboard card, v1.4.2.
+/* Hargassner thermostat popup and dashboard card, v1.4.3.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. Temperature gestures use guarded native climate.set_temperature only.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.2";
+const VERSION = "1.4.3";
+// Coalesce rapid native +/- gestures while reducing the avoidable send delay.
+const TEMPERATURE_BUTTON_DEBOUNCE_MS = 250;
 const SCHEMA = "configured_room_setpoint_v1";
 const PRESETS = Object.freeze(["Aus", "Auto", "Heizen", "Absenken", "1x Heizen", "1x Absenken"]);
 // Original SVG paths from @mdi/js 7.4.47, icon data Apache-2.0.
@@ -42,6 +44,46 @@ function optionValues(menu) {
   const values = menu.options.map(option => option && typeof option === "object" ? option.value : null);
   return uniqueStrings(values) ? values : null;
 }
+function haSession(hass) {
+  return { connection: hass?.connection, user: hass?.user?.id };
+}
+function sameHaSession(session, hass) {
+  return !!session && session.connection === hass?.connection && session.user === hass?.user?.id;
+}
+function haConnected(hass) {
+  return !!hass && hass.connected !== false && hass.connection?.connected !== false;
+}
+// HA's websocket Connection emits these events synchronously. Retire authority
+// on the event itself, including disconnect -> ready before the next UI render.
+// Sampling also supports HA objects whose connectivity flags update first.
+function watchHaConnection(hass, retire, changed) {
+  const connection = hass?.connection;
+  const record = { session: haSession(hass), connected: haConnected(hass) };
+  const update = connected => {
+    if (record.connected === connected) return;
+    record.connected = connected;
+    if (!connected) retire();
+    changed();
+  };
+  const disconnected = () => update(false), ready = () => update(true);
+  if (typeof connection?.addEventListener === "function" && typeof connection?.removeEventListener === "function") {
+    connection.addEventListener("disconnected", disconnected);
+    connection.addEventListener("ready", ready);
+    record.dispose = () => {
+      connection.removeEventListener("disconnected", disconnected);
+      connection.removeEventListener("ready", ready);
+    };
+  }
+  record.sync = value => update(haConnected(value));
+  return record;
+}
+function retireTargetIntent(presentation) {
+  const intent = presentation?.intent;
+  if (!intent) return;
+  if (intent.submitted) intent.status = "sent_unconfirmed";
+  else presentation.intent = null;
+  presentation.notify();
+}
 function eligible(host) {
   const state = host.stateObj, attributes = state?.attributes;
   if (!state || typeof state.entity_id !== "string" || !state.entity_id.startsWith("climate.") ||
@@ -67,6 +109,7 @@ export function installHargassnerThermostatPopup(environment = window) {
   // Presentation records are scoped to one native popup child. The real
   // more-info stateObj and Home Assistant states are never replaced.
   const targetRecords = new Map();
+  const connections = new Map();
   const targetCallShims = new WeakMap();
   function popupHass(host) {
     let node = host;
@@ -78,7 +121,31 @@ export function installHargassnerThermostatPopup(environment = window) {
   }
   function popupConnected(host) {
     const hass = popupHass(host);
-    return !!hass && hass.connected !== false && hass.connection?.connected !== false;
+    return haConnected(hass) && connections.get(host)?.connected !== false;
+  }
+  function clearPopupConnection(host) {
+    connections.get(host)?.dispose?.(); connections.delete(host);
+  }
+  function syncPopupConnection(host) {
+    const hass = popupHass(host);
+    let record = connections.get(host);
+    if (!host.isConnected || !scopedClimate(host.stateObj)) {
+      clearPopupConnection(host); return;
+    }
+    if (record && !sameHaSession(record.session, hass)) {
+      record.dispose?.(); connections.delete(host); record = null;
+    }
+    if (!record) {
+      record = watchHaConnection(hass, () => {
+        const target = targetRecords.get(host);
+        // Rotate in place: restoring the unguarded native API even briefly
+        // would let a popup gesture escape while its next render is pending.
+        target?.lease?.rotate(target.context);
+        retireTargetIntent(target?.presentation);
+      }, () => schedule(host));
+      connections.set(host, record);
+    }
+    record.sync(hass);
   }
   function popupMode(state) {
     const preset = state?.attributes?.preset_mode;
@@ -120,7 +187,7 @@ export function installHargassnerThermostatPopup(environment = window) {
   function targetCurrent(record) {
     const state = record.host.stateObj;
     return running && !record.closed && targetRecords.get(record.host) === record &&
-      record.host.isConnected && record.node.isConnected && popupConnected(record.host) && popupTarget(state) && record.presentation.allows(state) &&
+      record.host.isConnected && record.node.isConnected && sameHaSession(record.session, popupHass(record.host)) && popupConnected(record.host) && popupTarget(state) && record.presentation.allowsRequest(state) &&
       record.host.shadowRoot?.querySelectorAll("ha-state-control-climate-temperature").length === 1 &&
       record.host.shadowRoot.querySelector("ha-state-control-climate-temperature") === record.node;
   }
@@ -149,7 +216,7 @@ export function installHargassnerThermostatPopup(environment = window) {
   function makeTargetRecord(host, node, state) {
     const hass = popupHass(host), presentation = sharedTargetPresentation(hass, state);
     presentation.observe(state, hass?.config?.unit_system?.temperature, popupConnected(host));
-    const record = { host, node, entity: state.entity_id, closed: false, held: null, presentation,
+    const record = { host, node, entity: state.entity_id, session: haSession(hass), closed: false, held: null, presentation,
       unit: hass?.config?.unit_system?.temperature, context: popupContext(state, host), inert: node.inert, opacity: node.style.opacity || "", aria: node.getAttribute("aria-disabled"),
       observer: new MutationObserver(() => schedule(host)) };
     record.note = document.createElement("div"); record.note.dataset.hargassnerTargetUpdate = VERSION;
@@ -169,7 +236,7 @@ export function installHargassnerThermostatPopup(environment = window) {
         applyTargetPresentation(record); return intent;
       },
       intentCurrent: intent => !intent || presentation.intent === intent,
-      rejected: intent => { presentation.reject(intent); if (!record.closed) applyTargetPresentation(record); },
+      unknown: intent => { presentation.unknown(intent); if (!record.closed) applyTargetPresentation(record); },
       setTimeout: environment.setTimeout.bind(environment), clearTimeout: environment.clearTimeout.bind(environment),
     });
     if (!record.lease) { clearTarget(host); return null; }
@@ -184,7 +251,10 @@ export function installHargassnerThermostatPopup(environment = window) {
     if (!host.isConnected || !eligible(host) || children?.length !== 1 ||
         children[0].parentElement?.classList.contains("controls") !== true) { clearTarget(host); return; }
     const node = children[0], unit = popupHass(host)?.config?.unit_system?.temperature;
-    if (record && (record.node !== node || record.entity !== state.entity_id || record.unit !== unit)) {
+    if (record && (record.node !== node || record.entity !== state.entity_id || record.unit !== unit || !sameHaSession(record.session, popupHass(host)))) {
+      if (!sameHaSession(record.session, popupHass(host)) && record.presentation.intent && !record.presentation.intent.submitted) {
+        record.presentation.intent = null; record.presentation.notify();
+      }
       clearTarget(host); record = null;
     }
     if (!record) { record = makeTargetRecord(host, node, state); if (!record) return; }
@@ -234,6 +304,8 @@ export function installHargassnerThermostatPopup(environment = window) {
         try { clear(host); } catch { /* Optional UI only. */ }
         try { clearStatus(host); } catch { /* Optional UI only. */ }
         try { clearTarget(host); } catch { /* Optional UI only. */ }
+      } finally {
+        if (!records.has(host) && !statusRecords.has(host) && !targetRecords.has(host)) clearPopupConnection(host);
       }
     });
   }
@@ -282,7 +354,7 @@ export function installHargassnerThermostatPopup(environment = window) {
       anchor.insertAdjacentElement("afterend", node);
     }
     const label = attributes["Heizkreisstatus"], code = attributes["Heizkreisstatus-Code"];
-    const available = !["unavailable", "unknown"].includes(state.state) &&
+    const available = popupConnected(host) && !["unavailable", "unknown"].includes(state.state) &&
       attributes["Heizkreisstatus verfügbar"] === true && Number.isSafeInteger(code) &&
       typeof label === "string" && label.trim().length > 0 && label.length <= 160;
     const text = available ? label : "Nicht verfügbar";
@@ -293,6 +365,7 @@ export function installHargassnerThermostatPopup(environment = window) {
     observe(record);
   }
   function reconcile(host) {
+    syncPopupConnection(host);
     reconcileTarget(host);
     reconcileStatus(host);
     if (!host.isConnected || !host.shadowRoot) { clear(host); return; }
@@ -375,7 +448,8 @@ export function installHargassnerThermostatPopup(environment = window) {
       for (const record of [...records.values()]) { try { restore(record); } catch { /* Keep stopping other records. */ } }
       for (const host of [...statusRecords.keys()]) { try { clearStatus(host); } catch { /* Keep stopping other records. */ } }
       for (const host of [...targetRecords.keys()]) { try { clearTarget(host); } catch { /* Keep stopping other records. */ } }
-      queued.clear();
+      for (const connection of connections.values()) connection.dispose?.();
+      connections.clear(); queued.clear();
       if (prototype && prototype.updated === wrapped) {
         if (originalDescriptor) Object.defineProperty(prototype, "updated", originalDescriptor);
         else delete prototype.updated;
@@ -475,6 +549,22 @@ export class HargassnerTargetPresentation {
       this.context !== null && envelope.context !== this.context ||
       envelope.context === this.context && envelope.revision < this.revision)) && this.coherent(state, unit);
   }
+  allowsRequest(state, unit = this.unit) {
+    if (!this.allows(state, unit)) return false;
+    const intent = this.intent;
+    if (!intent?.submitted) return true;
+    // A terminal backend uncertainty plus a new coherent qualified basis can
+    // authorize a new deliberate gesture. Keep the old requested number and
+    // uncertainty label until that gesture; neither elapsed time nor a local
+    // transport error proves that the backend operation has terminated.
+    const envelope = this.envelope(state), basis = state?.attributes?.Sollwertbasis;
+    return validTarget(state) && intent.status === "sent_unconfirmed" &&
+      typeof basis === "string" && /^[a-f0-9]{32}$/.test(basis) && basis !== intent.basis &&
+      envelope?.context === intent.context && intent.boundSequence !== null &&
+      !envelope.records.some(row => row.status === "pending") &&
+      envelope.records.some(row => row.sequence === intent.boundSequence &&
+        row.basis === intent.basis && row.target === intent.target && row.status === "sent_unconfirmed");
+  }
   configuration(state, unit) {
     const a = state?.attributes || {}, correction = Number(a.Raumkorrektur);
     const base = Number.isFinite(a.temperature) && a.Raumkorrektur != null && Number.isFinite(correction)
@@ -483,7 +573,7 @@ export class HargassnerTargetPresentation {
   }
   begin(state, unit, target) {
     this.scope(state, unit);
-    if (!validTarget(state) || !this.allows(state, unit) || !Number.isFinite(target) || target < state.attributes.min_temp || target > state.attributes.max_temp) return null;
+    if (!validTarget(state) || !this.allowsRequest(state, unit) || !Number.isFinite(target) || target < state.attributes.min_temp || target > state.attributes.max_temp) return null;
     const envelope = this.envelope(state);
     const intent = { serial: ++this.serial, target, basis: state.attributes.Sollwertbasis,
       context: envelope?.context ?? this.context, afterSequence: envelope?.sequence ?? this.sequence,
@@ -563,7 +653,7 @@ export class HargassnerTargetPresentation {
   }
   display(state, connected = true) {
     if (!this.confirmed || state?.state === "off" || !scopedClimate(state)) return { state, note: "", inert: !connected || !validTarget(state) };
-    const intent = this.intent, valid = connected && validTarget(state) && this.allows(state);
+    const intent = this.intent, valid = connected && validTarget(state) && this.allowsRequest(state);
     if (!intent && valid) return { state, note: this.failure ? "Änderung abgelehnt · bestätigter Sollwert" : "", inert: false };
     const old = this.confirmed.state.attributes, target = intent?.target ?? old.temperature;
     const attributes = { ...state.attributes, temperature: target, min_temp: old.min_temp, max_temp: old.max_temp,
@@ -576,7 +666,7 @@ export class HargassnerTargetPresentation {
 }
 
 // Memory only, isolated by authenticated HA connection/user/entity. This lets a
-// later gesture in another surface supersede an older pending gesture without
+// later gesture in another surface supersede an older unsubmitted draft without
 // persisting intent or modifying Home Assistant's shared states.
 const targetPresentationSessions = new WeakMap();
 function sharedTargetPresentation(hass, state, fallback) {
@@ -624,10 +714,17 @@ function temperatureLease(node, options) {
     const guarded = (...args) => {
       if (!current(epoch) || api.get.call(node) !== raw || args[0] !== "climate" || args[1] !== "set_temperature" || !options.allowed(args[2])) return Promise.resolve();
       const intent = options.prepare(args[2].temperature, true);
-      let result;
+      if (!intent) return Promise.resolve();
+      // Only this already-admitted synchronous dispatch may cross the lock
+      // installed by prepare; later gestures and captured APIs remain closed.
+      let result; record.dispatching = true;
       try { result = raw.callService(...args); }
-      catch (error) { options.rejected(intent); return Promise.resolve(); }
-      return Promise.resolve(result).catch(() => { options.rejected(intent); });
+      // The native HA call body supplies no definitive rejection receipt. A
+      // thrown/rejected transport or service error cannot prove non-application.
+      // A bound backend rejection receipt permits the rejected-value rollback.
+      catch { options.unknown(intent); return Promise.resolve(); }
+      finally { record.dispatching = false; }
+      return Promise.resolve(result).catch(() => { options.unknown(intent); });
     };
     const proxy = new Proxy(raw, { get: (value, key) => key === "callService" ? guarded : typeof value[key] === "function" ? value[key].bind(value) : value[key] });
     record.cache = { raw, epoch, proxy }; return proxy;
@@ -652,7 +749,7 @@ function temperatureLease(node, options) {
       record.rotate(options.context(), options.freshApi?.());
       record.tickets.set(ticket, { type, epoch: record.epoch, intent });
       const invoke = record.call;
-      record.timer = options.setTimeout(() => { record.timer = undefined; invoke.call(node, ticket); }, 1000);
+      record.timer = options.setTimeout(() => { record.timer = undefined; invoke.call(node, ticket); }, TEMPERATURE_BUTTON_DEBOUNCE_MS);
     };
     record.debounce.cancel = () => { record.originalDebounce.cancel(); options.clearTimeout(record.timer); record.timer = undefined; };
     Object.defineProperty(node, "_callService", { configurable: true, writable: true, value: record.call });
@@ -661,6 +758,7 @@ function temperatureLease(node, options) {
   };
   record.dispose = function () {
     record.closed = true; record.epoch++; record.originalDebounce.cancel();
+    options.clearTimeout(record.timer); record.timer = undefined;
     for (const [key, expected] of [["_api", record.get], ["_callService", record.call], ["_debouncedCallService", record.debounce]]) {
       const own = Object.getOwnPropertyDescriptor(node, key); if ((key === "_api" ? own?.get : own?.value) !== expected) continue;
       const original = record.originals[key];
@@ -718,12 +816,24 @@ export function installHargassnerThermostatCard(environment = window) {
         this._pending = false; this._native?.remove(); this._native = null;
       }
       _dispose() {
+        this._haConnection?.dispose?.(); this._haConnection = null;
         this._cancelNative(true); this._presentationUnsubscribe?.(); this._presentationUnsubscribe = null; this._presentation = new HargassnerTargetPresentation();
         if (this._binding) this._binding.menu.removeEventListener("wa-select", this._binding.handler);
         this._binding = null; this._ui = null; this._failed = false; this._busy = false;
         this.shadowRoot.replaceChildren();
       }
-      _connectedHA() { return this._hass?.connected !== false && this._hass?.connection?.connected !== false; }
+      _connectedHA() { return haConnected(this._hass) && this._haConnection?.connected !== false; }
+      _syncHaConnection() {
+        if (this._haConnection && !sameHaSession(this._haConnection.session, this._hass)) {
+          this._haConnection.dispose?.(); this._haConnection = null;
+        }
+        if (!this._haConnection) this._haConnection = watchHaConnection(this._hass, () => {
+          this._apiEpoch = (this._apiEpoch || 0) + 1;
+          this._controlLease?.rotate(this._nativeTargetContext, this._makeNativeApi(this._native, this._generation));
+          retireTargetIntent(this._presentation);
+        }, () => environment.queueMicrotask(() => { if (this.isConnected) this._render(); }));
+        this._haConnection.sync(this._hass);
+      }
       _build() {
         const style = document.createElement("style");
         style.textContent = `:host{display:block;height:100%}ha-card{height:100%;box-sizing:border-box;overflow:hidden}
@@ -776,9 +886,10 @@ export function installHargassnerThermostatCard(environment = window) {
           this._hass?.config?.unit_system?.temperature]);
       }
       _makeNativeApi(native, generation) {
-        const epoch = this._apiEpoch || 0, targetContext = this._targetContext(this._hass?.states?.[this._config?.entity]);
+        const epoch = this._apiEpoch || 0, session = this._haSession, targetContext = this._targetContext(this._hass?.states?.[this._config?.entity]);
         const current = () => this.isConnected && this._generation === generation && this._native === native &&
-          (this._apiEpoch || 0) === epoch && this._connectedHA() && validTarget(this._hass?.states?.[this._config?.entity]) && this._presentation.allows(this._hass?.states?.[this._config?.entity]) &&
+          (this._apiEpoch || 0) === epoch && this._haSession === session && sameHaSession(session, this._hass) && this._connectedHA() && validTarget(this._hass?.states?.[this._config?.entity]) && this._presentation.allows(this._hass?.states?.[this._config?.entity]) &&
+          (this._presentation.allowsRequest(this._hass?.states?.[this._config?.entity]) || this._controlLease?.dispatching === true) &&
           targetContext === this._targetContext(this._hass?.states?.[this._config?.entity]);
         const guarded = (...args) => {
           if (!current() || args[0] !== "climate" || args[1] !== "set_temperature" ||
@@ -815,8 +926,8 @@ export function installHargassnerThermostatCard(environment = window) {
         if (!this._controlLease) {
           const native = this._native, generation = this._generation;
           this._controlLease = temperatureLease(node, {
-            current: () => this.isConnected && node.isConnected && findTemperatureControl(native) === node && this._native === native && this._generation === generation && this._connectedHA() &&
-              validTarget(this._hass?.states?.[this._config?.entity]) && this._presentation.allows(this._hass?.states?.[this._config?.entity]),
+            current: () => this.isConnected && node.isConnected && findTemperatureControl(native) === node && this._native === native && this._generation === generation && sameHaSession(this._haSession, this._hass) && this._connectedHA() &&
+              validTarget(this._hass?.states?.[this._config?.entity]) && this._presentation.allowsRequest(this._hass?.states?.[this._config?.entity]),
             context: () => this._targetContext(this._hass?.states?.[this._config?.entity]),
             allowed: data => { const state = this._hass?.states?.[this._config?.entity]; return data?.entity_id === this._config?.entity &&
               Number.isFinite(data.temperature) && validTarget(state) && data.temperature >= state.attributes.min_temp && data.temperature <= state.attributes.max_temp; },
@@ -824,7 +935,7 @@ export function installHargassnerThermostatCard(environment = window) {
             freshApi: () => { this._apiEpoch = (this._apiEpoch || 0) + 1; return this._makeNativeApi(native, generation); },
             prepare: (target, submitted) => this._prepareTarget(target, submitted),
             intentCurrent: intent => !intent || this._presentation.intent === intent,
-            rejected: intent => { if (this._presentation.intent !== intent) return; this._presentation.reject(intent); if (this._ui) this._ui.error.textContent = "Temperaturänderung fehlgeschlagen."; this._render(); },
+            unknown: intent => { if (this._presentation.intent !== intent) return; this._presentation.unknown(intent); this._render(); },
           });
           if (this._controlLease) this._controlLease.rotate(this._nativeTargetContext, this._makeNativeApi(native, generation));
         }
@@ -853,6 +964,17 @@ export function installHargassnerThermostatCard(environment = window) {
       _render() {
         if (!this.isConnected || !this._config || !this._hass) return;
         if (!this._ui) this._build();
+        if (!sameHaSession(this._haSession, this._hass)) {
+          // Retire the old callbacks permanently, including A -> B -> A, while
+          // retaining the native DOM and separately available mode selector.
+          if (this._presentation?.intent && !this._presentation.intent.submitted) {
+            this._presentation.intent = null; this._presentation.notify();
+          }
+          this._haSession = haSession(this._hass); this._apiEpoch = (this._apiEpoch || 0) + 1;
+          this._controlLease?.dispose(); this._controlLease = null;
+          this._nativeTargetContext = null;
+        }
+        this._syncHaConnection();
         const ui = this._ui, state = this._hass.states?.[this._config.entity];
         const scoped = scopedClimate(state) && state.entity_id === this._config.entity, connected = this._connectedHA();
         const presentation = sharedTargetPresentation(this._hass, state, this._presentation);

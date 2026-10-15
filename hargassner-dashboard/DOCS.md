@@ -75,8 +75,8 @@ Find **Hargassner Dashboard**, choose **Install**, and wait for the local image
 build. This needs Home Assistant OS or a Supervisor installation, `amd64` or
 `aarch64`, and registry network access during installation. A HACS installation
 of the popup does not install this app; the two stores use the same repository
-URL independently. The 1.3.1 change is a source candidate; actual upgrade and nonadministrator
-acceptance remain separate from earlier 1.3.0 installation evidence.
+URL independently. App1.5.0 build, upgrade and monitor commissioning remain
+separate acceptance steps.
 
 For an offline source transfer, copy this entire folder to the HA local apps
 share (`/local_apps/hargassner-dashboard`), then refresh the App store and
@@ -186,8 +186,9 @@ token for deliberate reuse. Direct password login remains configured.
 
 ## Implementation and local tests
 
-The app publishes no LAN ports, requests no Supervisor or Home Assistant API
-permissions, and accepts requests only from the actual TCP peer `172.30.32.2`.
+The app publishes no LAN ports or Supervisor-management/host/Docker privileges.
+App1.5.0 requests the HA API permission solely for its optional monitor; ordinary
+ingress accepts requests only from the actual TCP peer `172.30.32.2`.
 It requires a single valid `X-Remote-User-Id` and `X-Ingress-Path` supplied by
 Ingress. All incoming cookies, authorization and forwarding headers are
 discarded. The HTTPS upstream receives only the shared credential, validated
@@ -212,8 +213,8 @@ These tests need Python 3 and OpenSSL. They create a temporary local HTTPS
 server and certificate, and check peer enforcement, header replacement,
 request/response bounds, duplicate header rejection, redirect handling, and
 certificate/hostname verification. They make no live Home Assistant or
-controller requests. The 1.3.1 container build, upgrade and actual nonadministrator access remain
-unverified by these synthetic tests.
+controller requests. The current container build, app upgrade and actual
+nonadministrator access remain unverified by these synthetic tests.
 
 The separately installed backend has its own ingress and browser verification.
 This source package does not contain a controller identity, credential, live
@@ -229,3 +230,87 @@ official [base image list](https://github.com/home-assistant/docker-base),
 [Ingress requirements](https://developers.home-assistant.io/docs/apps/presentation/#ingress),
 and [authenticated user headers](https://developers.home-assistant.io/docs/apps/security/#authenticating-a-user-when-using-ingress),
 checked on 2026-10-14.
+
+
+## Optional independent HA-host monitor (app1.5.0)
+
+The monitor runs on the HA host while the observed dashboard VM is separate.
+It never connects to the controller or MQTT. Existing ingress origin, token,
+connect-host and non-admin access options remain unchanged. Monitoring is
+**disabled by default**; updating the app alone does not send a notification.
+
+Set `monitor_enabled: true`, a separately generated random URL-safe
+`monitor_token` matching the VM's dedicated health-token configuration, and
+`monitor_poll_interval` between15 and60 seconds (default30). The monitor token
+must differ from `ingress_token`; it is not a general dashboard credential.
+Do not enter a long-lived HA user token. `homeassistant_api:true` supplies the
+Supervisor-owned `SUPERVISOR_TOKEN` to the app. It stays in process memory and
+private request pipes, is not stored in the durable alert state and is never
+returned by status or logs. Other Supervisor/admin/Docker/host permissions and
+public ports remain disabled.
+
+The VM read is exactly `GET /api/dashboard/v1/monitor-health` with the separate
+`X-Hargassner-Health` header, never a control request. HTTPS chain/hostname
+verification stays enabled; the optional TCP connect-IP preserves the original
+origin hostname for SNI, certificate checks and Host. There are no redirects,
+plaintext VM reads or retries within an individual poll. Response JSON is
+strict, limited to64KiB and rejected on duplicate keys/nonfinite numbers.
+A child-process deadline bounds DNS, TLS, headers and body reads to5s.
+
+The accepted sanitized health schema keeps original certificate/Telnet checker
+timestamps. Fresh API reads cannot renew stale runs. Defaults distinguish120s
+heartbeat,90000s certificate execution,45s Telnet execution and2s future clock
+tolerance. Missing/invalid/stale or failed heartbeat evidence is **unknown**;
+it does not prove the heater is down. Normal maintenance is a suppression state.
+A healthy first observation establishes a silent baseline. Changed fault,
+unknown, maintenance and recovery conditions update fixed persistent IDs
+`harg_health_heartbeat`, `harg_health_certificate`, `harg_health_telnet`.
+
+Delivery is ONLY local `POST
+http://172.30.32.2/core/api/services/persistent_notification/create`, using the
+Supervisor token. This explicit fixed private-transport policy applies only to
+the internal Supervisor proxy; the VM path is always verified HTTPS. The app
+cannot select arbitrary HA services or remote notification URLs. A2xx response
+accepts the queued delivery; response bodies are not read. Notifications contain
+fixed component/status/reason codes and event IDs, never credentials, hostnames,
+controller identifiers, raw measurements or upstream exceptions.
+
+State is separate from all controller/charge journals: evaluator-owned0700
+`/data/health-monitor`,600 atomic/fsynced state and lock files. Keep it across
+app restarts and normal upgrades. Events are durable before sending, with a
+stable retry ID and component notification ID. One event at most is delivered
+per poll; failed/ambiguous delivery retains that event. The bounded64-event
+outbox refuses corruption, unsafe ownership or capacity without deleting events.
+Do not erase active state to clear a warning. A full/corrupt outbox requires
+explicit operator inspection/backup recovery. This is at-least-once delivery,
+not exactly-once; a lost successful response can cause a stable-ID redelivery.
+
+`GET /api/local-monitor/status`, relative to the app's existing Ingress base,
+returns only enabled/running, last-check epoch, queue count, current-process last accepted
+component/condition and a fixed monitor error code. It uses the SAME actual
+Supervisor peer and authenticated HA-user gate, works for a commissioned
+non-admin user, accepts no query/body and refuses mutation methods. Do not
+access a container port directly or reveal the private Ingress URL in receipts.
+Status cannot perform recovery, trigger alerts or reveal options/token/HA user.
+The proxy and optional worker stop together on normal app shutdown; no new
+notification is started after shutdown is observed.
+
+Root commissioning must first verify the normal heartbeat/healthy baseline and
+zero new notifications. A controlled **monitor-only** wrong-token401 followed
+by restoration can then verify genuine endpoint-unverified and recovery
+notifications, stable IDs/outbox dedup and status readback without stopping the
+VM or changing ingress/controller state. It does not establish a heater outage.
+Only the release owner performs that explicit notification test. Synthetic
+loopback tests do not prove that the actual Supervisor permission/token/API or
+receiver has been commissioned.
+
+An HA-host or HA-Core outage prevents its own notifications; independent from
+the VM does not mean independent from HA. A separate external watchdog is a
+future operator choice. Container build, real notification delivery, receiver
+permissions and actual app update remain unverified until separately recorded.
+
+The reused project `health_alerts.py` is byte-pinned to SHA-256
+`8f81aa20024f15032ae32a8103787ce5900cfb02457a2142a9f463cfd25f604c`.
+Its evaluator/outbox semantics are retained; this app adapter adds the fixed
+health-token fetch, existing HTTPS connector, bounded one-event scheduler and
+Supervisor destination. No original producer observation time is rewritten.

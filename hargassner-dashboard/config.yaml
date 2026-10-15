@@ -1,5 +1,5 @@
 name: Hargassner Dashboard
-version: "1.4.0"
+version: "1.5.0"
 slug: hargassner_dashboard
 description: Open the local Hargassner dashboard using your Home Assistant login.
 arch:
@@ -13,11 +13,18 @@ ingress_port: 8099
 panel_icon: mdi:radiator
 panel_title: Hargassner
 panel_admin: false
+homeassistant_api: true
 options:
   upstream_url: null
   ingress_token: null
+  monitor_enabled: false
+  monitor_token: ""
+  monitor_poll_interval: 30
 schema:
   upstream_url: url
   upstream_connect_host: "str?"
   ingress_token: password
+  monitor_enabled: bool
+  monitor_token: "password?"
+  monitor_poll_interval: "int(15,60)"
 url: https://github.com/lanabretterebner/harg-ha/tree/main/hargassner-dashboard

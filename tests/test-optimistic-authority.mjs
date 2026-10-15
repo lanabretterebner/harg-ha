@@ -26,4 +26,4 @@ for(const kind of['offline','unknown','unavailable','off','wrong-hvac','schema',
  if(kind==='entity')next.entity_id='climate.foreign';if(kind==='unit')f.card._hass.config.unit_system.temperature='°F';
  f.update(next);await api.callService('climate','set_temperature',{entity_id:ENTITY,temperature:19.5});call.call(f.node,'value');assert.equal(f.calls.length,0);
 });
-console.log(JSON.stringify({tests:results.length,passed:results.filter(x=>x.passed).length,failed:results.filter(x=>!x.passed).length,results},null,2));process.exitCode=results.some(x=>!x.passed)?1:0;
+console.log(JSON.stringify({tests:results.length,passed:results.filter(x=>x.passed).length,failed:results.filter(x=>!x.passed).length,results},null,2));if(results.some(x=>!x.passed))process.exitCode=1;

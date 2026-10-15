@@ -1,6 +1,6 @@
 # Hargassner for Home Assistant
 
-Frontend1.4.2 and the unchanged optional ingress app1.4.0 include the HA clients for an existing Hargassner local-control
+Frontend1.4.3 and the optional ingress/monitor app1.5.0 include the HA clients for an existing Hargassner local-control
 backend: a discoverable thermostat dashboard card, the matching native popup,
 one-device page grouping, the optional dashboard Ingress app and reference examples.
 
@@ -27,7 +27,7 @@ MQTT/backend services. No live backend identity, configuration or token is inclu
    this URL as a **JavaScript module**:
 
    ```text
-   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.4.2
+   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.4.3
    ```
 
 3. Remove older manual resource URLs, fully reload each browser/Companion App,
@@ -42,7 +42,7 @@ loading before a dashboard is visited.
 
 For manual installation, copy `dist/hargassner-thermostat-popup.js` to
 `/config/www/hargassner-thermostat-popup.js` and use
-`/local/hargassner-thermostat-popup.js?v=1.4.2` instead. Remove that manual
+`/local/hargassner-thermostat-popup.js?v=1.4.3` instead. Remove that manual
 registration when switching to HACS.
 
 The single **Modus** menu offers **Aus · Auto · Heizen · Absenken · 1x Heizen ·
@@ -102,8 +102,10 @@ https://github.com/lanabretterebner/harg-ha
 
 Install **Hargassner Dashboard**. Supervisor builds the source for `amd64` or
 `aarch64`; no prebuilt app image is required. The verified official base image
-index is pinned by digest. The app exposes no host ports and requests no HA API,
-Supervisor API, Docker or host privileges.
+index is pinned by digest. The app exposes no host ports or Supervisor-management,
+Docker or host privileges. App1.5.0 requests HA API permission solely for optional
+monitor notifications using the Supervisor-provided token; monitoring is disabled
+by default. No long-lived HA user token is needed.
 
 The existing backend must allow the app's source IP and HA browser origin and
 provide a private ingress token. Set the app's HTTPS `upstream_url` and
@@ -111,6 +113,15 @@ provide a private ingress token. Set the app's HTTPS `upstream_url` and
 The ordinary dashboard URL keeps its password login. The app creates no second
 controller/manufacturer connection.
 [Complete app instructions](hargassner-dashboard/DOCS.md).
+
+The optional monitor reads only a dedicated token-authenticated health endpoint
+over verified HTTPS, preserving original checker times. It runs on HA rather
+than the observed VM and delivers persistent unknown/fault/recovery notifications
+through the fixed internal Supervisor HA API. Healthy first baseline is silent.
+Its private durable outbox preserves stable IDs across restart. Missing evidence
+means unknown, not heater-down; an HA outage prevents HA-host delivery. Enable
+it only after the matching VM endpoint/private token and root commissioning.
+Read-only monitor status uses the existing authenticated Ingress peer/user gate.
 
 Actual container build, app installation and a live Ingress session remain
 unverified by this packaging checkpoint. Home Assistant OS or a Supervisor
@@ -134,7 +145,7 @@ entity. MQTT discovery, freshness and correction-only dial writes remain backend
 
 The popup contract was researched against HA frontend20260930.3. The preceding
 1.2.0 release was downloaded in HA2026.9.3/HACS2.0.5, with both matching native
-popups showing one Modus menu, icons and status. Current1.4.2 installation and native-component acceptance are recorded separately from this source package. Release-specific fixture checks are in
+popups showing one Modus menu, icons and status. Current1.4.3 installation and native-component acceptance are recorded separately from this source package. Release-specific fixture checks are in
 [validation.json](validation.json). Unsupported layouts and unknown current
 presets retain native controls. Future HA DOM changes may require an update.
 
@@ -164,12 +175,25 @@ loopback suite uses Python/OpenSSL and synthetic temporary HTTPS endpoints:
 python3 -B -m unittest discover -s hargassner-dashboard -p 'test_*.py'
 ```
 
-Serve this repository locally and open `tests/test-thermostat-popup.html` for
-the popup/card fixture and `tests/test-device-groups.html` for scoped grouping.
-Tests contact no live HA/controller. Structure, syntax and
-loopback tests do not establish hosted installation or physical heating response.
-Publish a GitHub release tagged `v1.4.2` with the standalone JavaScript asset;
+Run the synthetic browser suites automatically from this repository:
+
+```sh
+npm ci
+npx playwright install chromium
+npm run test:browser
+```
+
+CI uses `npx playwright install --with-deps chromium`. To use an existing local
+Chromium instead, set `HARG_BROWSER_EXECUTABLE=/usr/bin/chromium`. The runner
+serves only a loopback HTTP fixture and checks card, popup and device grouping
+assertions plus page/console/request errors. It emits a structured result.
+`npm test` remains the Node-only suite. You may also serve this repository and
+open the HTML fixtures manually. These synthetic checks contact no live HA or
+controller and do not establish installed-native rendering or physical heating
+response. See [browser checks](tests/README.md).
+Publish a GitHub release tagged `v1.4.3` with the standalone JavaScript asset;
 Supervisor builds the committed app source from the repository.
 [Third-party icon licenses](THIRD-PARTY-NOTICES.md).
 
-Frontend1.4.2 keeps the native thermostat and temperature-control nodes mounted while readback catches up. A requested number is shown as **Angefragt** until coherent qualified readback confirms it; an uncertain outcome says **Bestätigung unklar**, without automatic retry or silent rollback. A definitive rejection restores the confirmed number. Current modes/status stay truthful, and genuine schedule/base changes reconcile normally. During qualification loss the previous confirmed number remains visibly read-only; offline never becomes command authority. The separate Modus selector remains usable whenever its own native authority is available. The optional ingress app stays1.4.0 unchanged.
+Frontend1.4.3 keeps the native thermostat and temperature-control nodes mounted while readback catches up. A requested number is shown as **Angefragt** until coherent qualified readback confirms it; an uncertain outcome says **Bestätigung unklar**, without automatic retry or silent rollback. A definitive rejection restores the confirmed number. Current modes/status stay truthful, and genuine schedule/base changes reconcile normally. During qualification loss the previous confirmed number remains visibly read-only; offline never becomes command authority. The separate Modus selector remains usable whenever its own native authority is available. The separately updated optional ingress app1.5.0 adds disabled-by-default independent
+VM-health monitoring; see its instructions for private options and commissioning.

@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "license": "Apache-2.0",
+  "upstream_project": "Home Assistant frontend",
+  "upstream_tag": "20260930.3",
+  "source": {
+    "path": "src/state-control/climate/ha-state-control-climate-temperature.ts",
+    "url": "https://raw.githubusercontent.com/home-assistant/frontend/20260930.3/src/state-control/climate/ha-state-control-climate-temperature.ts",
+    "sha256": "c5aa68f9857b02ec9200f6f359ebc7d700e8c9b406648a1ae2e1f775f98e80f6"
+  },
+  "extraction": "Verbatim _handleButton, _valueChanging and _valueChanged bodies; TypeScript erasure happens in test harness. No source logic changed.",
+  "bodies": {
+    "_handleButton": "\n    const target = ev.currentTarget.target as Target;\n    const step = ev.currentTarget.step as number;\n\n    const defaultValue = target === \"high\" ? this._max : this._min;\n\n    let temp = this._targetTemperature[target] ?? defaultValue;\n    temp += step;\n    temp = clamp(temp, this._min, this._max);\n    if (target === \"high\" && this._targetTemperature.low != null) {\n      temp = clamp(temp, this._targetTemperature.low, this._max);\n    }\n    if (target === \"low\" && this._targetTemperature.high != null) {\n      temp = clamp(temp, this._min, this._targetTemperature.high);\n    }\n\n    this._targetTemperature = {\n      ...this._targetTemperature,\n      [target]: temp,\n    };\n    this._debouncedCallService(target);\n  ",
+    "_valueChanging": "\n    const { value } = ev.detail;\n    if (typeof value !== \"number\" || isNaN(value)) return;\n    const target = ev.type.replace(\"-changing\", \"\");\n    this._targetTemperature = {\n      ...this._targetTemperature,\n      [target]: value,\n    };\n    this._selectTargetTemperature = target as Target;\n  ",
+    "_valueChanged": "\n    const { value } = ev.detail;\n    if (typeof value !== \"number\" || isNaN(value)) return;\n    const target = ev.type.replace(\"-changed\", \"\");\n    this._targetTemperature = {\n      ...this._targetTemperature,\n      [target]: value,\n    };\n    this._selectTargetTemperature = target as Target;\n    this._callService(target);\n  "
+  }
+}

@@ -29,25 +29,30 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(set(app["arch"]), {"amd64", "aarch64"})
         self.assertNotIn("image", app, "Supervisor must build the included source")
 
-    def test_app_needs_no_host_or_supervisor_privileges_or_public_ports(self):
+    def test_app_has_only_notification_ha_permission_and_no_host_privileges_or_ports(self):
         app = load("hargassner-dashboard/config.yaml")
         self.assertIs(app["ingress"], True)
         self.assertEqual(app["ingress_port"], 8099)
         self.assertIs(app["panel_admin"], False)
-        for field in ("host_network", "host_pid", "hassio_api", "homeassistant_api",
+        for field in ("host_network", "host_pid", "hassio_api",
                       "docker_api", "full_access", "privileged", "ports", "map"):
             self.assertFalse(app.get(field), field)
-        self.assertEqual(app["options"], {"upstream_url": None, "ingress_token": None})
-        self.assertEqual(app["schema"], {"upstream_url": "url", "upstream_connect_host": "str?", "ingress_token": "password"})
+        self.assertIs(app["homeassistant_api"], True)
+        self.assertEqual(app["options"], {"upstream_url": None, "ingress_token": None,
+                                           "monitor_enabled": False, "monitor_token": "",
+                                           "monitor_poll_interval": 30})
+        self.assertEqual(app["schema"], {"upstream_url": "url", "upstream_connect_host": "str?", "ingress_token": "password",
+                                           "monitor_enabled": "bool", "monitor_token": "password?",
+                                           "monitor_poll_interval": "int(15,60)"})
 
-    def test_dockerfile_uses_verified_multiarch_index_and_only_proxy_source(self):
+    def test_dockerfile_uses_verified_multiarch_index_and_only_monitor_ingress_source(self):
         image = json.loads((ROOT / "validation/base-image.json").read_text())
         dockerfile = (ROOT / "hargassner-dashboard/Dockerfile").read_text()
         self.assertIn(f"FROM {image['repository']}:{image['tag']}@{image['digest']}", dockerfile)
         platforms = {f"{row['os']}/{row['architecture']}" for row in image["platforms"]}
         self.assertTrue({"linux/amd64", "linux/arm64"}.issubset(platforms))
         self.assertEqual(re.findall(r"^COPY\s+(.*)$", dockerfile, re.M),
-                         ["ingress_proxy.py /app/ingress_proxy.py"])
+                         ["ingress_proxy.py app_monitor.py health_alerts.py run_app.py LICENSE /app/"])
         self.assertIn('io.hass.type="app"', dockerfile)
         self.assertIn('io.hass.arch="aarch64|amd64"', dockerfile)
         self.assertNotIn("BUILD_FROM", dockerfile)

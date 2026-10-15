@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.0
+
+- Add optional disabled-by-default HA-host health monitoring and persistent notifications through the Supervisor-provided token.
+- Preserve verified HTTPS/SNI/connect-IP ingress and non-admin panel behavior; add authenticated read-only monitor status.
+- Keep durable private dedup/outbox state across restart; no controller, broker or heating action is part of monitoring.
+
+
 ## 1.4.0 (candidate)
 
 - Make the Ingress sidebar panel available to all authenticated HA users.

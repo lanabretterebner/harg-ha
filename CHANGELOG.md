@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.3
+
+- Preserve connection/user-scoped temperature API and debounce leases across reconnect and ABA, retaining uncertain requests without false rejection.
+- Keep submitted target stable and inert until qualified reconciliation; serialize burst adjustments and preserve independent six-mode controls.
+- Ship maintained bounded installed-native probes and automated local-only browser fixtures.
+- Include separately versioned Supervisor app1.5.0 with optional disabled-by-default independent health monitoring, durable notification outbox and authenticated read-only status.
+
 ## 1.4.2
 
 - Keep existing native card/control nodes during target changes; rotate only guarded callback/API leases.
