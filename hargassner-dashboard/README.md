@@ -38,5 +38,9 @@ App1.5.2 drains a full notification outbox before recording current conditions,
 uses one strict bounded options snapshot for ingress and monitoring, and rejects
 incomplete upstream responses. App1.5.3 treats an empty optional
 `upstream_connect_host` as unset and rejects raw non-ASCII request paths with
-HTTP400 instead of reporting the dashboard unreachable. These are source-tested fixes; a new container
+HTTP400 instead of reporting the dashboard unreachable. App1.5.4 accepts a VM
+clock up to 5 s ahead of the HA host and recovers from a backward step of the
+HA host's clock at the next poll instead of holding every component at
+`clock_invalid` until the old time has passed; alerts that do not depend on the
+clock keep their own reason meanwhile. These are source-tested fixes; a new container
 build, installed upgrade and real notification delivery require separate checks.

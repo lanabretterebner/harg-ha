@@ -143,8 +143,11 @@ def bounded_request(request):
 class Monitor:
     """One poller, durable bounded outbox, at most one send per interval."""
     def __init__(self, settings, token, state_directory='/data/health-monitor',
-                 *, network=bounded_request, clock=time.time):
+                 *, network=bounded_request, clock=time.time, monotonic=time.monotonic):
         self.settings, self.token, self.network, self.clock = settings, token, network, clock
+        # (wall, monotonic) of the last recorded evaluation. It lives only in this
+        # process; after a restart the persisted wall stamp is the only reference.
+        self.monotonic, self.reading = monotonic, None
         self.directory = private_directory(state_directory)
         self.state_path = self.directory / 'alert-state.json'
         self.last_error = None
@@ -174,7 +177,7 @@ class Monitor:
 
     def poll_once(self, stop=None):
         document, failed = self.heartbeat()
-        now = self.clock()
+        now, tick = self.clock(), self.monotonic()
         self.update_status(last_check_at=now if health.number(now) and now >= 0 else None)
         with health.state_lock(self.state_path):
             try:
@@ -184,14 +187,19 @@ class Monitor:
                     raise health.Refusal('state_invalid') from None
                 saved = health.initial_state()
             rows = health.evaluate(document, now=now, endpoint_failed=failed)
+            stepped = health.stepped_back(self.reading, (now, tick))
             deferred = False
             try:
-                proposed = health.transition(rows, saved, now)
+                proposed = health.transition(rows, saved, now, stepped)
             except health.Refusal as error:
                 if str(error) != 'state_capacity':
                     raise
                 proposed, deferred = saved, True
             health.atomic_json(self.state_path, proposed)
+            if not deferred:
+                # Advance only with a recorded evaluation, so a step seen while
+                # nothing could be recorded is still measured on the next poll.
+                self.reading = (now, tick)
             self.update_status(queue_count=len(proposed['queue']))
             if proposed['queue'] and not (stop is not None and stop.is_set()):
                 event = proposed['queue'][0]
@@ -207,12 +215,13 @@ class Monitor:
                     # At most one delivery per poll. Several polls may be
                     # needed to make room for all current condition changes.
                     try:
-                        proposed = health.transition(rows, proposed, now)
+                        proposed = health.transition(rows, proposed, now, stepped)
                     except health.Refusal as error:
                         if str(error) != 'state_capacity':
                             raise
                         return {'pending': len(proposed['queue']), 'delivered': 1, 'error': 'state_capacity'}
                     health.atomic_json(self.state_path, proposed)
+                    self.reading = (now, tick)
                     self.update_status(queue_count=len(proposed['queue']))
                 return {'pending': len(proposed['queue']), 'delivered': 1}
             if deferred:

@@ -262,12 +262,27 @@ A child-process deadline bounds DNS, TLS, headers and body reads to5s.
 
 The accepted sanitized health schema keeps original certificate/Telnet checker
 timestamps. Fresh API reads cannot renew stale runs. Defaults distinguish120s
-heartbeat,90000s certificate execution,45s Telnet execution and2s future clock
+heartbeat,90000s certificate execution,45s Telnet execution and5s future clock
 tolerance. Missing/invalid/stale or failed heartbeat evidence is **unknown**;
 it does not prove the heater is down. Normal maintenance is a suppression state.
 A healthy first observation establishes a silent baseline. Changed fault,
 unknown, maintenance and recovery conditions update fixed persistent IDs
 `harg_health_heartbeat`, `harg_health_certificate`, `harg_health_telnet`.
+
+From app1.5.4 a VM clock up to 5 s ahead of the HA host counts as current. A
+larger lead is unknown `run_future` until the clocks agree. The tolerance never
+shortens an age, so it delays a stale verdict by at most 5 s. When the HA
+host's own clock steps backward by more than 5 s, the next poll reports
+`clock_invalid` for components that would otherwise be healthy or in
+maintenance, and the poll after it evaluates normally again. Alerts that hold
+under either clock, such as an unreachable VM, a stale or failed check or a
+reported fault, keep their own reason throughout. Within a running app the
+step is measured against monotonic time. After an app restart only the saved
+wall-clock stamp can show it, and a stamp that lies in the future is replaced
+at the first poll instead of being waited out. The state format and reason
+codes are unchanged, so the state survives both an update and a downgrade.
+Earlier versions held every component at `clock_invalid` until the old stamp
+had passed and could not report a VM outage during that time.
 
 Delivery is ONLY local `POST
 http://172.30.32.2/core/api/services/persistent_notification/create`, using the
@@ -316,7 +331,7 @@ future operator choice. Container build, real notification delivery, receiver
 permissions and actual app update remain unverified until separately recorded.
 
 The reused project `health_alerts.py` is byte-pinned to SHA-256
-`32feb8236ffcee321996eb88f57a58f773293ba9e29a9fe0f060c07f6a6d4b6c`.
+`46a2da7f420e3093b0536a3c3d95423fd87d4028b466d13e0998d13867cf193a`.
 Its evaluator/outbox semantics are retained; this app adapter adds the fixed
 health-token fetch, existing HTTPS connector, bounded one-event scheduler and
 Supervisor destination. No original producer observation time is rewritten.

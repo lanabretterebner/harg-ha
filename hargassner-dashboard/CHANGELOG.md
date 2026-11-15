@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.5.4 (source only; not yet installed)
+
+- Accept a VM clock up to 5 s ahead of the HA host instead of 2 s, so two hosts
+  a few seconds apart no longer raise `run_future` for all three components.
+  The tolerance never shortens an age and cannot be raised.
+- Recover from a backward step of the HA host's clock at the next poll. Earlier
+  versions held every component at `clock_invalid` until the saved stamp had
+  passed, however far ahead it was, and reported no VM outage in that time.
+- During that one poll withhold only healthy and maintenance; an unreachable
+  VM, a stale or failed check and a reported fault keep their own reason and
+  are neither hidden nor notified again.
+- Measure the step against monotonic time while the app runs; after a restart
+  use the saved wall-clock stamp and replace it when it lies in the future.
+- Keep the state schema, reason codes and report format; the state loads after
+  an update and after a downgrade.
+
 ## 1.5.3
 
 - Treat an empty optional `upstream_connect_host` as unset instead of failing

@@ -13,6 +13,7 @@ from unittest.mock import patch
 import app_monitor as m
 import health_alerts as h
 import run_app
+from test_health_alerts import STATE_1_5_3
 
 NOW = 2_000_000_000.0
 INGRESS = 'i' * 43
@@ -32,8 +33,13 @@ class MonitorTests(unittest.TestCase):
         self.options = self.root / 'options.json'
         self.config = {'upstream_url': 'https://dashboard.example:8443', 'ingress_token': INGRESS,
                        'upstream_connect_host': '192.0.2.57', 'monitor_enabled': True, 'monitor_token': HEALTH}
-        self.settings = self.load(); self.documents = report(); self.fail_get = False; self.fail_post = False; self.calls = []; self.now = NOW
-        self.monitor = m.Monitor(self.settings, SUPERVISOR, self.root / 'state', network=self.network, clock=lambda: self.now)
+        self.settings = self.load(); self.documents = report(); self.fail_get = False; self.fail_post = False; self.calls = []; self.now = NOW; self.tick = 500.0
+        self.monitor = self.start()
+    def start(self):
+        return m.Monitor(self.settings, SUPERVISOR, self.root / 'state', network=self.network, clock=lambda: self.now, monotonic=lambda: self.tick)
+    def advance(self, wall, elapsed=30):
+        self.now += wall; self.tick += elapsed; self.documents = report(self.now)
+    def reasons(self): return {row['reason'] for row in self.state()['conditions'].values()}
     def tearDown(self): self.temp.cleanup()
     def load(self, **changes):
         options = {**self.config, **changes}; self.options.write_text(json.dumps(options))
@@ -98,7 +104,7 @@ class MonitorTests(unittest.TestCase):
     def test_failed_delivery_retains_durable_original_event_across_restart(self):
         self.fail_get = self.fail_post = True; first = self.monitor.poll_once(); self.assertEqual(first['delivered'], 0)
         event = self.state()['queue'][0]
-        self.fail_post = False; restored = m.Monitor(self.settings, SUPERVISOR, self.root / 'state', network=self.network, clock=lambda: self.now)
+        self.fail_post = False; restored = self.start()
         restored.poll_once(); self.assertEqual(self.posts()[-1]['event'], event)
         self.assertEqual(self.state()['sequence'], 3)
     def test_recovery_is_ordered_after_fault_and_deduplicated(self):
@@ -150,6 +156,50 @@ class MonitorTests(unittest.TestCase):
     def test_clock_rollback_does_not_claim_recovery(self):
         self.monitor.poll_once(); self.now -= 1; self.documents = report(self.now); self.monitor.poll_once()
         self.assertTrue(all(r['reason'] == 'clock_invalid' for r in self.state()['conditions'].values()))
+    def test_backward_step_recovers_on_the_next_poll_instead_of_waiting_out_the_old_stamp(self):
+        self.advance(3600, 0); self.monitor.poll_once()  # healthy baseline while an hour ahead
+        self.advance(-3570); self.monitor.poll_once()
+        self.assertEqual(self.reasons(), {'clock_invalid'}); self.assertEqual(self.state()['last_evaluated_at'], self.now)
+        self.advance(30); self.monitor.poll_once(); self.assertEqual(self.reasons(), {'ok'})
+        for _ in range(6): self.advance(30); self.monitor.poll_once()
+        self.assertEqual([r['event']['transition'] for r in self.posts()], ['alert'] * 3 + ['recovery'] * 3)
+        self.assertEqual(self.state()['queue'], [])
+    def test_step_shorter_than_the_interval_is_measured_against_monotonic_time(self):
+        self.monitor.poll_once(); self.advance(25); self.monitor.poll_once()  # 5 s lost: tolerated
+        self.assertEqual(self.reasons(), {'ok'}); self.assertEqual(self.posts(), [])
+        self.advance(10); self.monitor.poll_once()  # 20 s lost while the wall clock still passed the stamp
+        self.assertEqual(self.reasons(), {'clock_invalid'}); self.assertGreater(self.now, NOW + 30)
+        self.advance(30); self.monitor.poll_once(); self.assertEqual(self.reasons(), {'ok'})
+        self.advance(3600); self.monitor.poll_once(); self.assertEqual(self.reasons(), {'ok'})  # forward steps withhold nothing
+    def test_restart_on_a_1_5_3_state_from_the_future_recovers_without_monotonic_history(self):
+        self.monitor.state_path.write_bytes(STATE_1_5_3); self.monitor.state_path.chmod(0o600)
+        pending = self.state()['queue'][0]; restored = self.start(); self.assertIsNone(restored.reading)
+        restored.poll_once()
+        self.assertEqual([r['event'] for r in self.posts()], [pending])  # the original event, no duplicate
+        self.assertEqual((self.reasons(), self.state()['sequence'], self.state()['last_evaluated_at']), ({'clock_invalid'}, 4, NOW))
+        self.advance(30); restored.poll_once(); self.assertEqual(self.reasons(), {'ok'})
+        for _ in range(3): self.advance(30); restored.poll_once()
+        self.assertEqual([r['event']['transition'] for r in self.posts()], ['alert'] + ['recovery'] * 3)
+    def test_outage_across_a_backward_step_is_neither_lost_nor_repeated(self):
+        self.fail_get = True
+        for _ in range(4): self.advance(30); self.monitor.poll_once()
+        self.assertEqual(len(self.posts()), 3)
+        self.advance(-600); self.monitor.poll_once()
+        for _ in range(3): self.advance(30); self.monitor.poll_once()
+        self.assertEqual(len(self.posts()), 3); self.assertEqual(self.reasons(), {'endpoint_unavailable'})
+        self.assertEqual(self.state()['last_evaluated_at'], self.now)
+    def test_outage_that_begins_on_the_step_alerts_at_once_with_its_own_reason(self):
+        self.monitor.poll_once(); self.fail_get = True; self.advance(-600); self.monitor.poll_once()
+        self.assertEqual(self.reasons(), {'endpoint_unavailable'})
+        self.assertEqual((self.posts()[0]['event']['transition'], self.posts()[0]['event']['reason']), ('alert', 'endpoint_unavailable'))
+    def test_step_seen_with_a_full_outbox_is_still_withheld_when_the_evaluation_is_recorded(self):
+        self.monitor.poll_once(); self.full_outbox()
+        self.advance(10)  # 20 s lost; the stamp is behind the wall clock, so only monotonic time shows it
+        for _ in range(2):
+            self.assertEqual(self.monitor.poll_once()['error'], 'state_capacity'); self.assertEqual(self.reasons(), {'run_missing'}); self.advance(30)
+        self.monitor.poll_once(); self.assertEqual(self.reasons(), {'clock_invalid'})
+        for _ in range(3): self.advance(30); self.monitor.poll_once()  # room for the three recoveries
+        self.assertEqual(self.reasons(), {'ok'}); self.assertEqual(len(self.state()['queue']), 64)
     def test_shutdown_after_get_leaves_outbox_without_post(self):
         stop = threading.Event(); self.fail_get = True
         def network(request): stop.set(); return self.network(request)

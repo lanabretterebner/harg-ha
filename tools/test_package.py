@@ -14,15 +14,15 @@ def load(relative):
 
 
 class PackageTests(unittest.TestCase):
-    def test_frontend_1412_versions_and_independent_app_153(self):
+    def test_frontend_1413_versions_and_independent_app_154(self):
         package = json.loads((ROOT / "package.json").read_text())
         lock = json.loads((ROOT / "package-lock.json").read_text())
         release = json.loads((ROOT / "release.json").read_text())
         validation = json.loads((ROOT / "validation.json").read_text())
-        self.assertEqual({package["version"], lock["version"], lock["packages"][""]["version"], release["version"], validation["version"]}, {"1.4.12"})
-        self.assertEqual(release["supervisor_app_version"], "1.5.3")
-        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.5.3")
-        self.assertIn('const VERSION = "1.4.12";', (ROOT / "dist/hargassner-thermostat-popup.js").read_text())
+        self.assertEqual({package["version"], lock["version"], lock["packages"][""]["version"], release["version"], validation["version"]}, {"1.4.13"})
+        self.assertEqual(release["supervisor_app_version"], "1.5.4")
+        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.5.4")
+        self.assertIn('const VERSION = "1.4.13";', (ROOT / "dist/hargassner-thermostat-popup.js").read_text())
 
     def test_repository_and_app_are_discoverable_independently_of_hacs(self):
         repository = load("repository.yaml")

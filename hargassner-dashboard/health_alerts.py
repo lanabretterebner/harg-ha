@@ -24,6 +24,12 @@ from urllib.parse import urlsplit
 
 MAX_DOCUMENT = 65536
 MAX_QUEUE = 64
+# Seconds of wall-clock disagreement accepted without a verdict: a report stamp
+# this far ahead of the evaluator, or a backward step of the evaluator's own
+# clock. It is far above the offset of two synchronised LAN hosts. It never
+# shortens an age, so it delays a stale verdict by at most itself, 1/9 of the
+# shortest default staleness limit.
+FUTURE_TOLERANCE = 5
 KINDS = ('heartbeat', 'certificate', 'telnet')
 STATES = {'healthy', 'warning', 'fault', 'unknown', 'maintenance'}
 REASONS = {'ok', 'report_missing', 'report_invalid', 'clock_invalid', 'heartbeat_stale',
@@ -236,12 +242,12 @@ def settings(config):
             'telnet_max_age', 'future_tolerance', 'timeout', 'webhook', 'home_assistant', 'heartbeat_url', 'ca_file'}:
         raise Refusal('configuration_invalid')
     result = {'heartbeat_max_age': 120, 'certificate_max_age': 90000,
-              'telnet_max_age': 45, 'future_tolerance': 2, 'timeout': 5}
+              'telnet_max_age': 45, 'future_tolerance': FUTURE_TOLERANCE, 'timeout': 5}
     result.update(config)
     for key in ('heartbeat_max_age', 'certificate_max_age', 'telnet_max_age'):
         if not number(result[key]) or not 1 <= result[key] <= 604800:
             raise Refusal('configuration_invalid')
-    if not number(result['future_tolerance']) or not 0 <= result['future_tolerance'] <= 5:
+    if not number(result['future_tolerance']) or not 0 <= result['future_tolerance'] <= FUTURE_TOLERANCE:
         raise Refusal('configuration_invalid')
     if not number(result['timeout']) or not 0.2 <= result['timeout'] <= 30:
         raise Refusal('configuration_invalid')
@@ -369,13 +375,28 @@ def validate_state(value):
     return value
 
 
-def transition(rows, saved, now):
+def stepped_back(before, after, tolerance=FUTURE_TOLERANCE):
+    """Compare two (wall, monotonic) readings of one process: did wall time lose
+    more than the tolerance against the elapsed monotonic time? Monotonic values
+    mean nothing in another process, so no earlier reading is no evidence."""
+    return (before is not None and all(number(value) for value in (*before, *after))
+            and (after[0] - before[0]) - (after[1] - before[1]) < -tolerance)
+
+
+def transition(rows, saved, now, stepped=False):
     saved = decode(json.dumps(validate_state(saved)).encode())
     if not number(now) or now < 0:
         raise Refusal('clock_invalid')
     previous_time = saved['last_evaluated_at']
-    if previous_time is not None and now < previous_time:
-        rows = {kind: result('unknown', 'clock_invalid') for kind in KINDS}
+    if stepped or previous_time is not None and now < previous_time:
+        # The evaluator clock ran backward: measured by the caller within one
+        # process, or after a restart only visible against the persisted stamp.
+        # Neither clock is proven, so this one evaluation withholds what a wrong
+        # clock can fake, healthy and maintenance. Alerts hold under either clock
+        # and keep their own reason. The stamp is rebased below, so the next
+        # evaluation is judged on the present clock, never on a saved future one.
+        rows = {kind: result('unknown', 'clock_invalid') if row['status'] in {'healthy', 'maintenance'} else row
+                for kind, row in rows.items()}
     for kind in KINDS:
         row = rows[kind]
         old = saved['conditions'].get(kind)
@@ -393,7 +414,7 @@ def transition(rows, saved, now):
                 event['event_id'] = hashlib.sha256(json.dumps([saved['sequence'], event], sort_keys=True).encode()).hexdigest()
                 saved['queue'].append(event)
         saved['conditions'][kind] = row
-    saved['last_evaluated_at'] = max(now, previous_time or 0)
+    saved['last_evaluated_at'] = now
     return validate_state(saved)
 
 

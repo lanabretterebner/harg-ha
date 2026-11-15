@@ -19,12 +19,34 @@ from unittest.mock import patch
 import health_alerts as h
 
 NOW = 2000000000.0
+# Bytes as app 1.5.3 persisted them after its clock was corrected backward by an
+# hour: the stamp is still an hour ahead, every component is held at
+# clock_invalid and one of those three alerts is not yet delivered.
+STATE_1_5_3 = (b'{"conditions":{"certificate":{"observed_at":null,"reason":"clock_invalid","status":"unknown"},'
+               b'"heartbeat":{"observed_at":null,"reason":"clock_invalid","status":"unknown"},'
+               b'"telnet":{"observed_at":null,"reason":"clock_invalid","status":"unknown"}},'
+               b'"last_evaluated_at":2000003600.0,"queue":[{"component":"telnet","evaluated_at":2000000000.0,'
+               b'"event_id":"344d350d2b3ba6066c87fa10bba986e17bfc3833540fa4eb4d6f29d24529d2ff","observed_at":null,'
+               b'"reason":"clock_invalid","schema_version":1,"status":"unknown","transition":"alert"}],'
+               b'"schema_version":1,"sequence":4}')
 
 
 def heartbeat(now=NOW, certificate='healthy', telnet='healthy'):
     return {'schema_version': 1, 'sent_at': now, 'checks': {
         'certificate': {'checked_at': now, 'status': certificate},
         'telnet': {'checked_at': now, 'status': telnet}}}
+
+
+def unreachable(now):
+    return h.evaluate(None, now=now, endpoint_failed=True)
+
+
+def step(state, now, **measured):
+    return h.transition(h.evaluate(heartbeat(now), now=now), state, now, **measured)
+
+
+def reasons(state):
+    return {kind: row['reason'] for kind, row in state['conditions'].items()}
 
 
 def certificate(status='pass'):
@@ -217,11 +239,40 @@ class UnitTests(unittest.TestCase):
         self.assertEqual(h.evaluate(heartbeat(NOW - 121), now=NOW)['certificate']['reason'], 'heartbeat_stale')
 
     def test_future_heartbeat_invalidates_all_components(self):
-        self.assertTrue(all(r['reason'] == 'run_future' for r in h.evaluate(heartbeat(NOW + 3), now=NOW).values()))
+        self.assertTrue(all(r['reason'] == 'run_future' for r in h.evaluate(heartbeat(NOW + 6), now=NOW).values()))
 
     def test_future_execution_cannot_hide_behind_current_heartbeat(self):
-        row = heartbeat(); row['checks']['telnet']['checked_at'] += 3
+        row = heartbeat(); row['checks']['telnet']['checked_at'] += 6
         self.assertEqual(h.evaluate(row, now=NOW)['telnet']['reason'], 'run_future')
+
+    def test_future_skew_inside_the_tolerance_is_fresh_and_beyond_it_unverified(self):
+        for skew in (2.001, 3, 5):
+            with self.subTest(inside=skew):
+                rows = h.evaluate(heartbeat(NOW + skew), now=NOW)
+                self.assertTrue(all(r['status'] == 'healthy' for r in rows.values()))
+                self.assertEqual(rows['heartbeat']['observed_at'], NOW + skew)
+        for skew in (5.001, 6, 3600):
+            with self.subTest(outside=skew):
+                self.assertTrue(all(r['reason'] == 'run_future' for r in h.evaluate(heartbeat(NOW + skew), now=NOW).values()))
+        row = heartbeat(NOW - 30)
+        for ahead, reason in ((5, 'ok'), (5.001, 'run_future')):
+            row['checks']['telnet']['checked_at'] = NOW - 30 + ahead
+            with self.subTest(check_after_its_heartbeat=ahead):
+                self.assertEqual(h.evaluate(row, now=NOW)['telnet']['reason'], reason)
+
+    def test_future_tolerance_is_small_against_every_staleness_limit_and_adds_no_age(self):
+        config = h.settings({})
+        self.assertEqual((config['future_tolerance'], h.FUTURE_TOLERANCE), (5, 5))
+        self.assertLessEqual(9 * config['future_tolerance'], min(config[kind + '_max_age'] for kind in h.KINDS))
+        self.assertEqual(h.settings({'future_tolerance': 2})['future_tolerance'], 2)
+        with self.assertRaises(h.Refusal): h.settings({'future_tolerance': 5.001})
+        # Ages are never shortened by the tolerance: the limits stay exact.
+        self.assertEqual(h.evaluate(heartbeat(NOW - 120.001), now=NOW)['heartbeat']['reason'], 'heartbeat_stale')
+        row = heartbeat(); row['checks']['telnet']['checked_at'] = NOW - 45.001
+        self.assertEqual(h.evaluate(row, now=NOW)['telnet']['reason'], 'run_stale')
+        # A producer the full tolerance ahead delays staleness by that much and no more.
+        self.assertEqual(h.evaluate(heartbeat(NOW - 120 + 5), now=NOW + 5)['heartbeat']['status'], 'healthy')
+        self.assertEqual(h.evaluate(heartbeat(NOW - 120 + 5), now=NOW + 5.001)['heartbeat']['reason'], 'heartbeat_stale')
 
     def test_execution_cannot_postdate_old_heartbeat(self):
         row = heartbeat(NOW - 10); row['checks']['telnet']['checked_at'] = NOW
@@ -289,6 +340,91 @@ class UnitTests(unittest.TestCase):
         s = h.transition(h.evaluate(heartbeat(NOW-1), now=NOW-1), s, NOW-1)
         self.assertTrue(all(r['reason'] == 'clock_invalid' for r in s['conditions'].values()))
         self.assertFalse(any(e['transition'] == 'recovery' for e in s['queue']))
+
+    def test_backward_step_recovers_on_the_next_evaluation_not_when_the_old_stamp_passes(self):
+        s = step(h.initial_state(), NOW + 3600)  # healthy baseline while an hour ahead
+        s = step(s, NOW)
+        self.assertEqual(set(reasons(s).values()), {'clock_invalid'})
+        self.assertEqual(s['last_evaluated_at'], NOW)  # rebased, not kept an hour ahead
+        s = step(s, NOW + 30)
+        self.assertEqual(set(reasons(s).values()), {'ok'})
+        self.assertEqual([e['transition'] for e in s['queue']], ['alert'] * 3 + ['recovery'] * 3)
+        s = step(s, NOW + 60)
+        self.assertEqual(len(s['queue']), 6)
+
+    def test_state_written_by_1_5_3_loads_and_leaves_its_future_stamp_without_duplicates(self):
+        s = h.validate_state(h.decode(STATE_1_5_3))
+        pending = s['queue'][0]
+        s = step(s, NOW + 30)  # 3570 s before the persisted stamp
+        self.assertEqual(s['queue'], [pending])  # same condition, original event, nothing repeated
+        self.assertEqual((s['last_evaluated_at'], s['sequence']), (NOW + 30, 4))
+        s = step(s, NOW + 60)
+        self.assertEqual(set(reasons(s).values()), {'ok'})
+        self.assertEqual([e['transition'] for e in s['queue']], ['alert'] + ['recovery'] * 3)
+
+    def test_backward_step_never_hides_or_repeats_a_real_alert(self):
+        s = h.transition(unreachable(NOW + 3600), h.initial_state(), NOW + 3600)
+        alerts = list(s['queue'])
+        self.assertEqual(len(alerts), 3)
+        for now in (NOW, NOW + 30, NOW + 60):  # the outage continues across the step
+            s = h.transition(unreachable(now), s, now)
+        self.assertEqual(s['queue'], alerts)
+        self.assertEqual(set(reasons(s).values()), {'endpoint_unavailable'})
+        # An outage that begins while the persisted stamp is still ahead alerts at once.
+        s = h.transition(unreachable(NOW), step(h.initial_state(), NOW + 3600), NOW)
+        self.assertEqual([(e['transition'], e['reason']) for e in s['queue']], [('alert', 'endpoint_unavailable')] * 3)
+        s = h.transition(unreachable(NOW + 30), h.validate_state(h.decode(STATE_1_5_3)), NOW + 30)
+        self.assertEqual([e['reason'] for e in s['queue']], ['clock_invalid'] + ['endpoint_unavailable'] * 3)
+        # Only healthy and maintenance are withheld; a reported fault or stale run keeps its reason.
+        row = heartbeat(telnet='fault'); row['checks']['certificate']['checked_at'] = NOW - 90001
+        s = h.transition(h.evaluate(row, now=NOW), step(h.initial_state(), NOW + 3600), NOW)
+        self.assertEqual(reasons(s), {'heartbeat': 'clock_invalid', 'certificate': 'run_stale', 'telnet': 'telemetry_unhealthy'})
+        s = h.transition(h.evaluate(heartbeat(telnet='maintenance'), now=NOW), step(h.initial_state(), NOW + 3600), NOW)
+        self.assertEqual(reasons(s)['telnet'], 'clock_invalid')
+        self.assertFalse(any(e['transition'] in {'recovery', 'suppression'} for e in s['queue']))
+
+    def test_repeated_backward_steps_do_not_multiply_notifications(self):
+        s = step(h.initial_state(), NOW + 3600)
+        for index in range(1, 40):
+            s = step(s, NOW + 3600 - 60 * index)
+        self.assertEqual([(e['transition'], e['reason']) for e in s['queue']], [('alert', 'clock_invalid')] * 3)
+        self.assertEqual(s['last_evaluated_at'], NOW + 3600 - 60 * 39)
+
+    def test_in_process_step_is_measured_against_monotonic_time(self):
+        self.assertFalse(h.stepped_back(None, (NOW, 40.0)))  # another process: no evidence
+        for wall, lost in ((NOW + 30, False), (NOW + 25, False), (NOW + 24.999, True), (NOW - 3570, True),
+                           (NOW + 3630, False), (float('nan'), False)):
+            with self.subTest(wall=wall):
+                self.assertEqual(h.stepped_back((NOW, 10.0), (wall, 40.0)), lost)
+        # A step shorter than the interval never shows against the persisted stamp.
+        s = step(step(h.initial_state(), NOW), NOW + 10, stepped=True)
+        self.assertEqual(set(reasons(s).values()), {'clock_invalid'})
+        self.assertEqual(set(reasons(step(s, NOW + 40)).values()), {'ok'})
+
+    def test_state_keeps_the_schema_and_reasons_that_1_5_3_accepts(self):
+        # 1.5.3 refuses a state with any other key or reason, so a downgrade needs exactly these.
+        self.assertEqual(h.REASONS, {'ok', 'report_missing', 'report_invalid', 'clock_invalid', 'heartbeat_stale',
+                                     'run_missing', 'run_stale', 'run_future', 'result_failed', 'certificate_expiring',
+                                     'telemetry_unhealthy', 'maintenance', 'endpoint_unavailable', 'state_invalid'})
+        s = step(step(step(h.initial_state(), NOW + 3600), NOW, stepped=True), NOW + 30)
+        self.assertEqual(set(s), {'schema_version', 'sequence', 'conditions', 'queue', 'last_evaluated_at'})
+        self.assertEqual(s['schema_version'], 1)
+        self.assertTrue(all(set(row) == {'status', 'reason', 'observed_at'} for row in s['conditions'].values()))
+        self.assertTrue(all(set(event) == {'schema_version', 'event_id', 'component', 'transition', 'status',
+                                           'reason', 'observed_at', 'evaluated_at'} for event in s['queue']))
+        self.assertEqual(h.initial_state(), {'schema_version': 1, 'sequence': 0, 'conditions': {}, 'queue': [],
+                                             'last_evaluated_at': None})
+
+    def test_delivering_run_leaves_a_future_stamp_and_a_dry_run_never_rewrites_it(self):
+        self.state.write_bytes(STATE_1_5_3); self.state.chmod(0o600)
+        self.assertEqual(h.run(heartbeat(), self.state, self.config, NOW)['pending_events'], [h.decode(STATE_1_5_3)['queue'][0]])
+        self.assertEqual(self.state.read_bytes(), STATE_1_5_3)
+        with patch.object(h, 'delivery') as send:
+            self.assertEqual(h.run(heartbeat(), self.state, self.config, NOW, True)['delivered'], 1)
+            reply = h.run(heartbeat(NOW + 60), self.state, self.config, NOW + 60, True)
+        self.assertEqual(reply['delivered'], 3)
+        self.assertEqual([call.args[0]['transition'] for call in send.call_args_list], ['alert'] + ['recovery'] * 3)
+        self.assertEqual(set(reasons(reply).values()), {'ok'})
 
     def test_dry_run_makes_no_files_and_sends_nothing(self):
         with patch.object(h, 'delivery', side_effect=AssertionError('must not send')):

@@ -1,6 +1,11 @@
 # Changelog
 
-## 1.4.12 (source only; not yet installed)
+## 1.4.13 (source only; not yet installed)
+
+- Include the independently versioned app 1.5.4. Its optional monitor accepts a relay clock up to 5 s ahead of the HA host, recovers from a backward step of the HA host's clock at the next poll instead of staying at `clock_invalid` until the old time has passed, and keeps real alerts under their own reason meanwhile. Update the app separately through Supervisor.
+- Change nothing in the thermostat frontend except its version number; card and popup behavior are those of 1.4.12.
+
+## 1.4.12
 
 - Keep a correction-dial drag that crossed the whole open bottom gap at the end it left through: back on the ring beyond the gap the dial no longer jumps to the opposite end, and follows the pointer again once the pointer is nearer to the held value along the ring than across the gap. A new press on the ring still selects its own value.
 - Keep all independently versioned app 1.5.3 files unchanged.
