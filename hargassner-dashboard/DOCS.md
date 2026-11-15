@@ -316,7 +316,7 @@ future operator choice. Container build, real notification delivery, receiver
 permissions and actual app update remain unverified until separately recorded.
 
 The reused project `health_alerts.py` is byte-pinned to SHA-256
-`8f81aa20024f15032ae32a8103787ce5900cfb02457a2142a9f463cfd25f604c`.
+`32feb8236ffcee321996eb88f57a58f773293ba9e29a9fe0f060c07f6a6d4b6c`.
 Its evaluator/outbox semantics are retained; this app adapter adds the fixed
 health-token fetch, existing HTTPS connector, bounded one-event scheduler and
 Supervisor destination. No original producer observation time is rewritten.

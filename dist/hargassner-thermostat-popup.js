@@ -1,11 +1,11 @@
-/* Hargassner thermostat popup and dashboard card, v1.4.9.
+/* Hargassner thermostat popup and dashboard card, v1.4.10.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. Qualified target gestures use guarded climate.set_temperature.
  * Unknown-target correction controls use the separately commissioned number.set_value.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.9";
+const VERSION = "1.4.10";
 // Coalesce rapid native +/- gestures while reducing the avoidable send delay.
 const TEMPERATURE_BUTTON_DEBOUNCE_MS = 250;
 const SCHEMA = "configured_room_setpoint_v1";
@@ -758,7 +758,7 @@ export function createHargassnerCorrectionControl(environment, current) {
     const pending = !!model?.intent && model.intent.status === "pending";
     const actual = draft ?? model?.intent?.value ?? (link.available ? link.value : null);
     const disabled = !link.available || pending;
-    const formatted = actual === null ? "—" : `${actual > 0 ? "+" : ""}${actual.toLocaleString("de", { maximumFractionDigits: 1 })} °C`;
+    const formatted = actual === null ? "—" : `${actual > 0 ? "+" : ""}${(actual + 0).toLocaleString("de", { maximumFractionDigits: 1 })} °C`;
     text(value, formatted);
     attr(dial, "aria-valuetext", formatted); attr(dial, "aria-disabled", disabled);
     if (actual !== null) attr(dial, "aria-valuenow", actual); else if (dial.getAttribute("aria-valuenow") !== null) dial.removeAttribute("aria-valuenow");
@@ -803,7 +803,7 @@ export function createHargassnerCorrectionControl(environment, current) {
   const change = (desired, debounce = true) => {
     const context = allowed();
     if (!context || !Number.isFinite(desired) || desired < -3 || desired > 3 || !Number.isInteger(desired * 2)) return;
-    draft = desired; model.failure = false;
+    draft = desired + 0; model.failure = false; // Never keep or display -0.
     if (timer !== null) environment.clearTimeout(timer);
     const captured = epoch;
     if (debounce) timer = environment.setTimeout(() => submit(captured), TEMPERATURE_BUTTON_DEBOUNCE_MS);
@@ -821,21 +821,29 @@ export function createHargassnerCorrectionControl(environment, current) {
       else increment(["ArrowUp", "ArrowRight"].includes(event.key) ? 0.5 : -0.5);
     }
   });
+  // Arc angle 0..270 maps to -3..+3. The open bottom gap snaps to its nearer
+  // end; the centre (value text) has no stable angle and selects nothing.
   const pointerValue = event => {
     const rect = dial.getBoundingClientRect(), x = (event.clientX - rect.left) / rect.width * 220 - 110,
       y = (event.clientY - rect.top) / rect.height * 190 - 100;
+    if (Math.hypot(x, y) < 60) return null;
     const angle = (Math.atan2(y, x) * 180 / Math.PI + 225 + 360) % 360;
-    return Math.round((Math.min(270, angle) / 270 * 6 - 3) * 2) / 2;
+    const arc = angle <= 270 ? angle : angle <= 315 ? 270 : 0;
+    return Math.round((arc / 270 * 6 - 3) * 2) / 2 + 0;
   };
   dial.addEventListener("pointerdown", event => {
     if (!allowed() || event.button !== 0) return;
+    const desired = pointerValue(event); if (desired === null) return;
     event.preventDefault(); dial.setPointerCapture(event.pointerId); dragging = event.pointerId;
-    change(pointerValue(event), false);
+    change(desired, false);
   });
-  dial.addEventListener("pointermove", event => { if (dragging === event.pointerId) change(pointerValue(event), false); });
+  dial.addEventListener("pointermove", event => {
+    if (dragging !== event.pointerId) return;
+    const desired = pointerValue(event); if (desired !== null) change(desired, false);
+  });
   dial.addEventListener("pointerup", event => {
     if (dragging !== event.pointerId) return; dragging = null;
-    change(pointerValue(event));
+    const desired = pointerValue(event) ?? draft; if (desired !== null) change(desired);
   });
   dial.addEventListener("pointercancel", () => { cancelDraft(); render(); });
   return { node, render, retire() { cancelDraft(); render(); }, dispose() { closed = true; cancelDraft(); model?.listeners.delete(render); node.remove(); } };
@@ -1480,13 +1488,16 @@ export function installHargassnerThermostatCard(environment = window) {
             !binding.menu.isConnected || binding.menu.disabled || binding.entity !== this._config?.entity || this._busy ||
             !this._connectedHA() || !eligible({ stateObj: state }) || !HVAC.includes(state.state) ||
             !PRESETS.includes(value) || value === state.attributes.preset_mode) return;
-        this._presentation.intent = null; this._presentation.notify(); this._busy = true; this._ui.error.textContent = ""; this._render();
+        // The in-flight lock belongs to this call, not to its menu binding: an
+        // unavailable state may drop the binding before the service settles.
+        const busy = {};
+        this._presentation.intent = null; this._presentation.notify(); this._busy = busy; this._ui.error.textContent = ""; this._render();
         try {
           await this._hass.callService("climate", "set_preset_mode", { entity_id: binding.entity, preset_mode: value });
         } catch {
           if (this._binding === binding && this._ui) this._ui.error.textContent = "Modus konnte nicht geändert werden.";
         } finally {
-          if (this._binding === binding) { this._busy = false; this._render(); }
+          if (this._busy === busy) { this._busy = false; this._render(); }
         }
       }
       _withTimeout(promise) {

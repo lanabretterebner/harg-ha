@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.10
+
+- Snap correction-dial touches in the open bottom gap to the nearer end, so a touch just past −3 no longer selects +3; ignore touches on the centre value text.
+- Display and send a zero correction as 0, never −0.
+- Release the card's six-mode selector when its own mode request settles, even if the climate became unavailable meanwhile.
+- Update the Settings-first global loader and tile examples to this version. Include the independently versioned app 1.5.3.
+
 ## 1.4.9
 
 - Show the actual room temperature as Ist directly below the set/correction number, including narrow native dials. Keep zero readings and explicitly show unavailable readings without inventing a value.

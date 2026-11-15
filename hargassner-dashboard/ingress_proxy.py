@@ -155,6 +155,9 @@ class Settings:
         if not isinstance(token, str) or not TOKEN_PATTERN.fullmatch(token):
             raise ValueError("A random URL-safe ingress token is required")
         connect_host = options.get("upstream_connect_host")
+        if connect_host == "":
+            # The optional "str?" option may be saved empty; that means unset.
+            connect_host = None
         if connect_host is not None:
             if not isinstance(connect_host, str) or "%" in connect_host:
                 raise ValueError("The optional connection host must be a literal IP address")
@@ -268,9 +271,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             user, prefix = trusted_identity(self.client_address[0], self.headers)
             target = self.requestline.split()[1]
             parsed = urlsplit(target)
+            # Raw non-ASCII bytes are not a valid request target and cannot be
+            # forwarded; browsers percent-encode them.
             if (not target.startswith("/") or target.startswith("//")
                     or parsed.scheme or parsed.netloc or parsed.fragment
-                    or re.search(r"[\\\x00-\x20\x7f]", target)):
+                    or re.search(r"[^\x21-\x5b\x5d-\x7e]", target)):
                 raise Rejected(400, "Invalid request path.")
             if self.headers.get_all("Transfer-Encoding") or self.headers.get_all("Expect"):
                 raise Rejected(400, "An explicit bounded request body is required.")

@@ -68,7 +68,9 @@ class ValidationTests(unittest.TestCase):
     def test_optional_connect_host_is_only_a_literal_unicast_ip(self):
         for address in ("192.0.2.57", "2001:db8::57"):
             self.assertEqual(self.settings(upstream_connect_host=address).connect_host, address)
-        for address in ("", "dashboard.example", "https://192.0.2.57", "192.0.2.57:8443",
+        # Supervisor may save the optional "str?" option empty; that is unset.
+        self.assertIsNone(self.settings(upstream_connect_host="").connect_host)
+        for address in (" ", "dashboard.example", "https://192.0.2.57", "192.0.2.57:8443",
                         "192.0.2.57\n", "[2001:db8::57]", "fe80::1%eth0", "0.0.0.0",
                         "::", "224.0.0.1", 57, False):
             with self.subTest(address=address), self.assertRaises(ValueError):
@@ -76,7 +78,7 @@ class ValidationTests(unittest.TestCase):
 
     def test_panel_access_and_version_metadata(self):
         config = Path(__file__).with_name("config.yaml").read_text()
-        self.assertIn('version: "1.5.2"', config)
+        self.assertIn('version: "1.5.3"', config)
         self.assertIn("panel_admin: false", config)
         self.assertIn('upstream_connect_host: "str?"', config)
         self.assertNotIn("ports:", config)
@@ -254,6 +256,19 @@ class HTTPSProxyTests(unittest.TestCase):
         for target in ("https://other.example/path", "//other.example/path", "/a#fragment", "/a\\b"):
             with self.subTest(target=target):
                 self.assertEqual(self.request(target=target)[0], 400)
+        self.assertEqual(self.upstream.requests, [])
+
+    def test_raw_non_ascii_request_target_is_rejected_not_reported_unreachable(self):
+        for raw in ("/caf\u00e9".encode(), "/caf\u00e9".encode("latin-1"), b"/a\xff?x=1"):
+            with self.subTest(raw=raw):
+                client = socket.create_connection(self.server.server_address, timeout=5)
+                identity = "".join(f"{name}: {value}\r\n" for name, value in IDENTITY.items())
+                client.sendall(b"GET " + raw + b" HTTP/1.1\r\nHost: x\r\n" + identity.encode() + b"\r\n")
+                response = http.client.HTTPResponse(client)
+                response.begin()
+                body = response.read()
+                client.close()
+                self.assertEqual((response.status, body), (400, b"Invalid request path.\n"))
         self.assertEqual(self.upstream.requests, [])
 
     def test_upstream_redirect_is_not_followed_or_sent_to_browser(self):

@@ -36,5 +36,7 @@ monitor commissioning on a real HA host are separate acceptance steps.
 
 App1.5.2 drains a full notification outbox before recording current conditions,
 uses one strict bounded options snapshot for ingress and monitoring, and rejects
-incomplete upstream responses. These are source-tested fixes; a new container
+incomplete upstream responses. App1.5.3 treats an empty optional
+`upstream_connect_host` as unset and rejects raw non-ASCII request paths with
+HTTP400 instead of reporting the dashboard unreachable. These are source-tested fixes; a new container
 build, installed upgrade and real notification delivery require separate checks.

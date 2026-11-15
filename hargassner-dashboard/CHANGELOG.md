@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.5.3
+
+- Treat an empty optional `upstream_connect_host` as unset instead of failing
+  startup.
+- Reject raw non-ASCII request paths with HTTP400 instead of a 502
+  "Cannot reach" response; existing identity and path checks are unchanged.
+- Correct the documented `health_alerts.py` pin; the evaluator is unchanged.
+
 ## 1.5.2
 
 - Drain a full notification outbox before recording current condition changes,
