@@ -1,11 +1,11 @@
-/* Hargassner thermostat popup and dashboard card, v1.4.10.
+/* Hargassner thermostat popup and dashboard card, v1.4.11.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. Qualified target gestures use guarded climate.set_temperature.
  * Unknown-target correction controls use the separately commissioned number.set_value.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.10";
+const VERSION = "1.4.11";
 // Coalesce rapid native +/- gestures while reducing the avoidable send delay.
 const TEMPERATURE_BUTTON_DEBOUNCE_MS = 250;
 const SCHEMA = "configured_room_setpoint_v1";
@@ -756,6 +756,7 @@ export function createHargassnerCorrectionControl(environment, current) {
       model.intent = null; model.failure = false;
     }
     const pending = !!model?.intent && model.intent.status === "pending";
+    if (pending && draft !== null) cancelDraft(); // A pending request leaves no surface an unsent draft.
     const actual = draft ?? model?.intent?.value ?? (link.available ? link.value : null);
     const disabled = !link.available || pending;
     const formatted = actual === null ? "—" : `${actual > 0 ? "+" : ""}${(actual + 0).toLocaleString("de", { maximumFractionDigits: 1 })} °C`;
@@ -783,7 +784,7 @@ export function createHargassnerCorrectionControl(environment, current) {
     timer = null;
     const context = allowed(), desired = draft;
     if (!context || captured !== epoch || desired === null) { cancelDraft(); render(); return; }
-    draft = null;
+    draft = null; dragging = null;
     if (desired === context.link.value && !model.intent) { render(); return; }
     const beforeStamp = Date.parse(context.link.state.last_updated);
     const owner = model, intent = { value: desired, beforeStamp: Number.isFinite(beforeStamp) ? beforeStamp : Date.now(),
@@ -802,16 +803,17 @@ export function createHargassnerCorrectionControl(environment, current) {
   };
   const change = (desired, debounce = true) => {
     const context = allowed();
-    if (!context || !Number.isFinite(desired) || desired < -3 || desired > 3 || !Number.isInteger(desired * 2)) return;
+    if (!context || !Number.isFinite(desired) || desired < -3 || desired > 3 || !Number.isInteger(desired * 2)) return false;
     draft = desired + 0; model.failure = false; // Never keep or display -0.
-    if (timer !== null) environment.clearTimeout(timer);
+    if (timer !== null) environment.clearTimeout(timer); timer = null;
     const captured = epoch;
     if (debounce) timer = environment.setTimeout(() => submit(captured), TEMPERATURE_BUTTON_DEBOUNCE_MS);
-    render();
+    render(); return true;
   };
   const increment = delta => {
     const context = allowed(); if (!context) return;
-    change(Math.min(3, Math.max(-3, (draft ?? model.intent?.value ?? context.link.value) + delta)));
+    // Steps continue only a draft already scheduled for sending, never a drag's.
+    change(Math.min(3, Math.max(-3, (timer !== null ? draft : model.intent?.value ?? context.link.value) + delta)));
   };
   minus.addEventListener("click", () => increment(-0.5)); plus.addEventListener("click", () => increment(0.5));
   dial.addEventListener("keydown", event => {
@@ -821,14 +823,16 @@ export function createHargassnerCorrectionControl(environment, current) {
       else increment(["ArrowUp", "ArrowRight"].includes(event.key) ? 0.5 : -0.5);
     }
   });
-  // Arc angle 0..270 maps to -3..+3. The open bottom gap snaps to its nearer
-  // end; the centre (value text) has no stable angle and selects nothing.
-  const pointerValue = event => {
+  // Arc angle 0..270 maps to -3..+3. A press in the open bottom gap snaps to
+  // its nearer end; a drag keeps the end on the shorter way from its value
+  // `from`, so one that left through an end holds it across the whole gap.
+  // The centre (value text) and an unmeasurable dial select nothing.
+  const pointerValue = (event, from = 0) => {
     const rect = dial.getBoundingClientRect(), x = (event.clientX - rect.left) / rect.width * 220 - 110,
       y = (event.clientY - rect.top) / rect.height * 190 - 100;
-    if (Math.hypot(x, y) < 60) return null;
+    if (!(rect.width > 0 && rect.height > 0) || ![rect.width, rect.height, x, y].every(Number.isFinite) || Math.hypot(x, y) < 60) return null;
     const angle = (Math.atan2(y, x) * 180 / Math.PI + 225 + 360) % 360;
-    const arc = angle <= 270 ? angle : angle <= 315 ? 270 : 0;
+    const arc = angle <= 270 ? angle : angle <= (from + 3) * 45 + 180 ? 270 : 0;
     return Math.round((arc / 270 * 6 - 3) * 2) / 2 + 0;
   };
   dial.addEventListener("pointerdown", event => {
@@ -839,11 +843,12 @@ export function createHargassnerCorrectionControl(environment, current) {
   });
   dial.addEventListener("pointermove", event => {
     if (dragging !== event.pointerId) return;
-    const desired = pointerValue(event); if (desired !== null) change(desired, false);
+    const desired = pointerValue(event, draft ?? 0); if (desired !== null) change(desired, false);
   });
   dial.addEventListener("pointerup", event => {
     if (dragging !== event.pointerId) return; dragging = null;
-    const desired = pointerValue(event) ?? draft; if (desired !== null) change(desired);
+    const desired = pointerValue(event, draft ?? 0) ?? draft;
+    if (desired === null || !change(desired)) { cancelDraft(); render(); } // An unsent release keeps no draft.
   });
   dial.addEventListener("pointercancel", () => { cancelDraft(); render(); });
   return { node, render, retire() { cancelDraft(); render(); }, dispose() { closed = true; cancelDraft(); model?.listeners.delete(render); node.remove(); } };

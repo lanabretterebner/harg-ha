@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.11 (source only; not yet installed)
+
+- Keep a correction-dial drag that passes −3 or +3 at that end across the whole open bottom gap instead of flipping to the opposite end past straight-down; only a new press in the gap selects the nearer end.
+- Select nothing while the dial has a zero-size or non-finite measured rectangle.
+- Discard an unsent drag draft when its release cannot be sent or another surface's request for the same correction is pending; step minus/plus from the confirmed or requested value or an already queued step, never from a drag draft.
+- Restore the release numbers of the 1.4.8 and 1.4.9 layout paragraphs in the README. Keep all independently versioned app 1.5.3 files unchanged.
+
 ## 1.4.10
 
 - Snap correction-dial touches in the open bottom gap to the nearer end, so a touch just past −3 no longer selects +3; ignore touches on the centre value text.

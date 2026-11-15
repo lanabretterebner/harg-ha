@@ -4,17 +4,17 @@ import { createHargassnerCorrectionControl } from '../dist/hargassner-thermostat
 import { fixture, state, ENTITY } from './optimistic-card-fixture.mjs';
 
 class Element {
-  constructor(tag) { this.localName = tag; this.attributes = new Map(); this.children = []; this.listeners = new Map(); this.style = { cssText: '' }; this.dataset = {}; this.textContent = ''; this.hidden = false; this.disabled = false; this.tabIndex = -1; this.captured = [] }
+  constructor(tag) { this.localName = tag; this.attributes = new Map(); this.children = []; this.listeners = new Map(); this.style = { cssText: '' }; this.dataset = {}; this.textContent = ''; this.hidden = false; this.disabled = false; this.tabIndex = -1; this.captured = []; this.connected = true; this.rect = { left: 0, top: 0, width: 180, height: 155 } }
   setAttribute(k, v) { this.attributes.set(k, String(v)) }
   getAttribute(k) { return this.attributes.has(k) ? this.attributes.get(k) : null }
   removeAttribute(k) { this.attributes.delete(k) }
   append(...nodes) { this.children.push(...nodes) }
   remove() {}
-  get isConnected() { return true }
+  get isConnected() { return this.connected }
   addEventListener(type, fn) { this.listeners.set(type, [...(this.listeners.get(type) || []), fn]) }
   dispatch(type, event) { for (const fn of this.listeners.get(type) || []) fn({ preventDefault() {}, ...event }) }
   setPointerCapture(id) { this.captured.push(id) }
-  getBoundingClientRect() { return { left: 0, top: 0, width: 180, height: 155 } }
+  getBoundingClientRect() { return this.rect }
 }
 const ID = 'synthetic_correction_1', NUMBER = 'number.synthetic_hk1_rk';
 const climate = () => ({ entity_id: 'climate.synthetic_hc1', state: 'auto', attributes: { hargassner_control_schema: 'configured_room_setpoint_v1', hargassner_correction_id: ID,
@@ -22,22 +22,30 @@ const climate = () => ({ entity_id: 'climate.synthetic_hc1', state: 'auto', attr
   supported_features: 384, temperature: null, min_temp: 16, max_temp: 22, target_temp_step: .5, 'Zieltemperatur verfügbar': false } });
 const number = value => ({ entity_id: NUMBER, state: value, last_updated: new Date(Date.now() - 10000).toISOString(),
   attributes: { hargassner_control_schema: 'room_correction_v1', hargassner_correction_id: ID, min: -3, max: 3, step: .5, unit_of_measurement: '°C' } });
-function dial(value = '-2.5') {
+// One synthetic HA session; every surface() is a further control for the same entity and shares its request model.
+function world(value) {
   const timers = new Map(), calls = []; let timer = 0;
   const environment = { document: { createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
     setTimeout(fn) { timers.set(++timer, fn); return timer }, clearTimeout(id) { timers.delete(id) } };
   const c = climate(), hass = { connected: true, connection: { connected: true }, user: { id: 'synthetic' }, states: { [c.entity_id]: c, [NUMBER]: number(value) },
     callService: (...args) => { calls.push(args); return Promise.resolve() } };
-  const control = createHargassnerCorrectionControl(environment, () => ({ hass, state: c, connected: true }));
-  control.render();
-  const slider = control.node.children.find(node => node.getAttribute('role') === 'slider');
+  // Runs the timers due now; a timer started meanwhile (the 8 s confirmation limit) stays queued.
   const flush = () => { const pending = [...timers.values()]; timers.clear(); pending.forEach(fn => fn()) };
   // Client coordinates of a dial viewBox point (centre 110,100; ring radius 85).
   const at = (x, y) => ({ button: 0, pointerId: 1, clientX: x / 220 * 180, clientY: y / 190 * 155 });
   const polar = (degrees, radius = 85) => at(110 + radius * Math.cos(degrees * Math.PI / 180), 100 + radius * Math.sin(degrees * Math.PI / 180));
-  const tap = point => { slider.dispatch('pointerdown', point); slider.dispatch('pointerup', point); flush() };
-  return { control, slider, calls, flush, at, polar, tap, text: () => slider.getAttribute('aria-valuetext') };
+  const surface = () => {
+    const control = createHargassnerCorrectionControl(environment, () => ({ hass, state: c, connected: true }));
+    control.render();
+    const slider = control.node.children.find(node => node.getAttribute('role') === 'slider');
+    const [minus, plus] = control.node.children.find(node => node.className === 'correction-stepper').children;
+    const tap = point => { slider.dispatch('pointerdown', point); slider.dispatch('pointerup', point); flush() };
+    return { control, slider, minus, plus, note: control.node.children.at(-1), tap, text: () => slider.getAttribute('aria-valuetext') };
+  };
+  const readback = next => { hass.states[NUMBER] = { ...number(next), last_updated: new Date(Date.now() + 1000).toISOString() } };
+  return { calls, flush, at, polar, surface, readback, sent: () => calls.map(call => call[2].value) };
 }
+function dial(value = '-2.5') { const w = world(value); return { ...w, ...w.surface() } }
 let count = 0;
 async function test(name, fn) { await fn(); count++; console.log('PASS ' + name) }
 
@@ -57,6 +65,28 @@ await test('dragging slightly past -3 stays at -3 instead of jumping to +3', () 
   assert.equal(d.text(), '-3 °C'); d.slider.dispatch('pointerup', d.polar(120)); d.flush();
   assert.deepEqual(d.calls, [['number', 'set_value', { entity_id: NUMBER, value: -3 }]]);
 });
+// A drag that leaves the arc through an end keeps that end across the whole gap, also past straight-down.
+for (const [start, press, moves, end] of [['2', 22.5, [35, 45, 60, 80, 89, 91, 100, 120, 134], 3], ['-2', 157.5, [145, 135, 120, 100, 91, 89, 80, 60, 46], -3]])
+  await test(`drag overshooting ${end} across the bottom centre stays at ${end}`, () => {
+    const d = dial(start), label = `${end > 0 ? '+' : ''}${end} °C`; d.slider.dispatch('pointerdown', d.polar(press));
+    for (const degrees of moves) { d.slider.dispatch('pointermove', d.polar(degrees)); if (degrees > 45 && degrees < 135) assert.equal(d.text(), label, `${degrees}°`) }
+    d.slider.dispatch('pointerup', d.polar(moves.at(-1))); d.flush();
+    assert.deepEqual(d.calls, [['number', 'set_value', { entity_id: NUMBER, value: end }]]);
+  });
+for (const [press, moves, end] of [[60, [80, 89, 91, 110, 134], 3], [120, [100, 91, 89, 70, 46], -3]])
+  await test(`drag begun by a gap press at ${press}° keeps ${end} on the other half of the gap`, () => {
+    const d = dial('0'); d.slider.dispatch('pointerdown', d.polar(press));
+    for (const degrees of moves) { d.slider.dispatch('pointermove', d.polar(degrees)); assert.equal(d.slider.getAttribute('aria-valuenow'), String(end), `${degrees}°`) }
+    d.slider.dispatch('pointerup', d.polar(moves.at(-1))); d.flush();
+    assert.deepEqual(d.sent(), [end]);
+  });
+await test('one coarse move from an inner value into the gap takes the end on its shorter way', () => {
+  for (const [start, degrees, end] of [[22.5, 100, 3], [157.5, 80, -3], [-67.5, 105, 3], [-112.5, 75, -3]]) {
+    const d = dial('0'); d.slider.dispatch('pointerdown', d.polar(start)); d.slider.dispatch('pointermove', d.polar(degrees));
+    assert.equal(d.slider.getAttribute('aria-valuenow'), String(end), `${start}° → ${degrees}°`); d.slider.dispatch('pointercancel', {});
+    assert.deepEqual(d.calls, []);
+  }
+});
 await test('drag release over the centre keeps the last ring value', () => {
   const d = dial(); d.slider.dispatch('pointerdown', d.polar(-90));
   d.slider.dispatch('pointermove', d.at(110, 100)); assert.equal(d.text(), '0 °C');
@@ -75,6 +105,51 @@ await test('near-zero pointer value and -0 readback display 0 °C, never -0', ()
   const d = dial('-0.5'); d.slider.dispatch('pointerdown', d.polar(268)); assert.equal(d.text(), '0 °C'); assert.equal(d.slider.getAttribute('aria-valuenow'), '0');
   d.slider.dispatch('pointerup', d.polar(268)); d.flush();
   assert.equal(Object.is(d.calls[0][2].value, -0), false); assert.equal(d.calls[0][2].value, 0);
+});
+await test('zero-size or non-finite dial rect selects nothing during a captured drag', () => {
+  for (const rect of [{ left: 0, top: 0, width: 0, height: 0 }, { left: 0, top: 0, width: 180, height: 0 }, { left: NaN, top: NaN, width: NaN, height: NaN }, { left: 0, top: 0, width: Infinity, height: Infinity }]) {
+    const d = dial('0'); d.slider.dispatch('pointerdown', d.polar(0)); assert.equal(d.text(), '+2 °C');
+    d.slider.rect = rect;
+    for (const point of [{ clientX: 40, clientY: 40 }, { clientX: 0, clientY: 0 }, { clientX: 170, clientY: 150 }]) { d.slider.dispatch('pointermove', { pointerId: 1, ...point }); assert.equal(d.text(), '+2 °C') }
+    d.slider.dispatch('pointerup', { pointerId: 1, clientX: 40, clientY: 40 }); d.flush();
+    assert.deepEqual(d.sent(), [2], JSON.stringify(rect));
+    const fresh = dial('0'); fresh.slider.rect = rect; fresh.tap({ button: 0, pointerId: 1, clientX: 40, clientY: 40 });
+    assert.deepEqual(fresh.calls, []); assert.deepEqual(fresh.slider.captured, []); assert.equal(fresh.text(), '0 °C');
+  }
+  const d = dial('0'); d.slider.dispatch('pointerdown', d.polar(0));
+  for (const point of [{ clientX: NaN, clientY: 40 }, { clientX: 40, clientY: Infinity }]) d.slider.dispatch('pointermove', { pointerId: 1, ...point });
+  assert.equal(d.text(), '+2 °C'); d.slider.dispatch('pointercancel', {}); assert.deepEqual(d.calls, []);
+});
+
+await test("a second surface's pending request discards this surface's unsent drag draft", async () => {
+  const w = world('0'), a = w.surface(), b = w.surface();
+  a.slider.dispatch('pointerdown', w.polar(0)); assert.equal(a.text(), '+2 °C');
+  b.plus.dispatch('click', {}); w.flush(); assert.deepEqual(w.sent(), [.5]);
+  assert.equal(a.text(), '+0,5 °C'); assert.equal(a.note.textContent, 'Angefragt · Bestätigung ausstehend'); assert.equal(a.plus.disabled, true);
+  a.slider.dispatch('pointermove', w.polar(22.5)); a.slider.dispatch('pointerup', w.polar(22.5)); w.flush();
+  assert.equal(a.text(), '+0,5 °C'); assert.equal(b.text(), '+0,5 °C'); assert.deepEqual(w.sent(), [.5]);
+  w.readback('0.5'); a.control.render(); b.control.render();
+  assert.equal(a.text(), '+0,5 °C'); assert.equal(a.note.textContent, '');
+  a.plus.dispatch('click', {}); w.flush();
+  assert.deepEqual(w.sent(), [.5, 1]);
+});
+await test('a release that cannot be sent discards its draft instead of leaving it displayed', () => {
+  const d = dial('0'); d.slider.dispatch('pointerdown', d.polar(0)); assert.equal(d.text(), '+2 °C');
+  d.control.node.connected = false; d.slider.dispatch('pointerup', d.polar(0)); d.flush();
+  assert.deepEqual(d.calls, []); assert.equal(d.text(), '0 °C');
+  d.control.node.connected = true; d.control.render(); assert.equal(d.text(), '0 °C');
+  d.plus.dispatch('click', {}); d.flush();
+  assert.deepEqual(d.sent(), [.5]);
+});
+await test('plus and minus step from the real or pending value, never from an unscheduled drag draft', () => {
+  const d = dial('0'); d.slider.dispatch('pointerdown', d.polar(0)); assert.equal(d.text(), '+2 °C');
+  d.plus.dispatch('click', {}); assert.equal(d.text(), '+0,5 °C');
+  d.plus.dispatch('click', {}); assert.equal(d.text(), '+1 °C'); // scheduled steps still coalesce
+  d.flush(); assert.deepEqual(d.sent(), [1]);
+  d.slider.dispatch('pointermove', d.polar(22.5)); d.slider.dispatch('pointerup', d.polar(22.5)); d.flush();
+  assert.equal(d.text(), '+1 °C'); assert.deepEqual(d.sent(), [1]); // the sent step ended the drag
+  const w = world('1'), a = w.surface(); a.minus.dispatch('click', {}); a.minus.dispatch('click', {}); a.minus.dispatch('click', {}); w.flush();
+  assert.deepEqual(w.sent(), [-.5]);
 });
 
 await test('card mode lock clears when the climate becomes unavailable during set_preset_mode', async () => {
