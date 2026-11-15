@@ -87,6 +87,27 @@ await test('one coarse move from an inner value into the gap takes the end on it
     assert.deepEqual(d.calls, []);
   }
 });
+// The dial does not wrap: back on the ring beyond the gap, the drag keeps its end until the pointer is nearer to it along the ring.
+for (const [start, press, moves, end] of [['2', 22.5, [45, 90, 134, 140, 170, 220], 3], ['-2', 157.5, [135, 90, 46, 40, 10, -40], -3]])
+  await test(`drag crossing the whole gap onto the far ring stays at ${end}`, () => {
+    const d = dial(start), label = `${end > 0 ? '+' : ''}${end} °C`; d.slider.dispatch('pointerdown', d.polar(press));
+    for (const degrees of moves) { d.slider.dispatch('pointermove', d.polar(degrees)); assert.equal(d.text(), label, `${degrees}°`) }
+    d.slider.dispatch('pointerup', d.polar(moves.at(-1))); d.flush();
+    assert.deepEqual(d.sent(), [end]);
+  });
+await test('a drag held at an end beyond the gap follows the pointer again once it is nearer along the ring', () => {
+  for (const [start, press, far, near, value] of [['2', 22.5, 170, 240, '-0,5 °C'], ['-2', 157.5, 10, -60, '+0,5 °C']]) {
+    const d = dial(start); d.slider.dispatch('pointerdown', d.polar(press));
+    for (const degrees of [90, far]) d.slider.dispatch('pointermove', d.polar(degrees));
+    d.slider.dispatch('pointermove', d.polar(near)); assert.equal(d.text(), value, `${press}° → ${near}°`);
+    d.slider.dispatch('pointercancel', {}); assert.deepEqual(d.calls, []);
+  }
+});
+await test('a press on the ring selects its own value whatever the shown value', () => {
+  for (const [start, degrees, expected] of [['3', 140, -3], ['-3', 40, 3], ['3', 180, -2], ['-3', 360, 2]]) {
+    const d = dial(start); d.tap(d.polar(degrees)); assert.deepEqual(d.sent(), [expected], `${start} → ${degrees}°`);
+  }
+});
 await test('drag release over the centre keeps the last ring value', () => {
   const d = dial(); d.slider.dispatch('pointerdown', d.polar(-90));
   d.slider.dispatch('pointermove', d.at(110, 100)); assert.equal(d.text(), '0 °C');

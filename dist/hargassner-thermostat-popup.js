@@ -1,11 +1,11 @@
-/* Hargassner thermostat popup and dashboard card, v1.4.11.
+/* Hargassner thermostat popup and dashboard card, v1.4.12.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. Qualified target gestures use guarded climate.set_temperature.
  * Unknown-target correction controls use the separately commissioned number.set_value.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.11";
+const VERSION = "1.4.12";
 // Coalesce rapid native +/- gestures while reducing the avoidable send delay.
 const TEMPERATURE_BUTTON_DEBOUNCE_MS = 250;
 const SCHEMA = "configured_room_setpoint_v1";
@@ -826,13 +826,16 @@ export function createHargassnerCorrectionControl(environment, current) {
   // Arc angle 0..270 maps to -3..+3. A press in the open bottom gap snaps to
   // its nearer end; a drag keeps the end on the shorter way from its value
   // `from`, so one that left through an end holds it across the whole gap.
+  // The dial does not wrap: a drag that returns to the ring beyond the gap
+  // keeps that end until the pointer is nearer to it along the ring.
   // The centre (value text) and an unmeasurable dial select nothing.
   const pointerValue = (event, from = 0) => {
     const rect = dial.getBoundingClientRect(), x = (event.clientX - rect.left) / rect.width * 220 - 110,
       y = (event.clientY - rect.top) / rect.height * 190 - 100;
     if (!(rect.width > 0 && rect.height > 0) || ![rect.width, rect.height, x, y].every(Number.isFinite) || Math.hypot(x, y) < 60) return null;
     const angle = (Math.atan2(y, x) * 180 / Math.PI + 225 + 360) % 360;
-    const arc = angle <= 270 ? angle : angle <= (from + 3) * 45 + 180 ? 270 : 0;
+    const origin = (from + 3) * 45;
+    const arc = angle > 270 ? angle <= origin + 180 ? 270 : 0 : Math.abs(angle - origin) > 180 ? angle < origin ? 270 : 0 : angle;
     return Math.round((arc / 270 * 6 - 3) * 2) / 2 + 0;
   };
   dial.addEventListener("pointerdown", event => {
