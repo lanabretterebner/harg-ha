@@ -31,6 +31,12 @@ MAX_QUEUE = 64
 # shortest default staleness limit.
 FUTURE_TOLERANCE = 5
 KINDS = ('heartbeat', 'certificate', 'telnet')
+# The check kinds this evaluator knows how to judge. Both must be present in a
+# report. A producer that adds a further check key is a newer producer, not a
+# broken one: the extra key is ignored so that one unknown kind cannot turn all
+# three reported components into a blanket `report_invalid` with a notification
+# each. An unknown kind is therefore never evaluated and never reported.
+EVALUATED = ('certificate', 'telnet')
 STATES = {'healthy', 'warning', 'fault', 'unknown', 'maintenance'}
 REASONS = {'ok', 'report_missing', 'report_invalid', 'clock_invalid', 'heartbeat_stale',
            'run_missing', 'run_stale', 'run_future', 'result_failed', 'certificate_expiring',
@@ -303,7 +309,7 @@ def evaluate(document, config=None, now=None, endpoint_failed=False):
             or type(document['schema_version']) is not int or document['schema_version'] != 1
             or not number(document['sent_at']) or document['sent_at'] < 0
             or not isinstance(document['checks'], dict)
-            or set(document['checks']) != {'certificate', 'telnet'}):
+            or not set(EVALUATED) <= set(document['checks'])):
         return {kind: result('unknown', 'report_invalid') for kind in KINDS}
     sent = document['sent_at']
     if sent > now + config['future_tolerance']:
@@ -311,7 +317,7 @@ def evaluate(document, config=None, now=None, endpoint_failed=False):
     if now - sent > config['heartbeat_max_age']:
         return {kind: result('unknown', 'heartbeat_stale', sent) for kind in KINDS}
     rows = {'heartbeat': result('healthy', 'ok', sent)}
-    for kind in ('certificate', 'telnet'):
+    for kind in EVALUATED:
         check = document['checks'][kind]
         if check is None:
             rows[kind] = result('unknown', 'run_missing')

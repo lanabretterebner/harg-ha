@@ -10,6 +10,18 @@ and six manufacturer presets: Aus, Auto, Heizen, Absenken, 1x Heizen and
 The popup recognizes that contract rather than fixed entity IDs. Unsupported
 entities and unknown current presets retain native controls.
 
+`1x Heizen` and `1x Absenken` are one-time modes that the controller ends by
+itself. Offline firmware analysis of V14.1HAR.q1 establishes that each is a
+forced day or setback phase until the start of the circuit's next heating
+window, where the firmware calls its own `set_mode(Auto)` and rewrites the mode
+parameter, so the selected preset reads `Auto` again; with no window in the
+circuit's time programme a 24-hour fallback does it. A later observation of
+`Auto` after one of these presets is that normal silent end, and must not be
+presented as a lost command, a rejected write or a mode the user chose. No end
+time or countdown is derived or displayed: the instant depends on the circuit's
+time programme and on the controller clock, which has no NTP client and whose
+error is permanent, so any such value would be invented.
+
 The backend additionally exposes these climate attributes:
 
 | Attribute | Meaning |
@@ -49,7 +61,7 @@ also leaves one existing MQTT device and all registry/discovery identities intac
 
 `Sollwertbasis` identifies the currently qualified configured target context. The backend remains the only command authority. Legacy `Sollwertaktualisierung` markers are display hints; they never authorize a temperature command.
 
-Frontend 1.4.13 also understands additive `Temperaturauftrag` schemaVersion1: controller-unit `temperatureUnit: °C`, opaque `context`, monotonic operation `sequence` and full-envelope `revision`, bounded last8 `records`, plus same-snapshot `confirmedTarget`, `confirmedBasis` and `confirmedPreset` echoes. A record contains its sequence, original basis/requested target, status (`pending`, `confirmed`, `rejected`, `sent_unconfirmed`), safe reason/origin and timestamps. A confirmed correction record alone is insufficient: the displayed actual target/basis/preset must match the coherent echoes before settling. HA Fahrenheit display converts the Celsius metadata explicitly.
+Frontend 1.4.14 also understands additive `Temperaturauftrag` schemaVersion1: controller-unit `temperatureUnit: °C`, opaque `context`, monotonic operation `sequence` and full-envelope `revision`, bounded last8 `records`, plus same-snapshot `confirmedTarget`, `confirmedBasis` and `confirmedPreset` echoes. A record contains its sequence, original basis/requested target, status (`pending`, `confirmed`, `rejected`, `sent_unconfirmed`), safe reason/origin and timestamps. A confirmed correction record alone is insufficient: the displayed actual target/basis/preset must match the coherent echoes before settling. HA Fahrenheit display converts the Celsius metadata explicitly.
 
 The client captures a local draft before native debounce, keeps it pending/uncertain without automatic retry, and rejects stale snapshots/outcomes. An older rejected request cannot undo newer input. Memory-only intent is scoped to the authenticated HA connection/user/entity; nothing changes shared HA states or persists an intent. Native card/control nodes remain mounted while callback/API leases rotate. Only bound definitive rejection allows rollback. Fresh genuine mode/base/day-night changes remain truthful; no cached target grants permission.
 
@@ -83,7 +95,7 @@ and uncertainty note remain visible; independently qualified mode control stays
 available.
 
 
-## Independent correction fallback (frontend 1.4.13)
+## Independent correction fallback (frontend 1.4.14)
 
 When no active target basis is qualified, including Auto during summer shutdown,
 the card and popup offer a separately labelled Raumkorrektur dial instead of
@@ -115,3 +127,30 @@ The dial does not wrap: a drag that returns to the ring beyond the gap keeps
 its end until the pointer is nearer to it along the ring than across the gap.
 A normal qualified target restores its existing target-dial behavior. Unknown
 active target and missing actual room sensors remain labelled unknown.
+
+## One-time charge triggers
+
+The one-time charge buttons (`button:PR040` buffer, `button:PR042` hot water in
+the [naming reference](../examples/entity-name-mapping.json) and the
+[UI groups](../examples/entity-ui-groups.json)) are momentary requests, and when
+the parameter reports `1` and then `0` that `0` is the trigger resetting itself,
+neither completion of the charge nor a rejection of the request. Completion is
+only an independently qualified charging-to-noncharging transition of the
+buffer or hot-water state; a trigger reset, request acknowledgement, pump output
+or elapsed time never establishes it. This client adds no acknowledgement write
+and no entity that claims a finished cycle.
+
+## Telemetry cadence is a controller default, not a guarantee
+
+The freshness behaviour of these entities rests on the controller's telemetry
+cadence: V14.1HAR.q1 checks each channel every 60 s by default and resends an
+unchanged channel once per `max_channel_age`, 3600 s by default. Offline
+firmware analysis establishes that both are only defaults and that the cloud
+commands `get_channel_timeout` and `get_max_channel_age` are **setters**, not
+reads, so a cloud-sent value can change the cadence on a controller this client
+never wrote to. A longer resend age pushes state past the backend's availability
+timeout and makes entities flap or sit unavailable with nothing wrong locally;
+no local code in this repository sends either command. The HA-host monitor's own
+numbers are unaffected: its Telnet five-second sample contract and its 45 s,
+120 s and 90000 s limits are VM-local and independent of the MQTT cadence, so a
+changed cadence is not visible there either.

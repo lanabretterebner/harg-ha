@@ -1,6 +1,14 @@
 # Changelog
 
-## 1.4.13 (source only; not yet installed)
+## 1.4.14
+
+- Include the independently versioned app 1.5.5. Its optional monitor now ignores a check kind it does not know instead of reporting all three components invalid and notifying for each; both known checks are still required and no current report changes its verdict. Update the app separately through Supervisor.
+- Document three limits that this release does not change: the monitor cannot see a controller that has left the broker (none of its three components observes the MQTT session); `1x Heizen` and `1x Absenken` end silently when the controller itself returns the circuit to Auto, and no end time is displayed because the controller clock has no NTP client; and the one-time charge trigger's `0` report is the trigger resetting itself, not a completed charge and not a rejection. Also note that the controller's 60 s / 3600 s telemetry cadence is a default a cloud command can change.
+- Change nothing in the thermostat frontend except its version number; card and popup behavior are those of 1.4.12.
+
+## 1.4.13
+
+- Installed by the owner on 2026-11-16.
 
 - Include the independently versioned app 1.5.4. Its optional monitor accepts a relay clock up to 5 s ahead of the HA host, recovers from a backward step of the HA host's clock at the next poll instead of staying at `clock_invalid` until the old time has passed, and keeps real alerts under their own reason meanwhile. Update the app separately through Supervisor.
 - Change nothing in the thermostat frontend except its version number; card and popup behavior are those of 1.4.12.

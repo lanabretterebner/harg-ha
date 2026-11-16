@@ -241,6 +241,24 @@ It never connects to the controller or MQTT. Existing ingress origin, token,
 connect-host and non-admin access options remain unchanged. Monitoring is
 **disabled by default**; updating the app alone does not send a notification.
 
+**Coverage limit: a controller that has left the broker.** Not connecting to the
+controller or MQTT is also a limit on what the monitor can report, not only a
+safety property. **None of the three components can see a controller that is no
+longer on the relay's broker.** The heartbeat only shows that the VM is
+reachable and serving the health route; the certificate component only reports
+the age and result of the VM's own certificate check; and the Telnet component
+is a VM-to-controller TCP23 read stamped with the VM's own clock, entirely
+independent of the MQTT session, so it keeps reporting `fresh` while the broker
+path is dead. Offline firmware analysis of V14.1HAR.q1 establishes that this
+state is reachable without any fault on the VM: a cloud `switch_broker` command
+stores a volatile broker override whose only local symptom is an unexpected
+will followed by silence, and the 2026-11-12 cloud write of `Z1w` = 0 alone took
+the controller off the relay, with no controller restart restoring it. In that
+state every HA entity goes unavailable while all three monitor components can
+still report healthy. Unavailable entities are the symptom to investigate
+directly; the monitor is not a detector for it, and a silent monitor is not
+evidence that the controller is connected.
+
 Set `monitor_enabled: true`, a separately generated random URL-safe
 `monitor_token` matching the VM's dedicated health-token configuration, and
 `monitor_poll_interval` between15 and60 seconds (default30). The monitor token
@@ -283,6 +301,15 @@ at the first poll instead of being waited out. The state format and reason
 codes are unchanged, so the state survives both an update and a downgrade.
 Earlier versions held every component at `clock_invalid` until the old stamp
 had passed and could not report a VM outage during that time.
+
+From app1.5.5 a check kind the evaluator does not know is ignored instead of
+invalidating the whole report. Both known checks, `certificate` and `telnet`,
+are still required, and a report missing either one stays `report_invalid` for
+all three components. An additional key that a later relay version may send is
+neither evaluated nor reported, so one unknown kind can no longer turn all three
+components into a blanket unknown with a notification for each. This is forward
+compatibility only: no current report changes its verdict, and the status
+schema, reason codes and state format are unchanged.
 
 Delivery is ONLY local `POST
 http://172.30.32.2/core/api/services/persistent_notification/create`, using the
@@ -331,7 +358,7 @@ future operator choice. Container build, real notification delivery, receiver
 permissions and actual app update remain unverified until separately recorded.
 
 The reused project `health_alerts.py` is byte-pinned to SHA-256
-`46a2da7f420e3093b0536a3c3d95423fd87d4028b466d13e0998d13867cf193a`.
+`17e59fca9ad7ca3c3453f904ae17a4edd0aaea2456d5483633df73ec080ef137`.
 Its evaluator/outbox semantics are retained; this app adapter adds the fixed
 health-token fetch, existing HTTPS connector, bounded one-event scheduler and
 Supervisor destination. No original producer observation time is rewritten.

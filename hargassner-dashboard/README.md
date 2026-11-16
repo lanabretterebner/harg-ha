@@ -42,5 +42,8 @@ HTTP400 instead of reporting the dashboard unreachable. App1.5.4 accepts a VM
 clock up to 5 s ahead of the HA host and recovers from a backward step of the
 HA host's clock at the next poll instead of holding every component at
 `clock_invalid` until the old time has passed; alerts that do not depend on the
-clock keep their own reason meanwhile. These are source-tested fixes; a new container
+clock keep their own reason meanwhile. App1.5.5 makes that monitor ignore a
+check kind it does not know, instead of reporting all three components invalid
+and notifying for each, while still requiring both known checks; no current
+report changes its verdict. These are source-tested fixes; a new container
 build, installed upgrade and real notification delivery require separate checks.

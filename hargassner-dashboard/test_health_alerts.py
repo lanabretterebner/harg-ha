@@ -303,6 +303,43 @@ class UnitTests(unittest.TestCase):
             with self.subTest(row=row):
                 self.assertEqual(h.evaluate(row, now=NOW)['heartbeat']['reason'], 'report_invalid')
 
+    def test_unknown_check_kind_is_ignored_and_changes_no_current_verdict(self):
+        # A newer producer may report a fourth check. The evaluator does not know
+        # that kind, so it neither evaluates nor reports it, and the three known
+        # components keep exactly the verdict they have without it.
+        extra = {'checked_at': NOW, 'status': 'fault'}
+        for certificate, telnet in [('healthy', 'healthy'), ('warning', 'maintenance'),
+                                    ('healthy', 'fault'), ('maintenance', 'warning')]:
+            with self.subTest(certificate=certificate, telnet=telnet):
+                current = h.evaluate(heartbeat(certificate=certificate, telnet=telnet), now=NOW)
+                row = heartbeat(certificate=certificate, telnet=telnet)
+                row['checks']['pellet_store'] = extra
+                extended = h.evaluate(row, now=NOW)
+                self.assertEqual(extended, current)
+                self.assertEqual(set(extended), set(h.KINDS))
+        # Unknown kinds are ignored whatever they contain, including junk.
+        for value in [None, {}, 'SECRET', {'checked_at': NOW + 10 ** 6, 'status': 'nonsense'}]:
+            with self.subTest(unknown=value):
+                row = heartbeat(); row['checks']['future_kind'] = value
+                self.assertEqual(h.evaluate(row, now=NOW), h.evaluate(heartbeat(), now=NOW))
+        # Staleness and clock rules of the known kinds are untouched by an extra key.
+        row = heartbeat(); row['checks']['future_kind'] = extra
+        row['checks']['telnet']['checked_at'] = NOW - 45.001
+        self.assertEqual(h.evaluate(row, now=NOW)['telnet']['reason'], 'run_stale')
+
+    def test_missing_required_check_kind_stays_invalid(self):
+        for missing in h.EVALUATED:
+            with self.subTest(missing=missing):
+                row = heartbeat(); del row['checks'][missing]
+                self.assertTrue(all(r['reason'] == 'report_invalid' for r in h.evaluate(row, now=NOW).values()))
+                # Still invalid when an unknown kind is present in its place.
+                row['checks']['future_kind'] = {'checked_at': NOW, 'status': 'healthy'}
+                self.assertTrue(all(r['reason'] == 'report_invalid' for r in h.evaluate(row, now=NOW).values()))
+        row = heartbeat(); row['checks'] = {'future_kind': {'checked_at': NOW, 'status': 'healthy'}}
+        self.assertTrue(all(r['reason'] == 'report_invalid' for r in h.evaluate(row, now=NOW).values()))
+        self.assertEqual(h.EVALUATED, ('certificate', 'telnet'))
+        self.assertTrue(set(h.EVALUATED) < set(h.KINDS))
+
     def test_config_refuses_headers_url_overrides_and_unknown_options(self):
         cases = [{'webhook': {'url': 'http://example.invalid'}}, {'timeout': 60},
                  {'webhook': {'url': 'https://a.invalid', 'headers': {'Host': 'other'}}},

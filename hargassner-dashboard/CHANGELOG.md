@@ -1,6 +1,29 @@
 # Changelog
 
-## 1.5.4 (source only; not yet installed)
+## 1.5.5
+
+- Ignore a check kind the evaluator does not know instead of rejecting the whole
+  report. Earlier versions required the report's check set to equal exactly
+  `certificate` and `telnet`, so a single extra key sent by a later relay
+  version made all three components `report_invalid` — a blanket unknown plus a
+  notification for each.
+- Keep both known checks required: a report missing `certificate` or `telnet` is
+  still `report_invalid` for all three components, and an unknown kind in its
+  place does not satisfy it.
+- An unknown kind is neither evaluated nor reported, whatever it contains.
+  Verdicts for current reports, the status schema, reason codes, report format
+  and state format are unchanged, and the staleness and clock rules of the known
+  checks are untouched.
+- Tests cover an unknown extra key, a missing required key and both together,
+  and assert that an extra key changes no current verdict. Monitoring tests
+  87 -> 89, app tests 169 -> 171.
+- Document that none of the three components can see a controller that has left
+  the relay's broker, that the one-time charge trigger's `0` report is its own
+  reset and that the controller's telemetry cadence is a changeable default.
+
+## 1.5.4
+
+- Installed by the owner on 2026-11-16.
 
 - Accept a VM clock up to 5 s ahead of the HA host instead of 2 s, so two hosts
   a few seconds apart no longer raise `run_future` for all three components.
