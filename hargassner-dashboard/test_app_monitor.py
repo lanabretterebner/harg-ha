@@ -90,6 +90,30 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(self.posts(), []); self.assertEqual(self.state()['queue'], [])
         self.assertEqual(stat.S_IMODE(self.monitor.directory.stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE(self.monitor.state_path.stat().st_mode), 0o600)
+    def test_healthy_start_silently_clears_only_fixed_legacy_banners_once(self):
+        for _ in range(6): self.monitor.poll_once()
+        self.assertEqual(self.posts(), [])
+        self.assertEqual([r['component'] for r in self.calls if r['kind'] == 'dismissal'], list(h.KINDS))
+
+    def test_startup_cleanup_does_not_dismiss_a_fault_and_retries_failed_cleanup(self):
+        self.documents = report(telnet='fault')
+        self.monitor.poll_once()
+        self.fail_post = True
+        self.assertEqual(self.monitor.poll_once()['error'], 'delivery_failed')
+        self.fail_post = False
+        for _ in range(5): self.monitor.poll_once()
+        cleanups = [r['component'] for r in self.calls if r['kind'] == 'dismissal']
+        self.assertNotIn('telnet', cleanups)
+        self.assertEqual(cleanups.count('heartbeat'), 2)
+        self.assertEqual(cleanups.count('certificate'), 1)
+
+    def test_clock_guard_is_also_used_for_notification_freshness_and_cleanup(self):
+        self.monitor.poll_once(); self.advance(-600); self.monitor.poll_once()
+        request = self.posts()[-1]
+        self.assertEqual((request['condition']['status'], request['condition']['reason']), ('unknown', 'clock_invalid'))
+        self.assertEqual(request['condition']['status'], request['event']['status'])
+        self.assertEqual(len([r for r in self.calls if r['kind'] == 'dismissal']), 1)
+
     def test_heartbeat_request_never_contains_other_credentials(self):
         self.monitor.poll_once(); request = self.calls[0]
         self.assertEqual(request['kind'], 'heartbeat'); self.assertEqual(request['token'], HEALTH)
@@ -133,6 +157,15 @@ class MonitorTests(unittest.TestCase):
         self.monitor.state_path.write_bytes(b'{broken'); self.monitor.state_path.chmod(0o600)
         with self.assertRaises(h.Refusal): self.monitor.poll_once()
         self.assertEqual(self.monitor.state_path.read_bytes(), b'{broken'); self.assertEqual(self.posts(), [])
+    def test_valid_json_malformed_state_is_preserved_without_monitor_crash(self):
+        for raw in (b'{}', b'[]', b'{"queue":[]}'):
+            self.monitor.state_path.write_bytes(raw); self.monitor.state_path.chmod(0o600)
+            with self.subTest(raw=raw), self.assertRaisesRegex(h.Refusal, 'state_invalid'):
+                self.monitor.poll_once()
+            self.assertEqual(self.monitor.state_path.read_bytes(), raw)
+        self.assertEqual(self.posts(), [])
+        self.assertEqual([r for r in self.calls if r['kind'] == 'dismissal'], [])
+
     def test_state_lock_refuses_concurrent_poller(self):
         with h.state_lock(self.monitor.state_path), self.assertRaises(h.Refusal): self.monitor.poll_once()
         self.assertEqual(self.posts(), [])
@@ -212,7 +245,7 @@ class MonitorTests(unittest.TestCase):
             def is_set(self): return self.calls > 0
             def wait(self, value): owner.assertEqual(value, 30); self.calls += 1
         with redirect_stdout(io.StringIO()): self.monitor.run(Stop())
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual([r["kind"] for r in self.calls], ["heartbeat", "dismissal"])
     def test_sanitized_status_excludes_credentials_and_safe_delivery_condition(self):
         self.fail_get = True; self.monitor.poll_once(); status = self.monitor.status()
         self.assertEqual(status['queue_count'], 2); self.assertEqual(status['last_check_at'], NOW)

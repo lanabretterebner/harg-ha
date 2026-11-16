@@ -624,15 +624,58 @@ class UnitTests(unittest.TestCase):
         for i, status in enumerate(['fault', 'healthy']):
             state = h.transition(h.evaluate(heartbeat(NOW+i, telnet=status), now=NOW+i), state, NOW+i)
         identities = []
-        for event in state['queue']:
+        for index, event in enumerate(state['queue']):
             with patch.object(h, 'request_https') as send:
                 h.delivery(event, config)
                 args = send.call_args.args
-                self.assertEqual(args[1], 'https://ha.example.invalid/api/services/persistent_notification/create')
+                self.assertEqual(args[1], 'https://ha.example.invalid/api/services/persistent_notification/' + ('create' if index == 0 else 'dismiss'))
                 self.assertEqual(args[3]['Authorization'], 'Bearer SYNTHETIC_PRIVATE_TOKEN')
                 body = json.loads(args[4]); identities.append(body['notification_id'])
                 self.assertNotIn('SYNTHETIC_PRIVATE_TOKEN', args[4])
         self.assertEqual(identities, ['harg_health_telnet', 'harg_health_telnet'])
+
+    def test_ha_problem_copy_is_actionable_and_has_no_internal_event_identity(self):
+        state = h.transition(h.evaluate(heartbeat(telnet='fault'), now=NOW), h.initial_state(), NOW)
+        event = state['queue'][0]
+        action, payload = h.ha_notification(event)
+        self.assertEqual(action, 'create')
+        self.assertIn('Messwerte', payload['title']); self.assertIn('Prüfe', payload['message'])
+        self.assertNotIn(event['event_id'], json.dumps(payload))
+        for status in ('healthy', 'maintenance'):
+            self.assertEqual(h.ha_notification({**event, 'status': status}), ('dismiss', {'notification_id': 'harg_health_telnet'}))
+
+    def test_common_endpoint_outage_is_one_ha_problem_but_checker_faults_remain_visible(self):
+        events = h.transition(h.evaluate(None, now=NOW, endpoint_failed=True), h.initial_state(), NOW)['queue']
+        self.assertEqual([h.ha_notification(event)[0] for event in events], ['create', None, None])
+        for component in ('certificate', 'telnet'):
+            for reason in ('run_future', 'run_stale', 'result_failed'):
+                self.assertEqual(h.ha_notification({**events[0], 'component': component, 'reason': reason})[0], 'create')
+
+    def test_ha_delivery_skips_obsolete_problem_from_a_recovered_backlog(self):
+        config = self.ha()
+        saved = h.transition(h.evaluate(heartbeat(telnet='fault'), now=NOW), h.initial_state(), NOW)
+        h.atomic_json(self.state, saved)
+        with patch.object(h, 'request_https') as send:
+            reply = h.run(heartbeat(NOW + 1), self.state, config, NOW + 1, True)
+        self.assertEqual(reply['pending_count'], 0)
+        self.assertEqual(send.call_count, 1)
+        self.assertTrue(send.call_args.args[1].endswith('/persistent_notification/dismiss'))
+
+    def test_individually_invalid_checks_still_create_ha_problem_notifications(self):
+        for component in ('certificate', 'telnet'):
+            document = heartbeat(); document['checks'][component] = {'checked_at': NOW, 'status': 'unsupported'}
+            rows = h.evaluate(document, now=NOW)
+            self.assertEqual(rows['heartbeat']['status'], 'healthy')
+            events = h.transition(rows, h.initial_state(), NOW)['queue']
+            self.assertEqual(len(events), 1)
+            action, payload = h.ha_notification(events[0])
+            self.assertEqual(action, 'create')
+            self.assertEqual(payload['notification_id'], 'harg_health_' + component)
+
+    def test_effective_conditions_refuses_valid_json_malformed_state(self):
+        for saved in ({}, [], {'queue': []}):
+            with self.subTest(saved=saved), self.assertRaisesRegex(h.Refusal, 'state_invalid'):
+                h.effective_conditions(h.evaluate(heartbeat(), now=NOW), saved, NOW)
 
     def test_home_assistant_token_requires_private_regular_file(self):
         config = self.ha(); token = Path(config['home_assistant']['token_file'])
@@ -745,8 +788,8 @@ class LoopbackHTTPSTests(unittest.TestCase):
             first = h.run(heartbeat(telnet='fault'), state, config, NOW, True)
             second = h.run(heartbeat(NOW+1), state, config, NOW+1, True)
             self.assertEqual((first['delivered'], second['delivered']), (1, 1))
-            for record in self.records[before:]:
-                self.assertEqual(record['path'], '/api/services/persistent_notification/create')
+            for index, record in enumerate(self.records[before:]):
+                self.assertEqual(record['path'], '/api/services/persistent_notification/' + ('create' if index == 0 else 'dismiss'))
                 self.assertEqual(record['authorization'], 'Bearer SYNTHETIC_HA_TOKEN')
                 self.assertEqual(json.loads(record['body'])['notification_id'], 'harg_health_telnet')
             self.assertNotIn('SYNTHETIC_HA_TOKEN', state.read_text())

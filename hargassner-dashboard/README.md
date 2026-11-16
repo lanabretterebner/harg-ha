@@ -47,3 +47,7 @@ check kind it does not know, instead of reporting all three components invalid
 and notifying for each, while still requiring both known checks; no current
 report changes its verdict. These are source-tested fixes; a new container
 build, installed upgrade and real notification delivery require separate checks.
+
+App 1.5.6 uses German problem notifications with a next step. Recovery quietly
+clears the old warning. Update the app through Supervisor; no HACS update is
+needed for this notification change.

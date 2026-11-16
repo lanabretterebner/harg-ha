@@ -283,8 +283,10 @@ timestamps. Fresh API reads cannot renew stale runs. Defaults distinguish120s
 heartbeat,90000s certificate execution,45s Telnet execution and5s future clock
 tolerance. Missing/invalid/stale or failed heartbeat evidence is **unknown**;
 it does not prove the heater is down. Normal maintenance is a suppression state.
-A healthy first observation establishes a silent baseline. Changed fault,
-unknown, maintenance and recovery conditions update fixed persistent IDs
+A healthy first observation establishes a silent baseline. Fault and unknown
+conditions create readable German problem notifications with a next step. Healthy
+recovery and maintenance silently dismiss the corresponding warning. A missing
+common connection produces one Status warning. The fixed persistent IDs are
 `harg_health_heartbeat`, `harg_health_certificate`, `harg_health_telnet`.
 
 From app1.5.4 a VM clock up to 5 s ahead of the HA host counts as current. A
@@ -311,14 +313,20 @@ components into a blanket unknown with a notification for each. This is forward
 compatibility only: no current report changes its verdict, and the status
 schema, reason codes and state format are unchanged.
 
-Delivery is ONLY local `POST
-http://172.30.32.2/core/api/services/persistent_notification/create`, using the
+Delivery is ONLY local `POST` to the Supervisor proxy at `172.30.32.2`, using
+`/core/api/services/persistent_notification/create` for problems and
+`/core/api/services/persistent_notification/dismiss` for silent recovery, with the
 Supervisor token. This explicit fixed private-transport policy applies only to
 the internal Supervisor proxy; the VM path is always verified HTTPS. The app
 cannot select arbitrary HA services or remote notification URLs. A2xx response
-accepts the queued delivery; response bodies are not read. Notifications contain
-fixed component/status/reason codes and event IDs, never credentials, hostnames,
-controller identifiers, raw measurements or upstream exceptions.
+accepts the queued delivery; response bodies are not read. Notification text contains the problem and a suggested check, never internal
+status codes, event hashes, credentials, hostnames, controller identifiers, raw
+measurements or upstream exceptions. Event IDs remain transport metadata.
+App 1.5.6 also clears legacy healthy banners after startup when current checks
+confirm recovery. Only the three fixed monitor IDs can be dismissed. Unknown or
+failed checks stay visible. Obsolete queued alerts/recoveries are accepted
+without changing the current notification; the original durable outbox and
+clock/freshness guards remain intact.
 
 State is separate from all controller/charge journals: evaluator-owned0700
 `/data/health-monitor`,600 atomic/fsynced state and lock files. Keep it across

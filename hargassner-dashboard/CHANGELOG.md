@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.5.6
+
+- Show readable German problem notifications with a next step. Internal status
+  codes and event hashes stay out of the message.
+- Clear resolved warnings silently instead of creating healthy/recovery alerts.
+  Maintenance does not create a notification.
+- Report a missing common dashboard connection once, while retaining independent
+  certificate and measurement problems.
+- Ignore obsolete outbox events for presentation so a recovered problem cannot
+  raise a stale alert or dismiss a newer fault. Durable state and retry IDs stay.
+- Clear legacy healthy banners after startup only when current checks confirm
+  recovery; never dismiss unknown/failed checks or unrelated notifications.
+
+
 ## 1.5.5
 
 - Ignore a check kind the evaluator does not know instead of rejecting the whole

@@ -88,8 +88,38 @@ class WireTests(unittest.TestCase):
         first, second = self.http.requests
         self.assertEqual(first[:2], ('POST', '/core/api/services/persistent_notification/create'))
         self.assertEqual(first[2]['Authorization'], 'Bearer ' + SUPERVISOR_TOKEN)
-        payload = json.loads(first[3]); self.assertEqual(payload['notification_id'], 'harg_health_heartbeat'); self.assertIn('does not prove the heater is down', payload['message'])
+        payload = json.loads(first[3]); self.assertEqual(payload['notification_id'], 'harg_health_heartbeat'); self.assertIn('keinen Heizungsausfall', payload['message']); self.assertNotIn(event()['event_id'], payload['message']); self.assertIn('Prüfe', payload['message'])
         self.assertEqual(first[3], second[3]); self.assertNotIn(TOKEN, first[3].decode())
+    def notification(self, **request):
+        original = http.client.HTTPConnection
+        with patch.object(m.http.client, 'HTTPConnection', side_effect=lambda host, port, **kw: original('127.0.0.1', self.http.server_address[1], **kw)):
+            return m.request_worker({'kind': 'notification', 'token': SUPERVISOR_TOKEN, **request})
+
+    def test_healthy_and_maintenance_are_silent_dismissals_with_no_message(self):
+        for status in ('healthy', 'maintenance'):
+            self.assertTrue(self.notification(event={**event(), 'status': status, 'transition': 'recovery' if status == 'healthy' else 'suppression'})['ok'])
+            request = self.http.requests[-1]
+            self.assertEqual(request[1], m.DISMISS_PATH)
+            self.assertEqual(json.loads(request[3]), {'notification_id': 'harg_health_heartbeat'})
+
+    def test_obsolete_outbox_alert_and_recovery_cannot_change_current_notification(self):
+        self.assertTrue(self.notification(event=event(), condition=h.result('healthy', 'ok'))['ok'])
+        self.assertTrue(self.notification(event={**event(), 'status': 'healthy', 'reason': 'ok', 'transition': 'recovery'}, condition=h.result('fault', 'result_failed'))['ok'])
+        self.assertEqual(self.http.requests, [])
+
+    def test_missing_common_endpoint_does_not_create_duplicate_component_alerts(self):
+        for component in ('certificate', 'telnet'):
+            self.assertTrue(self.notification(event={**event(), 'component': component})['ok'])
+        self.assertEqual(self.http.requests, [])
+
+    def test_silent_cleanup_can_only_dismiss_fixed_component_ids(self):
+        self.assertTrue(self.notification(kind='dismissal', component='telnet')['ok'])
+        self.assertEqual(self.http.requests[-1][1], m.DISMISS_PATH)
+        self.assertEqual(json.loads(self.http.requests[-1][3]), {'notification_id': 'harg_health_telnet'})
+        count = len(self.http.requests)
+        self.assertFalse(self.notification(kind='dismissal', component='unrelated_notification')['ok'])
+        self.assertEqual(len(self.http.requests), count)
+
     def test_real_heartbeat401_then_restore_queues_unknown_and_recovery_not_heater_down(self):
         self.tls.status = 401
         now = 2_000_000_000.0; delivered = []

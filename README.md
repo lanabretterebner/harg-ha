@@ -1,6 +1,6 @@
 # Hargassner for Home Assistant
 
-Frontend 1.4.14 and the optional ingress/monitor app 1.5.5 include the HA clients for an existing Hargassner local-control
+Frontend 1.4.14 and the optional ingress/monitor app 1.5.6 include the HA clients for an existing Hargassner local-control
 backend: a discoverable thermostat dashboard card, the matching native popup,
 one-device page grouping, the optional dashboard Ingress app and reference examples.
 
@@ -20,7 +20,7 @@ Frontend 1.4.14 keeps an independent room-correction control available when
 Auto has no qualified day/setback target basis, including summer phases.
 The configured target remains unknown until the backend qualifies that basis.
 Install/update the HACS resource and fully reload the frontend. The separately
-versioned ingress/monitor app 1.5.5 contains separate notification-outbox, strict
+versioned ingress/monitor app 1.5.6 contains separate notification-outbox, strict
 configuration and incomplete-response fixes, treats an empty optional connection
 host as unset, rejects raw non-ASCII request paths with HTTP400, recovers its
 optional monitor from clock skew and backward clock steps and makes that monitor
@@ -311,3 +311,9 @@ left the broker, `1x Heizen` and `1x Absenken` end silently when the controller
 returns the circuit to Auto, and the one-time charge trigger's `0` report is its
 own reset rather than a finished charge. Update the app through Supervisor; the
 HACS update alone does not change it.
+
+App 1.5.6 replaces internal health codes and hashes with readable German problem
+messages and a next step. Recovery clears the old warning silently. A missing
+common connection produces one warning; obsolete queued events do not raise
+stale alerts or clear newer faults. Update the app through Supervisor; the
+HACS frontend remains 1.4.14.

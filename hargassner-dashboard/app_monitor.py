@@ -18,6 +18,7 @@ from ingress_proxy import Settings, TOKEN_PATTERN, read_options, upstream_connec
 SUPERVISOR_IP = '172.30.32.2'
 HEARTBEAT_PATH = '/api/dashboard/v1/monitor-health'
 NOTIFY_PATH = '/core/api/services/persistent_notification/create'
+DISMISS_PATH = '/core/api/services/persistent_notification/dismiss'
 REQUEST_TIMEOUT = 5
 MAX_RESPONSE = 65536
 
@@ -98,21 +99,38 @@ def request_worker(request):
             if response.length not in (None, 0):
                 return {'ok': False}
             return {'ok': True, 'document': health.decode(raw)}
-        if kind == 'notification':
+        if kind in ('notification', 'dismissal'):
             token = request['token']
             if (not isinstance(token, str) or not 1 <= len(token) <= 8192
                     or any(ord(char) < 33 or ord(char) > 126 for char in token)):
                 raise ValueError('request_invalid')
-            event = request['event']
-            health.validate_state({**health.initial_state(), 'queue': [event]})
-            body = json.dumps({'notification_id': 'harg_health_' + event['component'],
-                               'title': 'Hargassner health: ' + event['component'],
-                               'message': f"{event['transition']}: {event['status']} ({event['reason']}). Event {event['event_id']}" + (' Monitor evidence is unverified; this does not prove the heater is down.' if event['status'] == 'unknown' else '')}, allow_nan=False).encode()
-            # Explicit local-only policy. Never interpolate a configured URL.
+            event = request.get('event')
+            if kind == 'dismissal':
+                component = request.get('component')
+                if component not in health.KINDS:
+                    raise ValueError('request_invalid')
+                path, payload = DISMISS_PATH, {'notification_id': 'harg_health_' + component}
+                identity = None
+            else:
+                health.validate_state({**health.initial_state(), 'queue': [event]})
+                condition = request.get('condition')
+                if condition is not None:
+                    health.validate_state({**health.initial_state(), 'conditions': {event['component']: condition}})
+                    # A queued historical event must not raise an obsolete alert
+                    # or clear a newer problem while an outage backlog drains.
+                    if any(condition[key] != event[key] for key in ('status', 'reason')):
+                        return {'ok': True}
+                action, payload = health.ha_notification(event)
+                if action is None:
+                    return {'ok': True}
+                path = NOTIFY_PATH if action == 'create' else DISMISS_PATH
+                identity = event['event_id']
+            body = json.dumps(payload, allow_nan=False).encode()
+            # Only these two local notification services are allowed.
             connection = http.client.HTTPConnection(SUPERVISOR_IP, 80, timeout=REQUEST_TIMEOUT - 1)
-            connection.request('POST', NOTIFY_PATH, body=body, headers={
+            connection.request('POST', path, body=body, headers={
                 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
-                'Idempotency-Key': event['event_id'], 'Connection': 'close'})
+                **({'Idempotency-Key': identity} if identity else {}), 'Connection': 'close'})
             response = connection.getresponse()
             return {'ok': 200 <= response.status < 300}
         return {'ok': False}
@@ -148,6 +166,7 @@ class Monitor:
         # (wall, monotonic) of the last recorded evaluation. It lives only in this
         # process; after a restart the persisted wall stamp is the only reference.
         self.monotonic, self.reading = monotonic, None
+        self._notification_cleanup = set(health.KINDS)
         self.directory = private_directory(state_directory)
         self.state_path = self.directory / 'alert-state.json'
         self.last_error = None
@@ -188,6 +207,7 @@ class Monitor:
                 saved = health.initial_state()
             rows = health.evaluate(document, now=now, endpoint_failed=failed)
             stepped = health.stepped_back(self.reading, (now, tick))
+            rows = health.effective_conditions(rows, saved, now, stepped)
             deferred = False
             try:
                 proposed = health.transition(rows, saved, now, stepped)
@@ -204,9 +224,11 @@ class Monitor:
             if proposed['queue'] and not (stop is not None and stop.is_set()):
                 event = proposed['queue'][0]
                 try:
-                    self.network({'kind': 'notification', 'token': self.token, 'event': event})
+                    self.network({'kind': 'notification', 'token': self.token, 'event': event, 'condition': rows[event['component']]})
                 except health.Refusal:
                     return {'pending': len(proposed['queue']), 'delivered': 0, 'error': 'delivery_failed'}
+                if all(rows[event['component']][key] == event[key] for key in ('status', 'reason')):
+                    self._notification_cleanup.discard(event['component'])
                 self.update_status(last_delivery_condition={key: event[key] for key in ('component', 'transition', 'status', 'reason')})
                 proposed['queue'].pop(0)
                 health.atomic_json(self.state_path, proposed)
@@ -226,6 +248,17 @@ class Monitor:
                 return {'pending': len(proposed['queue']), 'delivered': 1}
             if deferred:
                 return {'pending': len(proposed['queue']), 'delivered': 0, 'error': 'state_capacity'}
+            # Clear legacy healthy/recovery banners after an app update, one
+            # silent request per poll. Never dismiss an unknown or failed check.
+            if not proposed['queue'] and not (stop is not None and stop.is_set()):
+                component = next((kind for kind in health.KINDS if kind in self._notification_cleanup
+                                  and rows[kind]['status'] in ('healthy', 'maintenance')), None)
+                if component:
+                    try:
+                        self.network({'kind': 'dismissal', 'token': self.token, 'component': component})
+                    except health.Refusal:
+                        return {'pending': 0, 'delivered': 0, 'error': 'delivery_failed'}
+                    self._notification_cleanup.discard(component)
             return {'pending': len(proposed['queue']), 'delivered': 0}
 
     def run(self, stop):

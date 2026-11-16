@@ -389,10 +389,11 @@ def stepped_back(before, after, tolerance=FUTURE_TOLERANCE):
             and (after[0] - before[0]) - (after[1] - before[1]) < -tolerance)
 
 
-def transition(rows, saved, now, stepped=False):
-    saved = decode(json.dumps(validate_state(saved)).encode())
+def effective_conditions(rows, saved, now, stepped=False):
+    """Current verdicts after the same clock guard used for durable events."""
     if not number(now) or now < 0:
         raise Refusal('clock_invalid')
+    validate_state(saved)
     previous_time = saved['last_evaluated_at']
     if stepped or previous_time is not None and now < previous_time:
         # The evaluator clock ran backward: measured by the caller within one
@@ -403,6 +404,14 @@ def transition(rows, saved, now, stepped=False):
         # evaluation is judged on the present clock, never on a saved future one.
         rows = {kind: result('unknown', 'clock_invalid') if row['status'] in {'healthy', 'maintenance'} else row
                 for kind, row in rows.items()}
+    return rows
+
+
+def transition(rows, saved, now, stepped=False):
+    saved = decode(json.dumps(validate_state(saved)).encode())
+    if not number(now) or now < 0:
+        raise Refusal('clock_invalid')
+    rows = effective_conditions(rows, saved, now, stepped)
     for kind in KINDS:
         row = rows[kind]
         old = saved['conditions'].get(kind)
@@ -510,14 +519,52 @@ def request_https(method, url, timeout=5, headers=None, body=None, ca_file=None,
         raise Refusal('delivery_failed') from None
 
 
+def ha_notification(event):
+    """Fixed human-facing HA copy; event identities remain transport metadata."""
+    component, status, reason = event['component'], event['status'], event['reason']
+    identity = {'notification_id': 'harg_health_' + component}
+    if status in ('healthy', 'maintenance'):
+        return 'dismiss', identity
+    # A missing common report is one problem, not three independent failures.
+    if component != 'heartbeat' and reason in ('endpoint_unavailable', 'report_missing', 'heartbeat_stale', 'clock_invalid'):
+        return None, None
+    label = {'heartbeat': 'Status', 'certificate': 'Zertifikat', 'telnet': 'Messwerte'}[component]
+    title = 'Heizung: ' + label + ' prüfen'
+    if reason == 'endpoint_unavailable':
+        title = 'Heizung: Status nicht erreichbar'
+        message = 'Home Assistant erreicht den lokalen Heizungsdienst nicht. Prüfe, ob die VM und der Dashboard-Dienst laufen und im Netzwerk erreichbar sind.'
+    elif reason == 'certificate_expiring':
+        title = 'Heizung: Zertifikat läuft bald ab'
+        message = 'Das Zertifikat des lokalen Heizungsdienstes läuft bald ab. Prüfe die automatische Zertifikatserneuerung auf der VM, damit das Dashboard erreichbar bleibt.'
+    elif reason == 'clock_invalid' or reason == 'run_future':
+        message = 'Die Uhrzeiten von Home Assistant und dem lokalen Heizungsdienst stimmen nicht überein. Prüfe die automatische Uhrzeitsynchronisierung auf beiden Geräten.'
+    elif reason == 'heartbeat_stale':
+        message = 'Die Statusmeldung des lokalen Heizungsdienstes ist veraltet. Prüfe den Dashboard-Dienst auf der VM.'
+    elif reason in ('report_missing', 'report_invalid'):
+        message = 'Der lokale Heizungsdienst liefert keine auswertbare Statusmeldung. Prüfe den Dashboard-Dienst und seine Protokolle auf der VM.'
+    elif reason in ('run_missing', 'run_stale'):
+        message = ('Die Zertifikatsprüfung wurde nicht rechtzeitig ausgeführt. Prüfe den Zertifikat-Monitor auf der VM.' if component == 'certificate' else
+                   'Die zusätzlichen Messwerte der Steuerung werden nicht mehr rechtzeitig geprüft. Prüfe den Messwert-Dienst und seine Verbindung zur Steuerung.')
+    elif component == 'certificate':
+        message = 'Die Zertifikatsprüfung des lokalen Heizungsdienstes ist fehlgeschlagen. Prüfe das Zertifikat und die automatische Erneuerung auf der VM.'
+    elif component == 'telnet':
+        message = 'Die zusätzlichen Messwerte der Steuerung sind nicht aktuell verfügbar. Prüfe den Messwert-Dienst auf der VM und seine Verbindung zur Steuerung.'
+    else:
+        message = 'Der lokale Heizungsdienst meldet ein Problem. Prüfe den Dienst und seine Protokolle auf der VM.'
+    if status == 'unknown':
+        message += ' Der Zustand der Heizung ist deshalb nicht verlässlich bekannt; das belegt keinen Heizungsausfall.'
+    return 'create', {**identity, 'title': title, 'message': message}
+
+
 def delivery(event, config):
     if 'home_assistant' in config:
         ha = config['home_assistant']
         token = read_token(ha['token_file'])
-        body = json.dumps({'notification_id': 'harg_health_' + event['component'],
-                           'title': 'Hargassner health: ' + event['component'],
-                           'message': f"{event['transition']}: {event['status']} ({event['reason']}). Event {event['event_id']}"})
-        request_https('POST', ha['url'].rstrip('/') + '/api/services/persistent_notification/create',
+        action, payload = ha_notification(event)
+        if action is None:
+            return
+        body = json.dumps(payload)
+        request_https('POST', ha['url'].rstrip('/') + '/api/services/persistent_notification/' + action,
                       config['timeout'], {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json',
                                           'Idempotency-Key': event['event_id']},
                       body, config.get('ca_file'), ha.get('allow_insecure_local', False))
@@ -553,7 +600,7 @@ def run(report, state_path, config, now, deliver=False, endpoint_failed=False):
     except OSError:
         raise Refusal('state_invalid') from None
     def process(saved):
-        rows = evaluate(report, config, now, endpoint_failed)
+        rows = effective_conditions(evaluate(report, config, now, endpoint_failed), saved, now)
         deferred = False
         try:
             proposed = transition(rows, saved, now)
@@ -574,7 +621,8 @@ def run(report, state_path, config, now, deliver=False, endpoint_failed=False):
             while proposed['queue']:
                 event = proposed['queue'][0]
                 try:
-                    delivery(event, config)
+                    if ('home_assistant' not in config or all(rows[event['component']][key] == event[key] for key in ('status', 'reason'))):
+                        delivery(event, config)
                 except Refusal:
                     return {'schema_version': 1, 'dry_run': False, 'conditions': proposed['conditions'],
                             'pending_count': len(proposed['queue']), 'delivered': sent, 'error': 'delivery_failed'}
