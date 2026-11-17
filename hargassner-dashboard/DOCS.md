@@ -189,7 +189,10 @@ token for deliberate reuse. Direct password login remains configured.
 ## Implementation and local tests
 
 The app publishes no LAN ports or Supervisor-management/host/Docker privileges.
-App1.5.0 requests the HA API permission solely for its optional monitor; ordinary
+App 1.5.0 requested the HA API permission solely for its optional VM-health
+monitor. From app 1.6.0 the same permission also serves the room monitoring
+described below: it reads the selected sensors, opens one Home Assistant Core
+WebSocket and publishes through Core's `mqtt.publish` service. Ordinary
 ingress accepts requests only from the actual TCP peer `172.30.32.2`.
 It requires a single valid `X-Remote-User-Id` and `X-Ingress-Path` supplied by
 Ingress. All incoming cookies, authorization and forwarding headers are
@@ -214,8 +217,10 @@ python3 -B -m unittest discover -s hargassner-dashboard -p 'test_*.py' -v
 These tests need Python 3 and OpenSSL. They create a temporary local HTTPS
 server and certificate, and check peer enforcement, header replacement,
 request/response bounds, duplicate header rejection, redirect handling, and
-certificate/hostname verification. They make no live Home Assistant or
-controller requests. The current container build, app upgrade and actual
+certificate/hostname verification. The room-monitoring tests use an injected
+clock, a synthetic room model over several weeks and loopback HTTP and
+WebSocket servers. They make no live Home Assistant, broker or controller
+requests. The current container build, app upgrade and actual
 nonadministrator access remain unverified by these synthetic tests.
 
 The separately installed backend has its own ingress and browser verification.
@@ -237,7 +242,9 @@ checked on 2026-10-14.
 ## Optional independent HA-host monitor (app1.5.0)
 
 The monitor runs on the HA host while the observed dashboard VM is separate.
-It never connects to the controller or MQTT. Existing ingress origin, token,
+This VM-health monitor never connects to the controller or MQTT. (The separate
+room monitoring of app 1.6.0 uses MQTT only through Home Assistant Core; see
+below.) Existing ingress origin, token,
 connect-host and non-admin access options remain unchanged. Monitoring is
 **disabled by default**; updating the app alone does not send a notification.
 
@@ -370,3 +377,140 @@ The reused project `health_alerts.py` is byte-pinned to SHA-256
 Its evaluator/outbox semantics are retained; this app adapter adds the fixed
 health-token fetch, existing HTTPS connector, bounded one-event scheduler and
 Supervisor destination. No original producer observation time is rewritten.
+
+
+## Room monitoring with temperature sensors (app 1.6.0)
+
+The app can watch temperature sensors that already exist in Home Assistant and
+check whether the heating does its job: rooms that stay too cold while heating
+should be active, rooms that do not get warmer after heating starts, rooms that
+are clearly too warm, frost, and the health of each sensor. The room sensors
+are for monitoring only. They never control the heating, never replace the
+controller's own room sensor and never appear as controller readings.
+
+The app sends only codes and numbers to the VM. The VM writes the German texts
+and shows them in the **Betriebsüberwachung** (HA sensor
+`sensor.betriebsueberwachung` and the dashboard). Room monitoring needs a VM
+version that sends the context and accepts these reports (see "Before the VM
+is updated" below). Without it, nothing changes on the VM.
+
+### Before the VM is updated
+
+The app can be installed before the VM. Room monitoring needs the VM release
+with the Betriebsüberwachung (operation-monitor-20261117 or later). Until that
+release runs, the VM sends no context: the room page
+`api/local-monitor/raumsensoren` says "Noch keine Daten von der VM empfangen",
+no room is judged and no room finding appears anywhere. Nothing has to be
+changed in the app when the VM is updated; the room checks start by themselves
+within a few minutes.
+
+### What the app accesses from 1.6.0
+
+Earlier versions only created and dismissed notifications. From 1.6.0, with
+the Supervisor-provided token and nothing else, the app:
+
+- reads `/core/api/config` (whether Home Assistant is running, its time zone)
+  and the state of each selected sensor, once a minute;
+- reads the list of all states only while you open the room page below;
+- opens one Home Assistant Core WebSocket and subscribes to the single MQTT
+  topic `hargassner/+/house/context`, sent by the VM;
+- publishes its report to `hargassner/<gateway>/house/report` through Core's
+  `mqtt.publish` service (QoS 0, not retained), every 2 minutes and shortly
+  after a change.
+
+It has no broker password, no controller connection and no call that can
+change a heating setting. It stores nothing; after a restart every waiting time
+starts again. Home Assistant's MQTT integration must be connected to the same
+broker as the VM. The thread runs even when no sensor is selected, so that the
+VM learns that room monitoring is off.
+
+### Choosing the sensors
+
+1. Find the entity IDs of your room thermometers. The app's read-only page
+   `api/local-monitor/raumsensoren`, opened relative to the app's Ingress
+   address, lists every temperature sensor with its name and value. Home
+   Assistant's **Developer tools → States**, filtered by `temperature`, shows
+   the same.
+2. In the app's **Configuration** tab, add each sensor to one list only:
+   - **Räume an Heizkreis 1** and **Räume an Heizkreis 2**: rooms that this
+     circuit heats. Pick sensors away from radiators, windows, doors and
+     direct sun.
+   - **Weitere Räume**: rooms without a heating circuit or with closed valves,
+     for example cellar or garage. Only the sensor itself is checked there.
+3. Optional lists name sensors that are already in one of the lists above:
+   - **Räume, die kühler sein dürfen**: rooms kept cooler on purpose, such as a
+     bedroom. They may be 2 degrees below the set temperature.
+   - **Räume mit Ofen oder viel Sonne**: no notice when they are too warm.
+   - **Frostwarnung für weitere Räume**: rooms from **Weitere Räume** that
+     should still warn about frost.
+4. **Heizkreis 1 ist / Heizkreis 2 ist**: `automatisch` takes the type from
+   the controller (radiators or underfloor). Choose `heizkoerper` or
+   `fussboden` only if the controller setting is wrong.
+5. Save and restart the app.
+
+At most 24 sensors can be selected in total. A sensor may appear in only one
+of the three room lists. If the selection breaks these rules, the dashboard
+keeps working, room checks stay off and the Betriebsüberwachung shows that the
+room sensor settings of the app are invalid.
+
+### beobachten or melden
+
+**Raumüberwachung** starts as `beobachten`: room notices are shown in the
+Betriebsüberwachung and the dashboard, but they do not change its overall
+state. After a few weeks without wrong notices, switch to `melden`; then room
+notices count for the overall state.
+
+### What is checked
+
+The waiting times depend on the circuit type. Radiators react within an hour;
+underfloor heating needs many hours.
+
+| Check | Radiators | Underfloor |
+| --- | --- | --- |
+| No cold check after a change of day/setback phase, target or mode | 2 h | 8 h |
+| No warm check after a change of the day target or mode | 2 h | 8 h |
+| Room too cold (1.5 degrees below target) for | 90 min | 4 h |
+| All rooms of a circuit clearly too cold (3 degrees) for | 3 h | 8 h |
+| Room does not get warmer after heating starts, judged after | 60 min | 6 h |
+| Allowance for the pump to start and the flow to warm up | 30 min | 30 min |
+| Room clearly too warm at night (21:00-06:00, 2 degrees) for | 2 h | 4 h |
+| All rooms of a circuit too warm for | 6 h | 12 h |
+| Room at 28 °C or more while heating, for | 1 h | 1 h |
+| Too cold although the heating limit switched off the circuit, for | 6 h | 12 h |
+| Pause after a window was opened (drop of 1 degree in 15 min) | 60 min | 3 h |
+
+Frost (5 °C or less for 10 minutes) is checked without any VM data; frost in
+two or more rooms is a fault. Sensor checks report a sensor that is not found,
+gives no value, is silent for a day, reports impossible or jumping values, has
+shown exactly the same value for three days, or has a weak battery. A sensor
+problem never counts as a heating problem.
+
+Normal night setback and a normal heat-up do not create notices: the rooms are
+compared with the circuit's current day or setback target from the
+controller, never with the internal control target. While Home Assistant
+starts, the VM data is missing or old, or a target is unknown, rooms are shown
+as **Unbekannt**, never as **Normal**, and waiting times pause. Every notice
+ends by itself when the cause is gone, at the latest after 24 hours.
+
+The warm checks compare with the day target also during the night setback,
+so the daily change between day and setback does not restart their waiting
+time; only a changed day target, a changed mode or heating that starts again
+after an hour off does. A room that only gets warmer slowly after a heat-up
+is judged from the moment the circuit really heats: while the pump starts and
+the flow is still cold (at most 30 minutes) the check waits.
+
+If the room settings are invalid, the app reports that once and the rooms of
+the circuits named in the settings are shown as **Unbekannt**.
+
+The room page also shows the last report, whether the VM accepts the reports,
+the circuit types and how many minutes in the last 24 hours and 7 days the
+target was unknown. The log shows only fixed lines such as
+`House monitor: ha_api_unavailable.`, at most once per 5 minutes each.
+
+### Removing the app
+
+Raumsensoren leeren, dann App entfernen: empty the three room lists, save,
+restart the app and wait until the Betriebsüberwachung no longer shows room
+monitoring (a few minutes). Only then uninstall the app. If the app is removed
+while sensors are selected, the VM keeps the checks **Räume** and
+**Raumsensoren** at **Unbekannt**.

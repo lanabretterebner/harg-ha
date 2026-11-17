@@ -51,3 +51,15 @@ build, installed upgrade and real notification delivery require separate checks.
 App 1.5.6 uses German problem notifications with a next step. Recovery quietly
 clears the old warning. Update the app through Supervisor; no HACS update is
 needed for this notification change.
+
+App 1.6.0 adds optional room monitoring: choose temperature sensors that
+already exist in Home Assistant, per heating circuit. The app checks whether
+rooms stay too cold or get too warm while heating, whether they warm up after
+heating starts, frost and the sensors themselves, and reports codes and
+numbers to the VM, which shows the result in the Betriebsüberwachung. Room
+sensors are for monitoring only and control nothing. From this version the app
+reads the selected sensor states, opens one Home Assistant Core WebSocket and
+publishes through Core's `mqtt.publish`; it still has no broker password, no
+controller connection and no control call. It starts in `beobachten` mode,
+which shows notices without changing the overall state. Empty the room lists
+before removing the app. See DOCS.md.

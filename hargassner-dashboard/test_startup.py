@@ -28,7 +28,7 @@ class StartupTests(unittest.TestCase):
                 created.append('monitor');return obj
             def install(_sig,cb):threading.Timer(.03,cb).start()
             env={'SUPERVISOR_TOKEN':'synthetic-only'} if token else {'HASSIO_TOKEN':'not-a-fallback'}
-            with patch.dict(os.environ,env,clear=True), patch.object(run_app.MonitorSettings,'load',return_value=settings),patch.object(run_app,'Monitor',side_effect=construct),patch.object(run_app,'MonitorProxyServer',Server),patch.object(run_app.signal,'signal',side_effect=install),patch.object(m.Monitor,'run',lambda self,stop:stop.wait(1)),redirect_stdout(output):
+            with patch.dict(os.environ,env,clear=True), patch.object(run_app.MonitorSettings,'load',return_value=settings),patch.object(run_app,'Monitor',side_effect=construct),patch.object(run_app,'MonitorProxyServer',Server),patch.object(run_app.signal,'signal',side_effect=install),patch.object(run_app,'start_house_monitor',return_value=None),patch.object(m.Monitor,'run',lambda self,stop:stop.wait(1)),redirect_stdout(output):
                 result=run_app.main()
             self.assertNotIn('SECRET',output.getvalue());self.assertNotIn('synthetic-only',output.getvalue())
             return result,output.getvalue(),created

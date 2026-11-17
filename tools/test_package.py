@@ -7,6 +7,8 @@ import unittest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+HOUSE_LISTS = ("heizkreis_1_sensoren", "heizkreis_2_sensoren", "haus_sensoren",
+               "kuehlere_raeume", "ohne_ueberwaermung", "haus_frost_sensoren")
 
 
 def load(relative):
@@ -14,14 +16,19 @@ def load(relative):
 
 
 class PackageTests(unittest.TestCase):
-    def test_frontend_1414_versions_and_independent_app_156(self):
+    def test_frontend_1414_versions_and_independent_app_160(self):
         package = json.loads((ROOT / "package.json").read_text())
         lock = json.loads((ROOT / "package-lock.json").read_text())
         release = json.loads((ROOT / "release.json").read_text())
         validation = json.loads((ROOT / "validation.json").read_text())
         self.assertEqual({package["version"], lock["version"], lock["packages"][""]["version"], release["version"], validation["version"]}, {"1.4.14"})
-        self.assertEqual(release["supervisor_app_version"], "1.5.6")
-        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.5.6")
+        self.assertEqual(release["supervisor_app_version"], "1.6.0")
+        self.assertEqual(validation["supervisor_app_version"], "1.6.0")
+        self.assertEqual(release["component_checkpoint"], validation["component_checkpoint"])
+        self.assertEqual(release["component_checkpoint"], "frontend-1.4.14-app-1.6.0")
+        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.6.0")
+        self.assertIn("ARG BUILD_VERSION=1.6.0\n", (ROOT / "hargassner-dashboard/Dockerfile").read_text())
+        self.assertIn("APP_VERSION = '1.6.0'", (ROOT / "hargassner-dashboard/house_rules.py").read_text())
         self.assertIn('const VERSION = "1.4.14";', (ROOT / "dist/hargassner-thermostat-popup.js").read_text())
 
     def test_repository_and_app_are_discoverable_independently_of_hacs(self):
@@ -39,7 +46,9 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(set(app["arch"]), {"amd64", "aarch64"})
         self.assertNotIn("image", app, "Supervisor must build the included source")
 
-    def test_app_has_only_notification_ha_permission_and_no_host_privileges_or_ports(self):
+    def test_app_permissions_are_ha_api_only_without_host_privileges_or_ports(self):
+        # From app 1.6.0 the HA API permission serves notifications, the read of
+        # the configured room sensors, one Core WebSocket and mqtt.publish.
         app = load("hargassner-dashboard/config.yaml")
         self.assertIs(app["ingress"], True)
         self.assertEqual(app["ingress_port"], 8099)
@@ -48,12 +57,34 @@ class PackageTests(unittest.TestCase):
                       "docker_api", "full_access", "privileged", "ports", "map"):
             self.assertFalse(app.get(field), field)
         self.assertIs(app["homeassistant_api"], True)
+        sensor_list = ["match(^sensor\\.[a-z0-9_]{1,200}$)"]
         self.assertEqual(app["options"], {"upstream_url": None, "ingress_token": None,
                                            "monitor_enabled": False, "monitor_token": "",
-                                           "monitor_poll_interval": 30})
+                                           "monitor_poll_interval": 30,
+                                           "raumueberwachung_modus": "beobachten",
+                                           "heizkreis_1_art": "automatisch", "heizkreis_2_art": "automatisch",
+                                           **{key: [] for key in HOUSE_LISTS}})
         self.assertEqual(app["schema"], {"upstream_url": "url", "upstream_connect_host": "str?", "ingress_token": "password",
                                            "monitor_enabled": "bool", "monitor_token": "password?",
-                                           "monitor_poll_interval": "int(15,60)"})
+                                           "monitor_poll_interval": "int(15,60)",
+                                           "raumueberwachung_modus": "list(beobachten|melden)",
+                                           "heizkreis_1_art": "list(automatisch|heizkoerper|fussboden)",
+                                           "heizkreis_2_art": "list(automatisch|heizkoerper|fussboden)",
+                                           **{key: sensor_list for key in HOUSE_LISTS}})
+
+    def test_house_option_translations_are_complete_and_plain(self):
+        keys = {"raumueberwachung_modus", "heizkreis_1_art", "heizkreis_2_art", *HOUSE_LISTS}
+        for language in ("de", "en"):
+            texts = load(f"hargassner-dashboard/translations/{language}.yaml")["configuration"]
+            self.assertEqual(set(texts), keys, language)
+            for key, entry in texts.items():
+                self.assertEqual(set(entry), {"name", "description"}, key)
+                for text in entry.values():
+                    self.assertTrue(isinstance(text, str) and 0 < len(text) <= 200, key)
+                    self.assertNotRegex(text, "[\u2010-\u2015]")   # ordinary hyphens only
+        german = load("hargassner-dashboard/translations/de.yaml")["configuration"]
+        self.assertEqual(german["heizkreis_1_sensoren"]["name"], "Räume an Heizkreis 1")
+        self.assertIn("Nur zur Überwachung", german["heizkreis_1_sensoren"]["description"])
 
     def test_dockerfile_uses_verified_multiarch_index_and_only_monitor_ingress_source(self):
         image = json.loads((ROOT / "validation/base-image.json").read_text())
@@ -62,7 +93,8 @@ class PackageTests(unittest.TestCase):
         platforms = {f"{row['os']}/{row['architecture']}" for row in image["platforms"]}
         self.assertTrue({"linux/amd64", "linux/arm64"}.issubset(platforms))
         self.assertEqual(re.findall(r"^COPY\s+(.*)$", dockerfile, re.M),
-                         ["ingress_proxy.py app_monitor.py health_alerts.py run_app.py LICENSE /app/"])
+                         ["ingress_proxy.py app_monitor.py health_alerts.py run_app.py house_rules.py "
+                          "house_monitor.py ha_websocket.py LICENSE /app/"])
         self.assertIn('io.hass.type="app"', dockerfile)
         self.assertIn('io.hass.arch="aarch64|amd64"', dockerfile)
         self.assertNotIn("BUILD_FROM", dockerfile)

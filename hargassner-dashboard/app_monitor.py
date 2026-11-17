@@ -1,4 +1,5 @@
-"""Independent HA-host health observer. No controller/broker/control access."""
+"""Independent HA-host VM-health observer. No controller/broker/control access here;
+the separate house monitor (house_monitor.py) reads room sensors and uses MQTT through Core."""
 from dataclasses import dataclass, field
 import http.client
 import json

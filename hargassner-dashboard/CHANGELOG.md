@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.6.0
+
+- Add optional room monitoring with Home Assistant temperature sensors per
+  heating circuit (options `heizkreis_1_sensoren`, `heizkreis_2_sensoren`,
+  `haus_sensoren`, `kuehlere_raeume`, `ohne_ueberwaermung`,
+  `haus_frost_sensoren`, `heizkreis_1_art`, `heizkreis_2_art`,
+  `raumueberwachung_modus`), with German and English option texts.
+- Check rooms too cold or too warm against the circuit's current day/setback
+  target from the VM, rooms that do not warm up after heating starts, frost and
+  sensor health, with waiting times per radiator or underfloor circuit. Unknown
+  or old data gives Unbekannt, never Normal; every notice ends by itself.
+- Send codes and numbers to the VM through Core's `mqtt.publish` and receive
+  the VM context through one Core WebSocket subscription. The app now reads the
+  selected sensor states; it still has no broker password, no controller
+  connection and no control call. Nothing is stored.
+- Start in `beobachten` mode: room notices are shown but do not change the
+  overall state of the Betriebsüberwachung until `melden` is chosen.
+- Add the read-only page `api/local-monitor/raumsensoren` with the temperature
+  sensors of Home Assistant and the room monitoring status. The status endpoint
+  is unchanged.
+- An invalid room selection never stops ingress or the VM-health monitor; the
+  circuits named in it are reported as not judged (Räume Unbekannt).
+- Accept only VM contexts with the exact version 1 field set.
+- The warm checks wait after a change of the day target or mode, not after
+  every day/setback change, so underfloor circuits are judged at night too.
+  A heat-up check waits up to 30 minutes for the pump and the flow to start.
+- Align the Dockerfile build version with the app version.
+- The app works before the VM is updated. Room monitoring needs the VM release
+  with the Betriebsüberwachung (operation-monitor-20261117 or later). Until
+  that release runs, the VM sends no context: the room page says "Noch keine
+  Daten von der VM empfangen", no room is judged, and no room finding appears
+  in the Betriebsüberwachung, in Home Assistant or on the dashboard. Ingress
+  and the VM-health notifications are unaffected.
+
 ## 1.5.6
 
 - Show readable German problem notifications with a next step. Internal status

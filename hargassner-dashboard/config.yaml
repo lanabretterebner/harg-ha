@@ -1,5 +1,5 @@
 name: Hargassner Dashboard
-version: "1.5.6"
+version: "1.6.0"
 slug: hargassner_dashboard
 description: Open the local Hargassner dashboard using your Home Assistant login.
 arch:
@@ -20,6 +20,15 @@ options:
   monitor_enabled: false
   monitor_token: ""
   monitor_poll_interval: 30
+  raumueberwachung_modus: beobachten
+  heizkreis_1_art: automatisch
+  heizkreis_2_art: automatisch
+  heizkreis_1_sensoren: []
+  heizkreis_2_sensoren: []
+  haus_sensoren: []
+  kuehlere_raeume: []
+  ohne_ueberwaermung: []
+  haus_frost_sensoren: []
 schema:
   upstream_url: url
   upstream_connect_host: "str?"
@@ -27,4 +36,13 @@ schema:
   monitor_enabled: bool
   monitor_token: "password?"
   monitor_poll_interval: "int(15,60)"
+  raumueberwachung_modus: "list(beobachten|melden)"
+  heizkreis_1_art: "list(automatisch|heizkoerper|fussboden)"
+  heizkreis_2_art: "list(automatisch|heizkoerper|fussboden)"
+  heizkreis_1_sensoren: ["match(^sensor\\.[a-z0-9_]{1,200}$)"]
+  heizkreis_2_sensoren: ["match(^sensor\\.[a-z0-9_]{1,200}$)"]
+  haus_sensoren: ["match(^sensor\\.[a-z0-9_]{1,200}$)"]
+  kuehlere_raeume: ["match(^sensor\\.[a-z0-9_]{1,200}$)"]
+  ohne_ueberwaermung: ["match(^sensor\\.[a-z0-9_]{1,200}$)"]
+  haus_frost_sensoren: ["match(^sensor\\.[a-z0-9_]{1,200}$)"]
 url: https://github.com/lanabretterebner/harg-ha/tree/main/hargassner-dashboard

@@ -301,7 +301,7 @@ class RunnerTests(unittest.TestCase):
             def server_close(self): self.closed = True
         def install(_name, callback): threading.Timer(.03, callback).start()
         disabled = m.MonitorSettings(False, m.Settings('dashboard.example', 443, 'dashboard.example', INGRESS))
-        with patch.object(run_app.MonitorSettings, 'load', return_value=disabled), patch.object(run_app, 'MonitorProxyServer', Server), patch.object(run_app, 'Monitor') as monitor, patch.object(run_app, 'supervisor_token') as token, patch.object(run_app.signal, 'signal', side_effect=install), redirect_stdout(io.StringIO()):
+        with patch.object(run_app.MonitorSettings, 'load', return_value=disabled), patch.object(run_app, 'MonitorProxyServer', Server), patch.object(run_app, 'Monitor') as monitor, patch.object(run_app, 'supervisor_token') as token, patch.object(run_app.signal, 'signal', side_effect=install), patch.object(run_app, 'start_house_monitor', return_value=None), redirect_stdout(io.StringIO()):
             self.assertEqual(run_app.main(), 0)
         monitor.assert_not_called(); token.assert_not_called(); self.assertTrue(Server.instance.closed)
 
@@ -320,7 +320,7 @@ class RunnerTests(unittest.TestCase):
             def run(self, stop): stop.wait(1); monitor_stopped.set()
         enabled = m.MonitorSettings(True, m.Settings('dashboard.example', 443, 'dashboard.example', INGRESS), HEALTH)
         def install(_name, callback): threading.Timer(.03, callback).start()
-        with patch.object(run_app.MonitorSettings, 'load', return_value=enabled), patch.object(run_app, 'MonitorProxyServer', Server), patch.object(run_app, 'Monitor', Worker), patch.object(run_app, 'supervisor_token', return_value=SUPERVISOR), patch.object(run_app.signal, 'signal', side_effect=install), redirect_stdout(io.StringIO()):
+        with patch.object(run_app.MonitorSettings, 'load', return_value=enabled), patch.object(run_app, 'MonitorProxyServer', Server), patch.object(run_app, 'Monitor', Worker), patch.object(run_app, 'supervisor_token', return_value=SUPERVISOR), patch.object(run_app.signal, 'signal', side_effect=install), patch.object(run_app, 'start_house_monitor', return_value=None), redirect_stdout(io.StringIO()):
             self.assertEqual(run_app.main(), 0)
         self.assertTrue(proxy_stop.is_set()); self.assertTrue(monitor_stopped.is_set())
 

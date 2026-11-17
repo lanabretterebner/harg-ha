@@ -1,0 +1,28 @@
+configuration:
+  raumueberwachung_modus:
+    name: Room monitoring
+    description: "beobachten (observe): room notices are only shown. melden (report): they count for the overall state of the operation monitor."
+  heizkreis_1_art:
+    name: Heating circuit 1 is
+    description: "automatisch (automatic) takes the controller's setting. Otherwise heizkoerper (radiators) or fussboden (underfloor)."
+  heizkreis_2_art:
+    name: Heating circuit 2 is
+    description: "automatisch (automatic) takes the controller's setting. Otherwise heizkoerper (radiators) or fussboden (underfloor)."
+  heizkreis_1_sensoren:
+    name: Rooms on heating circuit 1
+    description: "Temperature sensors of the rooms that heating circuit 1 heats, e.g. sensor.living_room_temperature. Monitoring only, they control nothing."
+  heizkreis_2_sensoren:
+    name: Rooms on heating circuit 2
+    description: "Temperature sensors of the rooms that heating circuit 2 heats."
+  haus_sensoren:
+    name: Other rooms
+    description: "Sensors in rooms without a heating circuit or with closed valves, e.g. cellar or garage. Only the sensor itself is checked."
+  kuehlere_raeume:
+    name: Rooms that may be cooler
+    description: "Rooms that are kept cooler on purpose, e.g. bedrooms. They may be 2 degrees cooler than set."
+  ohne_ueberwaermung:
+    name: Rooms with a stove or much sun
+    description: "No notice is given when these rooms are too warm."
+  haus_frost_sensoren:
+    name: Frost warning for other rooms
+    description: "Other rooms that get a warning when there is a risk of frost."

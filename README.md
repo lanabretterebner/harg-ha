@@ -1,6 +1,6 @@
 # Hargassner for Home Assistant
 
-Frontend 1.4.14 and the optional ingress/monitor app 1.5.6 include the HA clients for an existing Hargassner local-control
+Frontend 1.4.14 and the optional ingress/monitor app 1.6.0 include the HA clients for an existing Hargassner local-control
 backend: a discoverable thermostat dashboard card, the matching native popup,
 one-device page grouping, the optional dashboard Ingress app and reference examples.
 
@@ -20,7 +20,7 @@ Frontend 1.4.14 keeps an independent room-correction control available when
 Auto has no qualified day/setback target basis, including summer phases.
 The configured target remains unknown until the backend qualifies that basis.
 Install/update the HACS resource and fully reload the frontend. The separately
-versioned ingress/monitor app 1.5.6 contains separate notification-outbox, strict
+versioned ingress/monitor app 1.6.0 contains separate notification-outbox, strict
 configuration and incomplete-response fixes, treats an empty optional connection
 host as unset, rejects raw non-ASCII request paths with HTTP400, recovers its
 optional monitor from clock skew and backward clock steps and makes that monitor
@@ -127,9 +127,11 @@ https://github.com/lanabretterebner/harg-ha
 Install **Hargassner Dashboard**. Supervisor builds the source for `amd64` or
 `aarch64`; no prebuilt app image is required. The verified official base image
 index is pinned by digest. The app exposes no host ports or Supervisor-management,
-Docker or host privileges. App 1.5.5 requests HA API permission solely for optional
-monitor notifications using the Supervisor-provided token; monitoring is disabled
-by default. No long-lived HA user token is needed.
+Docker or host privileges. The app uses the Supervisor-provided token for the HA
+API: optional VM-health notifications and, from app 1.6.0, optional room
+monitoring, which reads the selected sensor states, opens one Core WebSocket and
+publishes through Core's `mqtt.publish`. Both are off by default. No long-lived
+HA user token is needed.
 
 The existing backend must allow the app's source IP and HA browser origin and
 provide a private ingress token. Set the app's HTTPS `upstream_url` and
@@ -317,3 +319,8 @@ messages and a next step. Recovery clears the old warning silently. A missing
 common connection produces one warning; obsolete queued events do not raise
 stale alerts or clear newer faults. Update the app through Supervisor; the
 HACS frontend remains 1.4.14.
+
+App 1.6.0 adds optional room monitoring with existing Home Assistant
+temperature sensors per heating circuit, reported to the VM's
+Betriebsüberwachung. Room sensors control nothing. It starts in `beobachten`
+mode. Update the app through Supervisor; the HACS frontend remains 1.4.14.

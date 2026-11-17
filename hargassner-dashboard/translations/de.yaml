@@ -1,0 +1,28 @@
+configuration:
+  raumueberwachung_modus:
+    name: Raumüberwachung
+    description: "beobachten: Meldungen der Räume werden nur angezeigt. melden: sie zählen für den Gesamtzustand der Betriebsüberwachung."
+  heizkreis_1_art:
+    name: Heizkreis 1 ist
+    description: "automatisch übernimmt die Einstellung der Steuerung. Sonst heizkoerper oder fussboden."
+  heizkreis_2_art:
+    name: Heizkreis 2 ist
+    description: "automatisch übernimmt die Einstellung der Steuerung. Sonst heizkoerper oder fussboden."
+  heizkreis_1_sensoren:
+    name: Räume an Heizkreis 1
+    description: "Temperatursensoren der Räume, die Heizkreis 1 heizt, z. B. sensor.wohnzimmer_temperatur. Nur zur Überwachung, sie steuern nichts."
+  heizkreis_2_sensoren:
+    name: Räume an Heizkreis 2
+    description: "Temperatursensoren der Räume, die Heizkreis 2 heizt."
+  haus_sensoren:
+    name: Weitere Räume
+    description: "Sensoren in Räumen ohne Heizkreis oder mit geschlossenen Ventilen, z. B. Keller oder Garage. Für sie wird nur der Sensor selbst geprüft."
+  kuehlere_raeume:
+    name: Räume, die kühler sein dürfen
+    description: "Räume, die bewusst kühler gehalten werden, z. B. Schlafzimmer. Sie dürfen 2 Grad kühler sein als eingestellt."
+  ohne_ueberwaermung:
+    name: Räume mit Ofen oder viel Sonne
+    description: "Für diese Räume wird nicht gemeldet, wenn sie zu warm sind."
+  haus_frost_sensoren:
+    name: Frostwarnung für weitere Räume
+    description: "Weitere Räume, für die bei Frostgefahr gewarnt wird."
