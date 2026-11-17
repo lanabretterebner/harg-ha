@@ -1,7 +1,9 @@
 """Minimal RFC 6455 client for the Home Assistant Core WebSocket.
 
 Used only to receive the adapter context: `auth` with the Supervisor token,
-one `mqtt/subscribe` on the context topic, and `ping`. Bounded: connect
+one `mqtt/subscribe` on the context topic, and `ping`; and, from app 1.6.1,
+one short read-only `config/auth/list` connection that tells the room page
+whether its viewer is an administrator. Bounded: connect
 timeout, message cap, fragment cap, pong deadline. No exception text is
 logged by callers; it can contain addresses.
 """
@@ -340,6 +342,61 @@ class ContextSubscription:
         if self.socket is not None:
             self.socket.close()
             self.socket = None
+
+
+USERS_COMMAND = 'config/auth/list'
+
+
+def list_users(token, *, host='172.30.32.2', port=80, path='/core/websocket',
+               connect=WebSocket.connect, monotonic=time.monotonic):
+    """One short connection: auth, one `config/auth/list`, close.
+
+    Used only by the room page to tell whether the ingress user is a Home
+    Assistant administrator. Returns the list of user objects; any failure
+    raises WebSocketError with a fixed category (callers then fail closed).
+    """
+    socket_ = connect(host, port, path)
+    try:
+        deadline = monotonic() + CONNECT_TIMEOUT_S
+
+        def expect():
+            while True:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise WebSocketError('timeout')
+                text = socket_.receive(remaining)
+                if text is None:
+                    continue
+                try:
+                    message = strict_loads(text)
+                except (ValueError, RecursionError):
+                    raise WebSocketError('protocol') from None
+                if not isinstance(message, dict):
+                    raise WebSocketError('protocol')
+                return message
+        if expect().get('type') != 'auth_required':
+            raise WebSocketError('protocol')
+        socket_.send_json({'type': 'auth', 'access_token': token})
+        reply = expect()
+        if reply.get('type') == 'auth_invalid':
+            raise WebSocketError('auth_failed')
+        if reply.get('type') != 'auth_ok':
+            raise WebSocketError('protocol')
+        socket_.send_json({'id': 1, 'type': USERS_COMMAND})
+        while True:
+            reply = expect()
+            if reply.get('id') == 1 and reply.get('type') == 'result':
+                break
+            if 'id' in reply:
+                raise WebSocketError('protocol')
+        if reply.get('success') is not True:
+            raise WebSocketError('refused')
+        users = reply.get('result')
+        if not isinstance(users, list):
+            raise WebSocketError('protocol')
+        return users
+    finally:
+        socket_.close()
 
 
 class Backoff:

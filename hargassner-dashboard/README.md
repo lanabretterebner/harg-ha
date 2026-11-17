@@ -63,3 +63,14 @@ publishes through Core's `mqtt.publish`; it still has no broker password, no
 controller connection and no control call. It starts in `beobachten` mode,
 which shows notices without changing the overall state. Empty the room lists
 before removing the app. See DOCS.md.
+
+App 1.6.1: sensors are chosen on the app's room page
+(`api/local-monitor/raumsensoren` inside the app's Ingress address, see
+DOCS.md "Opening the room page") instead of typing entity IDs. It lists every
+temperature sensor of Home Assistant with name, value and area, with a search
+field. A Home Assistant administrator chooses per sensor Heizkreis 1,
+Heizkreis 2 or Weitere Räume and the extra flags and saves; the running room
+monitoring takes the selection over without a restart. Other users see the
+page read-only. Saving changes only the app's own options, through the
+Supervisor, which every app may do with its own token; no new permission is
+requested. The options stay editable in the Configuration tab.

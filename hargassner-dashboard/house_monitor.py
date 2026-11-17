@@ -5,7 +5,9 @@ through Home Assistant Core, receives the adapter context through one Core
 WebSocket `mqtt/subscribe` and sends codes and numbers through Core's
 `mqtt.publish`. It has no broker credentials, no controller access and no
 control-capable call. The allowlist in CoreApi.allowed is the complete set of
-requests. Nothing is persisted; a restart restarts every dwell time.
+requests of the worker; the room page adds the requests in room_picker.py.
+Nothing is persisted; a restart or a new sensor selection restarts every dwell
+time.
 """
 from datetime import datetime, timezone
 import html
@@ -236,6 +238,7 @@ class HouseMonitor:
         self.findings = []
         self.candidates = None
         self.candidate_lock = threading.Lock()
+        self.pending = None
         if not options.valid:
             self._log('config_invalid')
 
@@ -266,11 +269,47 @@ class HouseMonitor:
                 self.token = self.token_source()
             except Exception:
                 self.token = None
-        if self.token is not None and self.api is None:
-            self.api = self.api_factory(self.token, self.options.entities if self.options.valid else ())
+        with self.lock:
+            if self.token is not None and self.api is None:
+                self.api = self.api_factory(self.token, self.options.entities if self.options.valid else ())
         return self.token
 
+    # -- a new selection from the room page, applied by the worker thread only
+    def request_reconfigure(self, options):
+        """Queue validated options; the worker swaps them in at its next cycle.
+
+        Returns an Event that is set once the worker uses them. A later request
+        replaces an earlier one that was not yet applied."""
+        done = threading.Event()
+        with self.lock:
+            self.pending = (options, done)
+        return done
+
+    def _apply_pending(self):
+        with self.lock:
+            pending, self.pending = self.pending, None
+            if pending is None:
+                return False
+            options, done = pending
+            now = self.monotonic()
+            self.options = options
+            # A fresh engine: every waiting time starts again, as after a
+            # restart. The entity allowlist of the Core API follows the new set.
+            self.engine = rules.HouseEngine(options) if options.valid else None
+            self.api = None
+            self.findings = []
+            self.sampled = False
+            self.started = now
+            self.next_sample = now
+            self.next_labels = now
+            self.last_identities = None
+        if not options.valid:
+            self._log('config_invalid')
+        done.set()
+        return True
+
     def cycle(self, stop):
+        self._apply_pending()
         token = self._ensure_token()
         if token is not None:
             self._socket_step(token, stop)
@@ -372,22 +411,24 @@ class HouseMonitor:
 
     # -- sampling
     def sample(self, stop):
-        if self.engine is None:
+        with self.lock:
+            engine, options, api = self.engine, self.options, self.api
+        if engine is None:
             self.sampled = True
             return
         ha, samples, config = 'unavailable', {}, None
-        if self.api is not None:
+        if api is not None:
             try:
-                config = self.api.config()
+                config = api.config()
                 ha = 'running' if config.get('state') == 'RUNNING' else 'starting'
             except ApiError:
                 ha = 'unavailable'
         if ha == 'running':
-            for entity in self.options.entities:
+            for entity in options.entities:
                 if stop.is_set():
                     return
                 try:
-                    samples[entity] = self.api.state(entity)
+                    samples[entity] = api.state(entity)
                 except ApiError:
                     ha, samples = 'unavailable', {}
                     break
@@ -398,6 +439,8 @@ class HouseMonitor:
         now, wall = self.monotonic(), self.clock()
         state, context = self.fresh_context(now)
         with self.lock:
+            if self.engine is not engine:
+                return   # a new selection arrived meanwhile; its sample comes next
             self.findings = self.engine.step(now, wall=wall, ha=ha, samples=samples, context=context,
                                              context_state=state,
                                              local_minutes=local_minutes(wall, self.zone, self.zones))
@@ -421,7 +464,8 @@ class HouseMonitor:
                     monitor=monitor, reason=reason, sensors=sensors, circuits=circuits, findings=findings)
 
     def maybe_report(self):
-        if self.base is None or not self.sampled or self.api is None:
+        api = self.api
+        if self.base is None or not self.sampled or api is None:
             return False
         now = self.monotonic()
         with self.lock:
@@ -436,7 +480,7 @@ class HouseMonitor:
             topic = self.base + '/house/report'
         self.last_report, self.last_identities = now, current
         try:
-            self.api.publish(topic, payload)
+            api.publish(topic, payload)
             self.publish_state, self.last_report_wall = 'ok', self.clock()
         except ApiError:
             self.publish_state = 'failed'
@@ -461,10 +505,10 @@ class HouseMonitor:
                 'counters': dict(self.counters),
             }
 
-    def _candidates(self):
+    def _candidates(self, max_age=CANDIDATE_CACHE_S):
         now = self.monotonic()
         with self.candidate_lock:
-            if self.candidates is not None and now - self.candidates[0] < CANDIDATE_CACHE_S:
+            if self.candidates is not None and now - self.candidates[0] < max_age:
                 return self.candidates[1]
             rows = None
             token = self.token
@@ -542,15 +586,21 @@ def _time(wall, zone_name, zones):
         return 'unbekannt'
 
 
-def render_page(status, rows, zone=None, zones=None):
+PAGE_STYLE = (
+    ':root{color-scheme:light dark;--fg:#1c1c1c;--bg:#fff;--muted:#5f6368;--line:#c8c8c8;--accent:#03a9f4;'
+    '--card:#f6f7f8;--ok:#1b5e20;--bad:#b00020}'
+    '@media (prefers-color-scheme:dark){:root{--fg:#e8e8e8;--bg:#111315;--muted:#a8adb3;--line:#3b3f44;'
+    '--accent:#4fc3f7;--card:#1c1f22;--ok:#81c784;--bad:#ff8a80}}'
+    'body{font-family:sans-serif;margin:16px;max-width:60rem;color:var(--fg);background:var(--bg);line-height:1.4}'
+    'table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--line);padding:4px;text-align:left;'
+    'overflow-wrap:break-word}')
+
+
+def status_html(status, zone=None, zones=None):
+    """The monitoring status part of the room page (unchanged wording)."""
     escape = html.escape
     zones = zones or {}
-    lines = ['<!doctype html><html lang="de"><head><meta charset="utf-8">',
-             '<meta name="viewport" content="width=device-width, initial-scale=1">',
-             '<title>Raumsensoren</title><style>body{font-family:sans-serif;margin:16px;max-width:60rem}'
-             'table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid #ccc;padding:4px;text-align:left;'
-             'overflow-wrap:anywhere}</style></head><body>',
-             '<h1>Raumüberwachung</h1><p>Raumsensoren dienen nur der Überwachung. Sie steuern nichts.</p><ul>']
+    lines = ['<h1>Raumüberwachung</h1><p>Raumsensoren dienen nur der Überwachung. Sie steuern nichts.</p><ul>']
     lines.append(f'<li>Modus: {escape(status["mode"])}'
                  + (' (Meldungen werden nur angezeigt)' if status['mode'] == 'beobachten' else ' (Meldungen zählen für den Gesamtzustand)')
                  + '</li>')
@@ -583,8 +633,18 @@ def render_page(status, rows, zone=None, zones=None):
         counted = f'{minutes["24h"]} / {minutes["7d"]}' if minutes else '-'
         lines.append(f'<tr><td>Heizkreis {index}</td><td>{escape(kind)} {escape(source)}</td>'
                      f'<td>{escape(judged)}</td><td>{escape(counted)}</td></tr>')
-    lines.append('</table><h2>Temperatursensoren in Home Assistant</h2>'
-                 '<p>Diese Sensoren können in der Konfiguration der App eingetragen werden.</p>')
+    lines.append('</table>')
+    return ''.join(lines)
+
+
+def render_page(status, rows, zone=None, zones=None):
+    """Read-only page without script: status and the candidate list."""
+    escape = html.escape
+    lines = ['<!doctype html><html lang="de"><head><meta charset="utf-8">',
+             '<meta name="viewport" content="width=device-width, initial-scale=1">',
+             f'<title>Raumsensoren</title><style>{PAGE_STYLE}</style></head><body>',
+             status_html(status, zone, zones),
+             '<h2>Temperatursensoren in Home Assistant</h2>']
     if rows is None:
         lines.append('<p>Die Liste ist gerade nicht verfügbar.</p>')
     else:

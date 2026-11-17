@@ -570,15 +570,30 @@ class AppIntegrationTests(unittest.TestCase):
 
     def test_room_page_gate_and_headers(self):
         world = World()
-        server = self.serve(world.monitor.page)
+        seen = []
+
+        def page(user, nonce):
+            seen.append((user, nonce))
+            return world.monitor.page()
+        server = self.serve(page)
         status, body, headers = self.request(server)
         self.assertEqual(status, 200)
         self.assertIn('Raumüberwachung', body.decode())
-        self.assertEqual(headers['Content-Security-Policy'], "default-src 'none'; style-src 'unsafe-inline'")
+        nonce = seen[0][1]
+        self.assertEqual(seen[0][0], 'synthetic-user')
+        self.assertRegex(nonce, r'\A[A-Za-z0-9_-]{24}\Z')
+        self.assertEqual(headers['Content-Security-Policy'],
+                         f"default-src 'none'; style-src 'nonce-{nonce}'; script-src 'nonce-{nonce}'; "
+                         "connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'")
         self.assertEqual(headers['Cache-Control'], 'no-store')
         self.assertNotIn('synthetic-supervisor-token', body.decode())
         self.assertEqual(self.request(server, identity=False)[0], 400)
-        self.assertEqual(self.request(server, method='POST')[0], 405)
+        self.request(server)
+        self.assertNotEqual(seen[1][1], nonce)   # a fresh nonce per response
+        # A POST without JSON, origin and page token is refused before any save.
+        self.assertEqual(self.request(server, method='POST')[0], 415)
+        for method in ('PUT', 'DELETE', 'PATCH', 'OPTIONS'):
+            self.assertEqual(self.request(server, method=method)[0], 405)
         self.assertEqual(self.request(server, path='/api/local-monitor/raumsensoren?x=1')[0], 400)
         with patch.object(ingress_proxy, 'SUPERVISOR_IP', '172.30.32.2'):
             self.assertEqual(self.request(server)[0], 403)

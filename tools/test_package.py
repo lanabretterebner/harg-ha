@@ -16,19 +16,19 @@ def load(relative):
 
 
 class PackageTests(unittest.TestCase):
-    def test_frontend_1414_versions_and_independent_app_160(self):
+    def test_frontend_1414_versions_and_independent_app_161(self):
         package = json.loads((ROOT / "package.json").read_text())
         lock = json.loads((ROOT / "package-lock.json").read_text())
         release = json.loads((ROOT / "release.json").read_text())
         validation = json.loads((ROOT / "validation.json").read_text())
         self.assertEqual({package["version"], lock["version"], lock["packages"][""]["version"], release["version"], validation["version"]}, {"1.4.14"})
-        self.assertEqual(release["supervisor_app_version"], "1.6.0")
-        self.assertEqual(validation["supervisor_app_version"], "1.6.0")
+        self.assertEqual(release["supervisor_app_version"], "1.6.1")
+        self.assertEqual(validation["supervisor_app_version"], "1.6.1")
         self.assertEqual(release["component_checkpoint"], validation["component_checkpoint"])
-        self.assertEqual(release["component_checkpoint"], "frontend-1.4.14-app-1.6.0")
-        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.6.0")
-        self.assertIn("ARG BUILD_VERSION=1.6.0\n", (ROOT / "hargassner-dashboard/Dockerfile").read_text())
-        self.assertIn("APP_VERSION = '1.6.0'", (ROOT / "hargassner-dashboard/house_rules.py").read_text())
+        self.assertEqual(release["component_checkpoint"], "frontend-1.4.14-app-1.6.1")
+        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.6.1")
+        self.assertIn("ARG BUILD_VERSION=1.6.1\n", (ROOT / "hargassner-dashboard/Dockerfile").read_text())
+        self.assertIn("APP_VERSION = '1.6.1'", (ROOT / "hargassner-dashboard/house_rules.py").read_text())
         self.assertIn('const VERSION = "1.4.14";', (ROOT / "dist/hargassner-thermostat-popup.js").read_text())
 
     def test_repository_and_app_are_discoverable_independently_of_hacs(self):
@@ -48,12 +48,15 @@ class PackageTests(unittest.TestCase):
 
     def test_app_permissions_are_ha_api_only_without_host_privileges_or_ports(self):
         # From app 1.6.0 the HA API permission serves notifications, the read of
-        # the configured room sensors, one Core WebSocket and mqtt.publish.
+        # the configured room sensors, one Core WebSocket and mqtt.publish. From
+        # 1.6.1 it also serves the room page's administrator check and area
+        # template. Saving the app's own options uses the Supervisor's
+        # /addons/self/ endpoints, open to every app's own token: no hassio_api.
         app = load("hargassner-dashboard/config.yaml")
         self.assertIs(app["ingress"], True)
         self.assertEqual(app["ingress_port"], 8099)
         self.assertIs(app["panel_admin"], False)
-        for field in ("host_network", "host_pid", "hassio_api",
+        for field in ("host_network", "host_pid", "hassio_api", "hassio_role",
                       "docker_api", "full_access", "privileged", "ports", "map"):
             self.assertFalse(app.get(field), field)
         self.assertIs(app["homeassistant_api"], True)
@@ -85,6 +88,7 @@ class PackageTests(unittest.TestCase):
         german = load("hargassner-dashboard/translations/de.yaml")["configuration"]
         self.assertEqual(german["heizkreis_1_sensoren"]["name"], "Räume an Heizkreis 1")
         self.assertIn("Nur zur Überwachung", german["heizkreis_1_sensoren"]["description"])
+        self.assertIn("Raumsensoren-Seite", german["heizkreis_1_sensoren"]["description"])
 
     def test_dockerfile_uses_verified_multiarch_index_and_only_monitor_ingress_source(self):
         image = json.loads((ROOT / "validation/base-image.json").read_text())
@@ -94,7 +98,7 @@ class PackageTests(unittest.TestCase):
         self.assertTrue({"linux/amd64", "linux/arm64"}.issubset(platforms))
         self.assertEqual(re.findall(r"^COPY\s+(.*)$", dockerfile, re.M),
                          ["ingress_proxy.py app_monitor.py health_alerts.py run_app.py house_rules.py "
-                          "house_monitor.py ha_websocket.py LICENSE /app/"])
+                          "house_monitor.py ha_websocket.py room_picker.py LICENSE /app/"])
         self.assertIn('io.hass.type="app"', dockerfile)
         self.assertIn('io.hass.arch="aarch64|amd64"', dockerfile)
         self.assertNotIn("BUILD_FROM", dockerfile)

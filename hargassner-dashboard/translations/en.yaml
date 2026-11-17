@@ -10,7 +10,7 @@ configuration:
     description: "automatisch (automatic) takes the controller's setting. Otherwise heizkoerper (radiators) or fussboden (underfloor)."
   heizkreis_1_sensoren:
     name: Rooms on heating circuit 1
-    description: "Temperature sensors of the rooms that heating circuit 1 heats, e.g. sensor.living_room_temperature. Monitoring only, they control nothing."
+    description: "Easier to choose on the app's room sensor page. Sensors of the rooms that heating circuit 1 heats. Monitoring only, they control nothing."
   heizkreis_2_sensoren:
     name: Rooms on heating circuit 2
     description: "Temperature sensors of the rooms that heating circuit 2 heats."

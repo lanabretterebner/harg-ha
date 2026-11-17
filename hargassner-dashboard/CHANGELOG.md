@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.6.1
+
+- Sensors are now chosen on the app's room page instead of typed into the
+  options: the page lists every temperature sensor of Home Assistant with
+  name, entity ID, value and area, has a search field, and offers per sensor
+  "nicht überwachen", Heizkreis 1, Heizkreis 2 or Weitere Räume with the
+  flags "darf kühler sein", "Ofen oder viel Sonne" and "Frostwarnung", plus the
+  mode and the two circuit types. Sensors that are selected but gone from
+  Home Assistant stay listed so they can be removed.
+- Saving writes the app's own options through the Supervisor and keeps every
+  other option. The running room monitoring takes the new selection over
+  without a restart (its waiting times start again). If Home Assistant refuses
+  or does not answer, the page says so and nothing is assumed saved.
+- The app log names the path of the room page at start ("Raumsensoren
+  auswählen"), so the address no longer has to be taken from the browser.
+- Only Home Assistant administrators can save; the app asks Home Assistant
+  (`config/auth/list`) whether the logged-in user is one. Other users, and
+  everyone while that check fails, see the page read-only. Saving is accepted
+  only from the page itself (same origin, page token, JSON).
+- Permissions: none added. Every app may read and change its own options at
+  the Supervisor with the token it already has, so `hassio_api` stays off. The
+  existing Home Assistant API permission now also serves the administrator
+  check and one fixed read-only template for the sensor areas.
+- The page loads no external resources; its inline style and script carry a
+  fresh nonce per response.
+- The options stay visible and editable in the Configuration tab.
+
 ## 1.6.0
 
 - Add optional room monitoring with Home Assistant temperature sensors per

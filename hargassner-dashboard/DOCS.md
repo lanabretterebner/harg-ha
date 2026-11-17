@@ -192,7 +192,13 @@ The app publishes no LAN ports or Supervisor-management/host/Docker privileges.
 App 1.5.0 requested the HA API permission solely for its optional VM-health
 monitor. From app 1.6.0 the same permission also serves the room monitoring
 described below: it reads the selected sensors, opens one Home Assistant Core
-WebSocket and publishes through Core's `mqtt.publish` service. Ordinary
+WebSocket and publishes through Core's `mqtt.publish` service. From app 1.6.1
+the room page also checks whether its viewer is an administrator
+(`config/auth/list`), reads sensor areas through one fixed template and reads
+and saves the app's own options at the Supervisor; no permission was added for
+this. The room page's save is the app's only write; it is accepted only from a
+Home Assistant administrator, same-origin from that page, with the page's
+token and a JSON body. Ordinary
 ingress accepts requests only from the actual TCP peer `172.30.32.2`.
 It requires a single valid `X-Remote-User-Id` and `X-Ingress-Path` supplied by
 Ingress. All incoming cookies, authorization and forwarding headers are
@@ -379,7 +385,7 @@ health-token fetch, existing HTTPS connector, bounded one-event scheduler and
 Supervisor destination. No original producer observation time is rewritten.
 
 
-## Room monitoring with temperature sensors (app 1.6.0)
+## Room monitoring with temperature sensors (app 1.6.0, sensor page 1.6.1)
 
 The app can watch temperature sensors that already exist in Home Assistant and
 check whether the heating does its job: rooms that stay too cold while heating
@@ -399,7 +405,8 @@ is updated" below). Without it, nothing changes on the VM.
 The app can be installed before the VM. Room monitoring needs the VM release
 with the Betriebsüberwachung (operation-monitor-20261117 or later). Until that
 release runs, the VM sends no context: the room page
-`api/local-monitor/raumsensoren` says "Noch keine Daten von der VM empfangen",
+`api/local-monitor/raumsensoren` (see "Opening the room page") says "Noch
+keine Daten von der VM empfangen",
 no room is judged and no room finding appears anywhere. Nothing has to be
 changed in the app when the VM is updated; the room checks start by themselves
 within a few minutes.
@@ -418,40 +425,107 @@ the Supervisor-provided token and nothing else, the app:
   `mqtt.publish` service (QoS 0, not retained), every 2 minutes and shortly
   after a change.
 
+From 1.6.1 the room page adds, only while it is opened or saved:
+
+- one short Core WebSocket connection with the read-only command
+  `config/auth/list`, to tell whether the person viewing the page is a Home
+  Assistant administrator (cached for one minute);
+- one fixed read-only template through `/core/api/template` that returns the
+  area name of each temperature sensor;
+- `GET /addons/self/info` and `POST /addons/self/options` at the Supervisor:
+  the app reads its own stored options and, when an administrator saves,
+  writes them back with only the room settings changed.
+
+The Supervisor lets every app read and change its own options with the token
+it already has, so 1.6.1 needs no new permission: `hassio_api` stays off and
+no `hassio_role` is requested. The app does not restart itself and cannot
+change any other app, Home Assistant setting or entity.
+
 It has no broker password, no controller connection and no call that can
-change a heating setting. It stores nothing; after a restart every waiting time
-starts again. Home Assistant's MQTT integration must be connected to the same
-broker as the VM. The thread runs even when no sensor is selected, so that the
-VM learns that room monitoring is off.
+change a heating setting. It stores nothing; after a restart or a new sensor
+selection every waiting time starts again. Home Assistant's MQTT integration
+must be connected to the same broker as the VM. The thread runs even when no
+sensor is selected, so that the VM learns that room monitoring is off.
+
+### Opening the room page
+
+The room page lives inside the app's Ingress address, at the path
+`api/local-monitor/raumsensoren`. The app's panel (**Hargassner** in the
+sidebar or **Open Web UI**) opens the VM dashboard at the root of that
+address, so the room page is opened by hand.
+
+The quickest way: the app writes the path to its log when it starts
+(**Settings → Apps**, this app, **Log**), in a line beginning with
+"Raumsensoren auswählen". Put the address of your Home Assistant in front of
+that path, open the app's panel once and then open the result. If the line is
+missing, build the address yourself:
+
+1. Open the app's panel once, so that Home Assistant lets the browser in.
+2. Find the address of the dashboard frame: in Firefox right-click in the
+   dashboard and choose **Dieser Frame → Frame in neuem Tab öffnen**; in
+   Chrome or Edge right-click in the dashboard and choose
+   **Frame-Quelltext anzeigen**, then take the address after `view-source:`.
+   It looks like `https://<your-home-assistant>/api/hassio_ingress/<code>/`.
+3. Add `api/local-monitor/raumsensoren` to the end of that address:
+   `https://<your-home-assistant>/api/hassio_ingress/<code>/api/local-monitor/raumsensoren`.
+
+The `<code>` stays the same for this installation, so the address can be
+bookmarked. If the bookmark answers "401: Unauthorized", the browser's
+Ingress session has expired: open the app's panel once more and reload. The
+page works before the VM is updated.
 
 ### Choosing the sensors
 
-1. Find the entity IDs of your room thermometers. The app's read-only page
-   `api/local-monitor/raumsensoren`, opened relative to the app's Ingress
-   address, lists every temperature sensor with its name and value. Home
-   Assistant's **Developer tools → States**, filtered by `temperature`, shows
-   the same.
-2. In the app's **Configuration** tab, add each sensor to one list only:
-   - **Räume an Heizkreis 1** and **Räume an Heizkreis 2**: rooms that this
-     circuit heats. Pick sensors away from radiators, windows, doors and
-     direct sun.
-   - **Weitere Räume**: rooms without a heating circuit or with closed valves,
-     for example cellar or garage. Only the sensor itself is checked there.
-3. Optional lists name sensors that are already in one of the lists above:
-   - **Räume, die kühler sein dürfen**: rooms kept cooler on purpose, such as a
-     bedroom. They may be 2 degrees below the set temperature.
-   - **Räume mit Ofen oder viel Sonne**: no notice when they are too warm.
-   - **Frostwarnung für weitere Räume**: rooms from **Weitere Räume** that
-     should still warn about frost.
-4. **Heizkreis 1 ist / Heizkreis 2 ist**: `automatisch` takes the type from
-   the controller (radiators or underfloor). Choose `heizkoerper` or
-   `fussboden` only if the controller setting is wrong.
-5. Save and restart the app.
+The room page shows the monitoring status at the top and below it every
+temperature sensor of Home Assistant with its name, entity ID, current value
+and, when Home Assistant knows it, its area. The search field filters by
+name, area or entity ID. For each sensor choose:
 
-At most 24 sensors can be selected in total. A sensor may appear in only one
-of the three room lists. If the selection breaks these rules, the dashboard
-keeps working, room checks stay off and the Betriebsüberwachung shows that the
-room sensor settings of the app are invalid.
+- **nicht überwachen** (default), **Heizkreis 1**, **Heizkreis 2** or
+  **Weitere Räume**. Heizkreis 1 and 2 are rooms that this circuit heats; pick
+  sensors away from radiators, windows, doors and direct sun. Weitere Räume
+  are rooms without a heating circuit or with closed valves, for example
+  cellar or garage; only the sensor itself is checked there.
+- For rooms on a heating circuit: **darf kühler sein** (kept cooler on
+  purpose, such as a bedroom; may be 2 degrees below the set temperature) and
+  **Ofen oder viel Sonne** (no notice when the room is too warm).
+- For Weitere Räume: **Frostwarnung** (warn about frost in that room).
+
+Above the list choose **Raumüberwachung** (`beobachten` or `melden`, see
+below) and **Heizkreis 1 ist / Heizkreis 2 ist**: `automatisch` takes the type
+from the controller (radiators or underfloor); choose Heizkörper or Fußboden
+only if the controller setting is wrong. Then press **Speichern**.
+
+Saving writes the app's own options through the Supervisor and keeps every
+other option (dashboard address, tokens, VM-health monitor) unchanged. The
+running room monitoring takes the new selection over at once, without a
+restart; its waiting times start again. The page says whether the save
+worked. If Home Assistant refuses or does not answer, the page says so and
+nothing is assumed saved; reload the page to see the stored state. Sensors
+that are selected but no longer exist in Home Assistant stay listed under
+**Ausgewählt, aber nicht mehr in Home Assistant** so they can be removed.
+
+Who sees what:
+
+- A Home Assistant **administrator** can change and save the selection. The
+  page checks this for the logged-in Home Assistant user on every save.
+- **Other users** see the same page read-only, with a note that only
+  administrators can change the selection.
+- If the app cannot check the user (for example while Home Assistant
+  restarts), the page is read-only for everyone and says so.
+
+The same settings remain visible and editable in the app's **Configuration**
+tab as lists of entity IDs (`heizkreis_1_sensoren`, `heizkreis_2_sensoren`,
+`haus_sensoren`, `kuehlere_raeume`, `ohne_ueberwaermung`,
+`haus_frost_sensoren`). A change made there takes effect after the app is
+restarted (or when the room page saves); the room page names such a change
+that is not active yet.
+
+At most 24 sensors can be selected in total. A sensor may be in only one
+group. The page refuses selections that break these rules. If the
+Configuration tab holds a selection that breaks them, the dashboard keeps
+working, room checks stay off and the Betriebsüberwachung shows that the room
+sensor settings of the app are invalid.
 
 ### beobachten or melden
 
@@ -509,8 +583,9 @@ target was unknown. The log shows only fixed lines such as
 
 ### Removing the app
 
-Raumsensoren leeren, dann App entfernen: empty the three room lists, save,
-restart the app and wait until the Betriebsüberwachung no longer shows room
+Raumsensoren leeren, dann App entfernen: set every sensor on the room page to
+**nicht überwachen** and save (or empty the three room lists in the
+Configuration tab, save and restart the app), then wait until the Betriebsüberwachung no longer shows room
 monitoring (a few minutes). Only then uninstall the app. If the app is removed
 while sensors are selected, the VM keeps the checks **Räume** and
 **Raumsensoren** at **Unbekannt**.

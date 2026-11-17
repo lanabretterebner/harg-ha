@@ -1,6 +1,6 @@
 # Hargassner for Home Assistant
 
-Frontend 1.4.14 and the optional ingress/monitor app 1.6.0 include the HA clients for an existing Hargassner local-control
+Frontend 1.4.14 and the optional ingress/monitor app 1.6.1 include the HA clients for an existing Hargassner local-control
 backend: a discoverable thermostat dashboard card, the matching native popup,
 one-device page grouping, the optional dashboard Ingress app and reference examples.
 
@@ -20,7 +20,7 @@ Frontend 1.4.14 keeps an independent room-correction control available when
 Auto has no qualified day/setback target basis, including summer phases.
 The configured target remains unknown until the backend qualifies that basis.
 Install/update the HACS resource and fully reload the frontend. The separately
-versioned ingress/monitor app 1.6.0 contains separate notification-outbox, strict
+versioned ingress/monitor app 1.6.1 contains separate notification-outbox, strict
 configuration and incomplete-response fixes, treats an empty optional connection
 host as unset, rejects raw non-ASCII request paths with HTTP400, recovers its
 optional monitor from clock skew and backward clock steps and makes that monitor
@@ -130,8 +130,11 @@ index is pinned by digest. The app exposes no host ports or Supervisor-managemen
 Docker or host privileges. The app uses the Supervisor-provided token for the HA
 API: optional VM-health notifications and, from app 1.6.0, optional room
 monitoring, which reads the selected sensor states, opens one Core WebSocket and
-publishes through Core's `mqtt.publish`. Both are off by default. No long-lived
-HA user token is needed.
+publishes through Core's `mqtt.publish`. Both are off by default. From app
+1.6.1 its room page also reads and saves the app's own options at the
+Supervisor (which every app may do with its own token; no `hassio_api`
+permission is requested) and checks through Core whether its viewer is a Home
+Assistant administrator. No long-lived HA user token is needed.
 
 The existing backend must allow the app's source IP and HA browser origin and
 provide a private ingress token. Set the app's HTTPS `upstream_url` and
@@ -324,3 +327,10 @@ App 1.6.0 adds optional room monitoring with existing Home Assistant
 temperature sensors per heating circuit, reported to the VM's
 Betriebsüberwachung. Room sensors control nothing. It starts in `beobachten`
 mode. Update the app through Supervisor; the HACS frontend remains 1.4.14.
+
+App 1.6.1 replaces typing entity IDs into the app options: the app's room page
+`api/local-monitor/raumsensoren` (inside the app's Ingress address) lists every
+temperature sensor with name, value and area, with a search field, and a Home
+Assistant administrator picks the sensors and saves there. Other users see the
+page read-only. The options stay visible and editable in the Configuration
+tab. See the app's DOCS.md, "Opening the room page".
