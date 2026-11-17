@@ -673,6 +673,20 @@ class HttpTests(unittest.TestCase):
         self.assertNotIn(b'SECRET', raw)
         self.assertEqual(self.send('GET', path='/api/local-monitor/status')[0], 200)
 
+    def test_non_supervisor_peer_cannot_save_with_forged_ingress_admin_headers(self):
+        with patch.object(ingress_proxy, 'SUPERVISOR_IP', '127.0.0.2'):
+            status, _body, _headers = self.send(body=self.body(), headers=self.browser())
+        self.assertEqual(status, 403)
+        self.assertEqual(self.world.posted, [])
+
+    def test_nonadmin_cannot_promote_itself_with_admin_headers(self):
+        headers = self.browser()
+        headers['X-Remote-User-Is-Admin'] = 'true'
+        headers['X-Role'] = 'admin'
+        status, _body, _headers = self.send(body=self.body(), headers=headers, user=USER)
+        self.assertEqual(status, 403)
+        self.assertEqual(self.world.posted, [])
+
 
 class PickerApiTests(unittest.TestCase):
     def test_allowlist_is_exact(self):
@@ -887,3 +901,49 @@ class RoomPageAddress(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+class RoomPickerSecurityRegressions(unittest.TestCase):
+    def test_demoted_admin_cannot_save_with_a_still_valid_page_token(self):
+        world = PickerWorld()
+        token = world.token()
+        world.users = [{**entry, 'is_owner': False, 'group_ids': ['system-users']}
+                       if entry['id'] == ADMIN else dict(entry) for entry in USERS]
+        status, document = world.save([row('sensor.kueche', 'heizkreis_1')], token=token)
+        self.assertEqual(status, 403, document)
+        self.assertEqual(world.posted, [])
+        self.assertIsNone(world.monitor.pending)
+
+    def test_cached_admin_does_not_authorize_save_when_core_is_unreachable(self):
+        world = PickerWorld()
+        token = world.token()
+        world.users_fail = True
+        status, document = world.save([row('sensor.kueche', 'heizkreis_1')], token=token)
+        self.assertEqual(status, 403, document)
+        self.assertEqual(world.posted, [])
+        self.assertIsNone(world.monitor.pending)
+
+    def test_unhashable_group_is_a_validation_refusal_not_an_exception(self):
+        for group in ([], {}):
+            world = PickerWorld()
+            with self.subTest(group=group):
+                status, document = world.save([row('sensor.kueche', group)])
+                self.assertEqual(status, 400, document)
+                self.assertEqual(world.posted, [])
+
+    def test_malformed_entity_ids_never_reach_supervisor_options(self):
+        for entity in ('sensor.kueche\n', 'sensor.kueche/../../options', 'light.kueche',
+                       'sensor.küche', 'sensor.kueche?query=1', 'sensor.' + 'x' * 300):
+            world = PickerWorld()
+            with self.subTest(entity=entity):
+                status, document = world.save([row(entity, 'heizkreis_1')])
+                self.assertEqual(status, 400, document)
+                self.assertEqual(world.posted, [])
+
+    def test_radiator_and_floor_selections_remain_in_their_own_circuits(self):
+        world = PickerWorld()
+        status, document = world.save([row('sensor.kueche', 'heizkreis_1'), row('sensor.bad', 'heizkreis_2')],
+                                      art1='heizkoerper', art2='fussboden')
+        self.assertEqual(status, 200, document)
+        self.assertEqual(world.posted[-1]['heizkreis_1_sensoren'], ['sensor.kueche'])
+        self.assertEqual(world.posted[-1]['heizkreis_2_sensoren'], ['sensor.bad'])
+        self.assertEqual(r.parse_house_options(world.posted[-1]).option_types, ('radiator', 'floor'))

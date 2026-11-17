@@ -429,7 +429,8 @@ From 1.6.1 the room page adds, only while it is opened or saved:
 
 - one short Core WebSocket connection with the read-only command
   `config/auth/list`, to tell whether the person viewing the page is a Home
-  Assistant administrator (cached for one minute);
+  Assistant administrator (cached for page rendering for one minute; every save
+  requires a fresh lookup and is refused if Core is unavailable);
 - one fixed read-only template through `/core/api/template` that returns the
   area name of each temperature sensor;
 - `GET /addons/self/info` and `POST /addons/self/options` at the Supervisor:
@@ -442,8 +443,9 @@ no `hassio_role` is requested. The app does not restart itself and cannot
 change any other app, Home Assistant setting or entity.
 
 It has no broker password, no controller connection and no call that can
-change a heating setting. It stores nothing; after a restart or a new sensor
-selection every waiting time starts again. Home Assistant's MQTT integration
+change a heating setting. Its rule timers and sensor observations are in memory; after a restart or a
+new sensor selection every waiting time starts again. Sensor selections persist
+in the app options; the separate VM-health monitor retains its durable outbox. Home Assistant's MQTT integration
 must be connected to the same broker as the VM. The thread runs even when no
 sensor is selected, so that the VM learns that room monitoring is off.
 
@@ -452,7 +454,9 @@ sensor is selected, so that the VM learns that room monitoring is off.
 The room page lives inside the app's Ingress address, at the path
 `api/local-monitor/raumsensoren`. The app's panel (**Hargassner** in the
 sidebar or **Open Web UI**) opens the VM dashboard at the root of that
-address, so the room page is opened by hand.
+address, so the room page can be opened by hand. A newer VM dashboard source also
+links it under Ereignisse and Info when opened through HA ingress; that link
+is not part of operation-monitor-20261117.
 
 The quickest way: the app writes the path to its log when it starts
 (**Settings → Apps**, this app, **Log**), in a line beginning with

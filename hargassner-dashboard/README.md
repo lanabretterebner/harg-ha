@@ -74,3 +74,6 @@ monitoring takes the selection over without a restart. Other users see the
 page read-only. Saving changes only the app's own options, through the
 Supervisor, which every app may do with its own token; no new permission is
 requested. The options stay editable in the Configuration tab.
+
+App 1.6.2: every save on the room page checks again that the user is a Home
+Assistant administrator (refused if Home Assistant does not answer).

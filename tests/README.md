@@ -22,7 +22,8 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-On CI use `npx playwright install --with-deps chromium`. An existing executable
+On a host missing browser libraries, use `npx playwright install --with-deps chromium`
+with the required package-install permission. An existing executable
 can be selected with `HARG_BROWSER_EXECUTABLE=/usr/bin/chromium`. The runner
 starts its own loopback HTTP server, uses synthetic card/popup/grouping fixtures
 and fails on assertion, page, console or request errors. Its structured report

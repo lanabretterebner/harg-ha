@@ -1,6 +1,6 @@
 # Hargassner for Home Assistant
 
-Frontend 1.4.14 and the optional ingress/monitor app 1.6.1 include the HA clients for an existing Hargassner local-control
+Frontend 1.4.14 and the optional ingress/monitor app 1.6.2 include the HA clients for an existing Hargassner local-control
 backend: a discoverable thermostat dashboard card, the matching native popup,
 one-device page grouping, the optional dashboard Ingress app and reference examples.
 
@@ -20,7 +20,7 @@ Frontend 1.4.14 keeps an independent room-correction control available when
 Auto has no qualified day/setback target basis, including summer phases.
 The configured target remains unknown until the backend qualifies that basis.
 Install/update the HACS resource and fully reload the frontend. The separately
-versioned ingress/monitor app 1.6.1 contains separate notification-outbox, strict
+versioned ingress/monitor app 1.6.2 contains separate notification-outbox, strict
 configuration and incomplete-response fixes, treats an empty optional connection
 host as unset, rejects raw non-ASCII request paths with HTTP400, recovers its
 optional monitor from clock skew and backward clock steps and makes that monitor
@@ -212,7 +212,8 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-CI uses `npx playwright install --with-deps chromium`. To use an existing local
+For hosts missing browser libraries, `npx playwright install --with-deps chromium`
+installs them (requires host package authority). To use an existing local
 Chromium instead, set `HARG_BROWSER_EXECUTABLE=/usr/bin/chromium`. The runner
 serves only a loopback HTTP fixture and checks card, popup and device grouping
 assertions plus page/console/request errors. It emits a structured result.
@@ -220,117 +221,14 @@ assertions plus page/console/request errors. It emits a structured result.
 open the HTML fixtures manually. These synthetic checks contact no live HA or
 controller and do not establish installed-native rendering or physical heating
 response. See [browser checks](tests/README.md).
-Publish frontend 1.4.14 as a new `v1.4.14` release after its final source,
-package and frontend tests pass. Preserve all existing tags and release assets.
-The independently versioned Supervisor app 1.5.5 includes its own ingress/monitor
-fixes and requires a separate Supervisor update.
-HACS users update the resource and fully reload each browser/Companion App.
+Frontend 1.4.14 and app 1.6.2 are published independently. Installation and
+served-byte acceptance are separate from source checks; consult the installed
+version in HACS and Supervisor. Existing tags and assets remain immutable.
+The app is updated through Supervisor; HACS updates only the browser resource.
+
+The current frontend retains native controls during readback, correction-only
+writes, truthful unknown targets and room readings, six-mode selection and
+compact layouts. The dial uses -3 to +3 degrees in 0.5 steps. Pending and
+uncertain writes never gain success from elapsed time or automatic retry.
+Historical release details belong in [CHANGELOG.md](CHANGELOG.md).
 [Third-party icon licenses](THIRD-PARTY-NOTICES.md).
-
-Frontend 1.4.14 keeps the native thermostat and temperature-control nodes mounted while readback catches up. A requested number is shown as **Angefragt** until coherent qualified readback confirms it; an uncertain outcome says **Bestätigung unklar**, without automatic retry or silent rollback. A definitive rejection restores the confirmed number. Current modes/status stay truthful, and genuine schedule/base changes reconcile normally. During qualification loss the previous confirmed number remains visibly read-only; offline never becomes command authority. The separate Modus selector remains usable whenever its own native authority is available. The separately updated optional ingress app 1.5.3 retains disabled-by-default independent
-VM-health monitoring; see its instructions for private options and commissioning.
-
-
-Frontend 1.4.14 also retires old popup temperature callbacks synchronously when
-connection/user identity or connectivity changes before a native Lit render.
-Native connection/config contexts are observed directly; existing hass setters
-are preserved. Repeated connected snapshots of the same identity keep a queued
-adjustment. Stop/reparent releases only owned bindings. This adds no new command
-authority, automatic retries or target confirmation, and remains part of frontend 1.4.14.
-
-
-When a qualified configured target is unavailable, the card and popup can use
-only the separately discovered, available room-correction number entity.
-The adjustment remains −3 to +3°C in0.5°C steps. It never supplies a guessed
-configured target or room reading. Correction availability follows that number
-entity's own current backend authority; absent or unavailable correction entities
-remain read-only. The six-mode selector retains its own independent availability.
-
-
-Frontend 1.4.14 gives minus and plus separate rounded, filled, subtly bordered
-buttons with a visible gap. It preserves compact thermostat spacing and
-its existing native target controls, independent room-correction fallback,
-six-mode selector and status. Update the HACS resource and fully reload each
-browser/Companion App to replace an already registered card class. The separately
-versioned ingress/monitor app 1.5.5 includes independent fixes and is updated
-separately through Supervisor. Layout changes do not grant command
-authority or supply missing target/room values.
-
-Frontend 1.4.8 places popup room-correction controls before Modus and status,
-and centers the card mode/status rows vertically. While that fallback is visible,
-only the dedicated unavailable native target region is collapsed. Native target
-spacing and original inline styles return when qualification changes. Existing
-native controls stay mounted. The optional app 1.5.2 is byte-identical to the
-frontend 1.4.7 checkpoint and requires no new app update for this layout release.
-
-Frontend 1.4.9 puts **Ist** directly below the displayed set/correction number
-inside the card dial. Missing or unqualified room readings explicitly say
-**Ist: Nicht verfügbar** in the same reserved line; no room value is inferred.
-Cards retain a fixed 400px height, including pending/rejected commands,
-long statuses, offline states and helper failures. Native controls remain mounted
-through qualified updates. Popup layout and all 15 app 1.5.2 files are unchanged.
-
-Frontend 1.4.10 fixes the room-correction dial: a touch in the open bottom gap
-selects the nearer end (−3 or +3) instead of always +3, a touch on the centre
-value text selects nothing, and zero is shown as **0 °C**, never **-0 °C**. The
-card's six-mode selector is released when its own mode request settles, even if
-the climate briefly became unavailable meanwhile. Correction bounds and steps,
-command authority and readback confirmation are unchanged. App 1.5.3 contains
-only ingress option/request-path fixes; its monitor evaluator is unchanged.
-
-Frontend 1.4.11 fixes three further room-correction dial inputs. A drag that
-passes −3 or +3 keeps that end while the pointer is in the open bottom gap, on
-either side of straight-down, instead of flipping to the opposite end; only a
-new press in the gap selects the nearer end. A dial that cannot be measured
-selects nothing. A release that cannot be sent, or a request pending from
-another card or popup of the same circuit, discards the local draft, and minus
-and plus step from the confirmed or requested value, never from a drag draft.
-Correction bounds and steps, command authority and readback confirmation are
-unchanged. All app 1.5.3 files are unchanged from frontend 1.4.10.
-
-Frontend 1.4.12 stops the dial from wrapping. A drag that crosses the whole
-bottom gap and returns to the ring on the far side keeps the end it left
-through, instead of jumping to the opposite end. It follows the pointer again
-once the pointer is nearer to that end along the ring than across the gap. A
-new press on the ring still selects the value under it. Bounds, steps, command
-authority and readback confirmation are unchanged, and so are all app 1.5.3
-files.
-
-Frontend 1.4.13 changed only its version number; card and popup behavior are
-those of 1.4.12. That release carried app 1.5.4, whose optional monitor accepts
-a relay clock up to 5 s ahead of the HA host and recovers from a backward step
-of the HA host's clock at the next poll. Earlier app versions stayed at
-`clock_invalid` until the old time had passed and reported no relay outage in
-that time. Alerts that do not depend on the clock keep their own reason. The
-monitor's state, reason codes and report format are unchanged. Update the app
-through Supervisor; the HACS update alone does not change it.
-
-Frontend 1.4.14 again changes only its version number; card and popup behavior
-are those of 1.4.12. The release carries app 1.5.5, whose optional monitor
-ignores a check kind it does not know instead of reporting all three components
-invalid, so a later relay-side check cannot turn one unknown key into a blanket
-unknown with a notification for each component. Both known checks are still
-required and no current report changes its verdict. The release also documents
-three limits it does not change: the monitor cannot see a controller that has
-left the broker, `1x Heizen` and `1x Absenken` end silently when the controller
-returns the circuit to Auto, and the one-time charge trigger's `0` report is its
-own reset rather than a finished charge. Update the app through Supervisor; the
-HACS update alone does not change it.
-
-App 1.5.6 replaces internal health codes and hashes with readable German problem
-messages and a next step. Recovery clears the old warning silently. A missing
-common connection produces one warning; obsolete queued events do not raise
-stale alerts or clear newer faults. Update the app through Supervisor; the
-HACS frontend remains 1.4.14.
-
-App 1.6.0 adds optional room monitoring with existing Home Assistant
-temperature sensors per heating circuit, reported to the VM's
-Betriebsüberwachung. Room sensors control nothing. It starts in `beobachten`
-mode. Update the app through Supervisor; the HACS frontend remains 1.4.14.
-
-App 1.6.1 replaces typing entity IDs into the app options: the app's room page
-`api/local-monitor/raumsensoren` (inside the app's Ingress address) lists every
-temperature sensor with name, value and area, with a search field, and a Home
-Assistant administrator picks the sensors and saves there. Other users see the
-page read-only. The options stay visible and editable in the Configuration
-tab. See the app's DOCS.md, "Opening the room page".

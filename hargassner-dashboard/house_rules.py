@@ -11,7 +11,7 @@ import json
 import math
 import re
 
-APP_VERSION = '1.6.1'
+APP_VERSION = '1.6.2'
 REPORT_SCHEMA = 'harg-house-report/1'
 CONTEXT_SCHEMA_PREFIX = 'harg-house-context/'
 CONTEXT_MAJORS = (1,)

@@ -179,7 +179,7 @@ def announce_room_page(token_source=default_token, api_factory=PickerApi, log=No
 class AdminCheck:
     """Is this ingress user a Home Assistant administrator? Fails closed.
 
-    One `config/auth/list` answer is cached for ADMIN_TTL_S; a failed lookup
+    Page rendering caches `config/auth/list` for ADMIN_TTL_S; saves bypass it. A failed lookup
     is retried after ADMIN_RETRY_S at the earliest and means view only.
     """
 
@@ -215,9 +215,13 @@ class AdminCheck:
         self.cache, self.failed = (now, table), None
         return table
 
-    def lookup(self, user):
+    def lookup(self, user, *, refresh=False):
         """Return (kind, name): kind is admin, user, unknown_user or unavailable."""
         with self.lock:
+            if refresh:
+                # Display caching never authorizes a write after demotion or
+                # loss of the Core permission service. Saves recheck now.
+                self.cache = None
             table = self._table()
         if table is None:
             return 'unavailable', ''
@@ -348,7 +352,7 @@ def parse_request(document):
         entity = row['entity_id']
         if not isinstance(entity, str) or not rules.ENTITY_PATTERN.fullmatch(entity):
             raise SelectionError('Ungültiger Sensor.')
-        if row['gruppe'] not in GROUPS:
+        if not isinstance(row['gruppe'], str) or row['gruppe'] not in GROUPS:
             raise SelectionError('Unbekannte Zuordnung eines Sensors.')
         if any(type(row[name]) is not bool for name, _key, _scope, _text in FLAGS):
             raise SelectionError('Ungültige Anfrage.')
@@ -739,7 +743,7 @@ class RoomPicker:
         def refuse(status, message, category='save_refused'):
             self._log(category)
             return status, {'ok': False, 'message': message}
-        kind, _name = self.admin.lookup(user)
+        kind, _name = self.admin.lookup(user, refresh=True)
         if kind != 'admin':
             return refuse(403, REFUSED_TEXT[kind])
         if not self.tokens.valid(user, token):

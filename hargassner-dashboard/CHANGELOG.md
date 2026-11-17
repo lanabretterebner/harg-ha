@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.2
+
+- Saving on the room page asks Home Assistant again whether the user is an
+  administrator, every time. Before, the answer was kept for a minute, so a
+  user demoted in that minute could still save. If Home Assistant does not
+  answer, saving is refused. Showing the page still uses the one-minute answer.
+- A sensor assignment that is not text (for example a list) is now refused
+  with "Unbekannte Zuordnung eines Sensors." instead of causing an internal error.
+- Nothing else changed: the same options, rules, permissions and report.
+
 ## 1.6.1
 
 - Sensors are now chosen on the app's room page instead of typed into the
