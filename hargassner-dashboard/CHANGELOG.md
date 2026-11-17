@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.3
+
+- Home Assistant now owns the existing Betriebsüberwachung verdict: a VM outage or missing live reports becomes Störung within 90 seconds, even while the VM is off. An enabled health check can detect it sooner.
+- Retained Normal reports never establish liveness after a restart. If the HA app stops, the verdict expires after 90 seconds. Entity identity and saved HA views remain unchanged.
+- Preserve MQTT messages that arrive before the subscription acknowledgement, allowing room-monitor context to recover after restarts.
+
 ## 1.6.2
 
 - Saving on the room page asks Home Assistant again whether the user is an

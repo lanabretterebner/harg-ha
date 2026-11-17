@@ -219,6 +219,21 @@ class FrameTests(unittest.TestCase):
 
 
 class SubscriptionTests(unittest.TestCase):
+    def test_event_before_subscription_ack_is_delivered(self):
+        def script(peer):
+            peer.handshake()
+            peer.send_json({'type': 'auth_required'})
+            peer.receive_json()
+            peer.send_json({'type': 'auth_ok'})
+            peer.receive_json()
+            peer.send_json({'id': 1, 'type': 'event', 'event': {'topic': 'hargassner/gw/house/context',
+                                                            'payload': 'synthetic', 'retain': False}})
+            peer.send_json({'id': 1, 'type': 'result', 'success': True, 'result': None})
+            peer.read(1)
+        server, sub = self.subscription(script)
+        sub.open()
+        self.assertEqual(sub.poll(.01), [('hargassner/gw/house/context', 'synthetic', False)])
+
     def subscription(self, script, clock=None):
         server = Server(script)
         self.addCleanup(server.close)

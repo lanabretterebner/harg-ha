@@ -232,3 +232,5 @@ compact layouts. The dial uses -3 to +3 degrees in 0.5 steps. Pending and
 uncertain writes never gain success from elapsed time or automatic retry.
 Historical release details belong in [CHANGELOG.md](CHANGELOG.md).
 [Third-party icon licenses](THIRD-PARTY-NOTICES.md).
+
+App 1.6.3 makes Betriebsüberwachung independent of the VM: missing live reports or failed VM heartbeat cannot remain Normal. Update the Supervisor app separately; HACS frontend 1.4.14 is unchanged. The app uses the existing default `homeassistant` MQTT discovery prefix.

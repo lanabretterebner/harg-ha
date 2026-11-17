@@ -172,6 +172,7 @@ class Monitor:
         self.state_path = self.directory / 'alert-state.json'
         self.last_error = None
         self._status_lock = threading.Lock()
+        self._operation_heartbeat = None
         self._status = {'schema_version': 1, 'enabled': True, 'running': False,
                         'last_check_at': None, 'queue_count': None,
                         'last_delivery_condition': None, 'last_error': None}
@@ -180,6 +181,13 @@ class Monitor:
         with self._status_lock:
             return {**self._status, 'last_delivery_condition':
                     dict(self._status['last_delivery_condition']) if self._status['last_delivery_condition'] else None}
+
+    def operation_heartbeat(self):
+        with self._status_lock:
+            observed = self._operation_heartbeat
+        if observed is None or not 0 <= self.monotonic() - observed[0] < 90:
+            return {'status': 'unknown'}
+        return dict(observed[1])
 
     def update_status(self, **fields):
         with self._status_lock:
@@ -209,6 +217,8 @@ class Monitor:
             rows = health.evaluate(document, now=now, endpoint_failed=failed)
             stepped = health.stepped_back(self.reading, (now, tick))
             rows = health.effective_conditions(rows, saved, now, stepped)
+            with self._status_lock:
+                self._operation_heartbeat = (tick, dict(rows['heartbeat']))
             deferred = False
             try:
                 proposed = health.transition(rows, saved, now, stepped)

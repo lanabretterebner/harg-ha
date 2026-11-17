@@ -16,19 +16,19 @@ def load(relative):
 
 
 class PackageTests(unittest.TestCase):
-    def test_frontend_1414_versions_and_independent_app_162(self):
+    def test_frontend_1414_versions_and_independent_app_163(self):
         package = json.loads((ROOT / "package.json").read_text())
         lock = json.loads((ROOT / "package-lock.json").read_text())
         release = json.loads((ROOT / "release.json").read_text())
         validation = json.loads((ROOT / "validation.json").read_text())
         self.assertEqual({package["version"], lock["version"], lock["packages"][""]["version"], release["version"], validation["version"]}, {"1.4.14"})
-        self.assertEqual(release["supervisor_app_version"], "1.6.2")
-        self.assertEqual(validation["supervisor_app_version"], "1.6.2")
+        self.assertEqual(release["supervisor_app_version"], "1.6.3")
+        self.assertEqual(validation["supervisor_app_version"], "1.6.3")
         self.assertEqual(release["component_checkpoint"], validation["component_checkpoint"])
-        self.assertEqual(release["component_checkpoint"], "frontend-1.4.14-app-1.6.2")
-        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.6.2")
-        self.assertIn("ARG BUILD_VERSION=1.6.2\n", (ROOT / "hargassner-dashboard/Dockerfile").read_text())
-        self.assertIn("APP_VERSION = '1.6.2'", (ROOT / "hargassner-dashboard/house_rules.py").read_text())
+        self.assertEqual(release["component_checkpoint"], "frontend-1.4.14-app-1.6.3")
+        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.6.3")
+        self.assertIn("ARG BUILD_VERSION=1.6.3\n", (ROOT / "hargassner-dashboard/Dockerfile").read_text())
+        self.assertIn("APP_VERSION = '1.6.3'", (ROOT / "hargassner-dashboard/house_rules.py").read_text())
         self.assertIn('const VERSION = "1.4.14";', (ROOT / "dist/hargassner-thermostat-popup.js").read_text())
 
     def test_repository_and_app_are_discoverable_independently_of_hacs(self):
@@ -98,7 +98,7 @@ class PackageTests(unittest.TestCase):
         self.assertTrue({"linux/amd64", "linux/arm64"}.issubset(platforms))
         self.assertEqual(re.findall(r"^COPY\s+(.*)$", dockerfile, re.M),
                          ["ingress_proxy.py app_monitor.py health_alerts.py run_app.py house_rules.py "
-                          "house_monitor.py ha_websocket.py room_picker.py LICENSE /app/"])
+                      "house_monitor.py ha_websocket.py room_picker.py operation_watchdog.py LICENSE /app/"])
         self.assertIn('io.hass.type="app"', dockerfile)
         self.assertIn('io.hass.arch="aarch64|amd64"', dockerfile)
         self.assertNotIn("BUILD_FROM", dockerfile)

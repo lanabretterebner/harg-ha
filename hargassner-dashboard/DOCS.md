@@ -593,3 +593,11 @@ Configuration tab, save and restart the app), then wait until the Betriebsüberw
 monitoring (a few minutes). Only then uninstall the app. If the app is removed
 while sensors are selected, the VM keeps the checks **Räume** and
 **Raumsensoren** at **Unbekannt**.
+
+## Independent Betriebsüberwachung (app 1.6.3)
+
+The app maintains the existing MQTT entity identity and device. It subscribes through HA Core to the default `homeassistant` operation discovery topic and the VM operation reports, and redirects only this entity to its own checked state topic. No controller or settings command is possible. The VM report topic remains untouched. The app needs Home Assistant MQTT to be running; no broker credentials are stored in the app.
+
+A live report is required for Normal. Retained reports cannot start or renew that state. Without a live report for 90 seconds the state is Störung, with a message that the VM/monitoring is unreachable and the actual heating state is unknown. When the optional VM-health monitor is enabled, a failed or stale heartbeat also overrides a recent VM report. Its healthy heartbeat alone cannot clear a missing report. Recovery requires a new live report. The app publishes its checked state without retention every 15 seconds; if the app or HA connection fails, HA marks the entity unavailable after 90 seconds. No old Normal can be replayed from this topic. The independently generated verdict requires installing app 1.6.3; source publication alone changes no installed entity.
+
+After VM/app restart, room evaluation waits for fresh context and an accepted current app report. Room selections remain in app options; dwell timers intentionally restart. Missing acknowledgement is not proof that the rooms are healthy.

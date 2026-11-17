@@ -249,13 +249,15 @@ class ContextSubscription:
     """
 
     def __init__(self, token, *, host='172.30.32.2', port=80, path='/core/websocket',
-                 connect=WebSocket.connect, monotonic=time.monotonic):
+                 connect=WebSocket.connect, monotonic=time.monotonic, topic=CONTEXT_TOPIC):
         self.token, self.host, self.port, self.path = token, host, port, path
         self.connect, self.monotonic = connect, monotonic
         self.socket = None
         self.next_id = 2
         self.ping_at = None
         self.pong_wait = None
+        self.topic = topic
+        self.pending = []
 
     def _expect(self, deadline):
         while True:
@@ -285,7 +287,8 @@ class ContextSubscription:
                 raise WebSocketError('auth_failed')
             if reply.get('type') != 'auth_ok':
                 raise WebSocketError('protocol')
-            self.socket.send_json({'id': 1, 'type': 'mqtt/subscribe', 'topic': CONTEXT_TOPIC})
+            self.pending = []
+            self.socket.send_json({'id': 1, 'type': 'mqtt/subscribe', 'topic': self.topic})
             while True:
                 reply = self._expect(deadline)
                 if reply.get('id') == 1 and reply.get('type') == 'result':
@@ -293,7 +296,10 @@ class ContextSubscription:
                         raise WebSocketError('subscribe_refused')
                     break
                 if reply.get('id') == 1 and reply.get('type') == 'event':
-                    continue  # an event can race the result; it is not lost later
+                    if len(self.pending) >= 64:
+                        raise WebSocketError('protocol')
+                    self.pending.append(reply)
+                    continue
                 raise WebSocketError('protocol')
             self.ping_at = self.monotonic() + PING_INTERVAL_S
             self.pong_wait = None
@@ -313,6 +319,11 @@ class ContextSubscription:
             self.socket.send_json({'id': identity, 'type': 'ping'})
             self.pong_wait = (identity, now + PONG_DEADLINE_S)
         messages = []
+        for message in self.pending:
+            event = message.get('event')
+            if isinstance(event, dict) and isinstance(event.get('topic'), str) and isinstance(event.get('payload'), str):
+                messages.append((event['topic'], event['payload'], event.get('retain') is True))
+        self.pending = []
         deadline = now + max(0.0, timeout)
         while True:
             text = self.socket.receive(max(0.0, deadline - self.monotonic()))

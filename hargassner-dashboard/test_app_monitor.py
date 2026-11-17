@@ -28,6 +28,16 @@ def report(now=NOW, certificate='healthy', telnet='healthy'):
 
 
 class MonitorTests(unittest.TestCase):
+    def test_operation_heartbeat_never_uses_stale_health_or_outbox_delivery(self):
+        self.assertEqual(self.monitor.operation_heartbeat()['status'], 'unknown')
+        self.monitor.poll_once()
+        self.assertEqual(self.monitor.operation_heartbeat()['status'], 'healthy')
+        self.tick += 90
+        self.assertEqual(self.monitor.operation_heartbeat()['status'], 'unknown')
+        self.fail_get = self.fail_post = True
+        self.monitor.poll_once()
+        self.assertEqual(self.monitor.operation_heartbeat()['status'], 'unknown')
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.root = Path(self.temp.name)
         self.options = self.root / 'options.json'
@@ -291,6 +301,11 @@ class MonitorTests(unittest.TestCase):
 
 
 class RunnerTests(unittest.TestCase):
+    def setUp(self):
+        self.watchdog = patch.object(run_app.OperationWatchdog, 'run', lambda _self, stop: stop.wait(1))
+        self.watchdog.start()
+        self.addCleanup(self.watchdog.stop)
+
     def test_disabled_proxy_shutdown_never_reads_supervisor_token_or_monitor_state(self):
         stop_server = threading.Event()
         class Server:
@@ -317,6 +332,7 @@ class RunnerTests(unittest.TestCase):
             def __init__(self, settings, token):
                 if token != SUPERVISOR: raise AssertionError('Wrong synthetic token')
             def status(self): return run_app.disabled_status()
+            def operation_heartbeat(self): return {'status': 'healthy'}
             def run(self, stop): stop.wait(1); monitor_stopped.set()
         enabled = m.MonitorSettings(True, m.Settings('dashboard.example', 443, 'dashboard.example', INGRESS), HEALTH)
         def install(_name, callback): threading.Timer(.03, callback).start()
