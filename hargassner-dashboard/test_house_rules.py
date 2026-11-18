@@ -7,6 +7,18 @@ from house_test_support import Harness, circuit, context_document
 
 A, B, C, D = 'sensor.wohnzimmer', 'sensor.kueche', 'sensor.keller', 'sensor.bad'
 SETTLE = {'radiator': 120, 'floor': 480}
+COLD_SETTLE = {'radiator': 120, 'floor': 240}   # floor room_cold: day phase, cold_settle 4 h
+PERSIST = r.ROOM_COLD_PERSIST_S // 60   # a cold occasion becomes room_cold 12 h later
+
+
+def first_dwell(h, entity, limit):
+    """Minutes until the room_cold dwell (one cold occasion) completes, or None."""
+    for minute in range(1, limit + 1):
+        h.step()
+        dwell = h.engine.cold_dwell.get(entity)
+        if dwell is not None and dwell.active:
+            return minute
+    return None
 
 
 def hc1(*entities, **extra):
@@ -18,19 +30,21 @@ def hc2(*entities, **extra):
 
 
 class RoomColdTests(unittest.TestCase):
-    def test_room_cold_fires_exactly_after_settle_and_dwell_per_type(self):
+    def test_room_cold_fires_exactly_after_settle_dwell_and_persistence_per_type(self):
         for kind, options, dwell in (('radiator', hc1(A), 90), ('floor', hc2(A), 240)):
             with self.subTest(kind=kind):
                 h = Harness(options, values={A: 19.0})
+                self.assertEqual(first_dwell(h, A, 2000), 1 + COLD_SETTLE[kind] + dwell)
+                self.assertFalse(h.has('room_cold'))
                 minute = h.first('room_cold', 2000)
-                self.assertEqual(minute, 1 + SETTLE[kind] + dwell)
+                self.assertEqual(minute, PERSIST)
                 row = h.rows('room_cold')[0]
                 self.assertEqual((row['level'], row['room'], row['target'], row['label']), ('Hinweis', 19.0, 21.0, 'Sensor 1'))
                 self.assertEqual(row['circuit'], 'hc1' if kind == 'radiator' else 'hc2')
 
     def test_normal_and_short_deficits_stay_quiet(self):
         h = Harness(hc1(A), values={A: 19.6})  # D = 1.4 < 1.5
-        h.run(600)
+        h.run(1200)
         self.assertNotIn('room_cold', h.codes())
         h = Harness(hc1(A), values={A: 20.8})
         h.run(130)
@@ -40,24 +54,54 @@ class RoomColdTests(unittest.TestCase):
         h.run(200)
         self.assertNotIn('room_cold', h.codes())
 
+    def test_a_cold_afternoon_that_ends_at_the_day_level_is_forgotten(self):
+        # A valve turned down for 6 h: one cold occasion, then the room is back
+        # within 1 K of its day target. A second cold afternoon starts afresh.
+        h = Harness(hc1(A), values={A: 21.0})
+        h.run(130)
+        for _day in range(2):
+            for minute in range(1, 61):  # slowly, no airing signature
+                h.values[A] = round(21.0 - minute / 30, 2)
+                h.step()
+            self.assertIsNotNone(first_dwell(h, A, 120))
+            h.run(240)
+            h.values[A] = 20.6
+            h.run(20)
+            self.assertNotIn(A, h.engine.cold_since)
+            h.run(600)
+        self.assertNotIn('room_cold', {code for code in h.codes()})
+
+    def test_a_room_that_warms_is_not_staying_cold(self):
+        # 4 K below, but warming 0.4 K/h (a slow recovery): no occasion.
+        h = Harness(hc1(A), values={A: 17.0})
+        h.run(121)
+        for minute in range(300):
+            h.values[A] = round(17.0 + 0.4 * minute / 60, 2)
+            h.step()
+            self.assertFalse(h.engine.cold_dwell[A].active, minute)
+        # It stops warming 1.5 K or more below: the dwell runs once the trend is flat.
+        minute = first_dwell(h, A, 300)
+        self.assertTrue(90 < minute <= 90 + 60, minute)
+
     def test_hysteresis_and_clear(self):
         h = Harness(hc1(A), values={A: 19.0})
-        h.run(211)
+        h.run(211 + PERSIST)
         self.assertTrue(h.has('room_cold'))
         h.values[A] = 19.8           # D = 1.2: keeps the finding
         h.run(20)
         self.assertTrue(h.has('room_cold'))
         self.assertEqual(h.rows('room_cold')[0]['room'], 19.0)  # onset frozen
-        h.values[A] = 20.2           # D = 0.8 clears
+        h.values[A] = 20.2           # D = 0.8: back at the day level, clears
         h.run(16)
         self.assertFalse(h.has('room_cold'))
+        self.assertNotIn(A, h.engine.cold_since)
 
     def test_cooler_rooms_get_two_kelvin(self):
         h = Harness(hc1(A, kuehlere_raeume=[A]), values={A: 18.0})   # D = 21-2-18 = 1.0
-        h.run(400)
+        h.run(400 + PERSIST)
         self.assertNotIn('room_cold', h.codes())
         h = Harness(hc1(A, kuehlere_raeume=[A]), values={A: 17.5})   # D = 1.5
-        self.assertIsNotNone(h.first('room_cold', 400))
+        self.assertIsNotNone(h.first('room_cold', 400 + PERSIST))
         self.assertEqual(h.rows('room_cold')[0]['target'], 21.0)
 
     def test_settle_restarts_on_target_phase_and_mode_change(self):
@@ -65,12 +109,37 @@ class RoomColdTests(unittest.TestCase):
         h.run(200)
         h.set_circuit('hc1', target=21.5)  # a correction tap restarts settle
         h.run(200)
-        self.assertNotIn('room_cold', h.codes())
-        self.assertIsNotNone(h.first('room_cold', 30))
+        self.assertFalse(h.engine.cold_dwell[A].active)
+        self.assertIsNotNone(first_dwell(h, A, 30))
         h = Harness(hc1(A), values={A: 19.0})
         h.run(200)
         h.set_circuit('hc1', mode='day')
-        self.assertEqual(h.first('room_cold', 400), SETTLE['radiator'] + 90 + 1)
+        self.assertEqual(first_dwell(h, A, 400), SETTLE['radiator'] + 90 + 1)
+
+    def test_room_cold_lasts_across_a_night_off(self):
+        # Nights with the heating limit switching the circuit off (status 4):
+        # the finding stays, it is not new every morning.
+        h = Harness(hc1(A), values={A: 17.0})
+        self.assertIsNotNone(h.first('room_cold', 211 + PERSIST))
+        for _night in range(2):
+            h.set_circuit('hc1', phase='setback', target=17.0, status=4)
+            h.run(8 * 60)
+            h.set_circuit('hc1', phase='day', target=21.0, status=1)
+            held = h.rows('room_cold')[0]['held_s']
+            h.run(4 * 60)
+            self.assertEqual(h.rows('room_cold')[0]['held_s'], held + 4 * 3600)
+
+    def test_room_cold_lasts_across_the_settle_of_a_phase_change(self):
+        # A dead radiator: the finding stays through the 22:00 setback and the
+        # next morning's settle (no new notice every day).
+        h = Harness(hc1(A), values={A: 17.0})
+        self.assertIsNotNone(h.first('room_cold', 211 + PERSIST))
+        h.set_circuit('hc1', phase='setback', target=17.0, status=3)
+        h.run(8 * 60)
+        h.set_circuit('hc1', phase='day', target=21.0, status=1)
+        held = h.rows('room_cold')[0]['held_s']
+        h.run(4 * 60)
+        self.assertEqual(h.rows('room_cold')[0]['held_s'], held + 4 * 3600)
 
     def test_status_class_table(self):
         # 2 Absenken Rampe pauses: the timer neither resets nor counts.
@@ -78,9 +147,9 @@ class RoomColdTests(unittest.TestCase):
         h.run(121 + 60)
         h.set_circuit('hc1', status=2)
         h.run(60)
-        self.assertNotIn('room_cold', h.codes())
+        self.assertFalse(h.engine.cold_dwell[A].active)
         h.set_circuit('hc1', status=1)
-        self.assertEqual(h.first('room_cold', 60), 30)
+        self.assertEqual(first_dwell(h, A, 60), 30)
         # 4/5 heating limit and 0/6-10 inactive reset the cold rule.
         for status in (4, 5, 0, 6, 7, 8, 9, 10):
             with self.subTest(status=status):
@@ -89,7 +158,7 @@ class RoomColdTests(unittest.TestCase):
                 h.set_circuit('hc1', status=status)
                 h.run(5)
                 h.set_circuit('hc1', status=1)
-                self.assertEqual(h.first('room_cold', 400), 90 + 1, status)
+                self.assertEqual(first_dwell(h, A, 400), 90 + 1, status)
         for status in (None, 11, 99):
             with self.subTest(status=status):
                 h = Harness(hc1(A), values={A: 19.0})
@@ -108,17 +177,41 @@ class RoomColdTests(unittest.TestCase):
         self.assertEqual((report['judged'], report['why']), ('unknown', 'phase'))
         self.assertGreater(h.engine.basis_unknown_minutes(h.now)['hc1']['24h'], 500)
 
-    def test_airing_pauses_cold_and_response(self):
+    def test_airing_pauses_cold_until_the_room_is_back(self):
         h = Harness(hc1(A), values={A: 20.8})
         h.run(130)
         h.values[A] = 19.6
         h.step()
         self.assertTrue(h.engine.sensors[A].airing(h.now, 3600))
-        h.values[A] = 19.0           # stays cold, but the airing pause holds
-        # The last drop is the last update within 15 min of the 20.8 before the
-        # window opened (14 min later); the pause ends 60 min after it.
-        minute = h.first('room_cold', 400)
-        self.assertEqual(minute, 14 + 60 + 90)
+        h.values[A] = 19.0           # stays cold (a window left open): the episode holds
+        # The episode ends AIRING_MAX_S after its first drop; only then does the
+        # cold dwell start, and the finding needs its 12 h on top.
+        self.assertEqual(first_dwell(h, A, 2000), r.AIRING_MAX_S // 60 + 90)
+        self.assertIsNone(h.engine.sensors[A].airing_start)
+        # Airing that ends: back within 0.5 K of the level before, the episode is over.
+        h = Harness(hc1(A), values={A: 20.8})
+        h.run(130)
+        h.values[A] = 18.5
+        h.step()
+        h.run(70)
+        self.assertIsNotNone(h.engine.sensors[A].airing_start)
+        h.values[A] = 20.4
+        h.run(15)
+        self.assertIsNone(h.engine.sensors[A].airing_start)
+        self.assertFalse(h.engine.sensors[A].airing_episode(h.now, 3600, False))
+
+    def test_circuit_cold_waits_while_rooms_warm(self):
+        # Back from a holiday: every room 4 K below and warming 0.5 K/h. No
+        # Störung while they warm; it fires once they stop 3 K below.
+        h = Harness(hc1(A, B), values={A: 15.0, B: 15.0})
+        h.run(121)
+        for minute in range(240):
+            h.values[A] = h.values[B] = round(15.0 + 0.5 * minute / 60, 2)
+            h.step()
+            self.assertFalse(h.has('circuit_cold'), minute)
+        # Stuck 4 K below: the Störung follows its 3 h once the trend is flat.
+        minute = h.first('circuit_cold', 300)
+        self.assertTrue(180 < minute <= 180 + 60, minute)
 
     def test_circuit_cold_needs_all_usable_sensors(self):
         h = Harness(hc1(A, B), values={A: 17.5, B: 17.8})
@@ -130,20 +223,122 @@ class RoomColdTests(unittest.TestCase):
         h.run(16)
         self.assertFalse(h.has('circuit_cold'))
         h = Harness(hc1(A, B), values={A: 17.5, B: 19.0})
-        h.run(700)
+        h.run(700 + PERSIST)
         self.assertFalse(h.has('circuit_cold'))
         self.assertTrue(h.has('room_cold'))
         h = Harness(hc2(A, B), values={A: 17.5, B: 17.0})
-        self.assertEqual(h.first('circuit_cold', 2000), 1 + 480 + 480)
+        self.assertEqual(h.first('circuit_cold', 2000), 1 + 240 + 180)  # underfloor: 4 h heat-up, 3 h
+
+
+class FloorDailyProgrammeTests(unittest.TestCase):
+    """Underfloor circuit_cold with a split daily programme (owner decision 2026-11-18):
+    day 06:00-09:00 and 15:00-23:00, setback between. Judged only in a day phase,
+    against the day target, after 4 h of heat-up, for 3 h (TYPE_CONSTANTS)."""
+
+    PROGRAMME = ((6 * 60, 'day', 21.0), (9 * 60, 'setback', 18.0), (15 * 60, 'day', 21.0), (23 * 60, 'setback', 18.0))
+
+    def phase_at(self, minute):
+        phase = self.PROGRAMME[-1]
+        for start, name, target in self.PROGRAMME:
+            if minute >= start:
+                phase = (start, name, target)
+        return phase[1], phase[2]
+
+    def run_days(self, h, days, temperature=None):
+        """Minute by minute from 00:00; returns {(day, minute): codes}."""
+        seen = {}
+        for day in range(days):
+            for minute in range(24 * 60):
+                phase, target = self.phase_at(minute)
+                if h.context['circuits']['hc2']['phase'] != phase:
+                    h.set_circuit('hc2', phase=phase, target=target)
+                if temperature is not None:
+                    for entity, value in temperature(day, minute, phase).items():
+                        h.values[entity] = value
+                h.step()
+                seen[(day, minute)] = set(h.codes())
+        return seen
+
+    def harness(self, value):
+        h = Harness(hc2(A, B), local_minute=0, values={A: value, B: value})
+        h.set_circuit('hc2', phase='setback', target=18.0, day_target=21.0)
+        return h
+
+    def test_fires_within_the_evening_phase_when_the_rooms_stay_cold(self):
+        h = self.harness(17.0)                       # 4 K below the day target all day
+        seen = self.run_days(h, 3)
+        first = min(key for key, codes in seen.items() if 'circuit_cold' in codes)
+        # Day 1 evening: 15:00 + 4 h heat-up + 3 h = 22:00 (the first 15:00 phase start
+        # is the first known one, so the very first evening may also be day 1).
+        self.assertLessEqual(first[0], 1)
+        self.assertTrue(15 * 60 <= first[1] < 23 * 60, first)
+        # Once active it holds through setback and the next heat-up: no nightly end and return.
+        later = [codes for key, codes in seen.items() if key > first]
+        self.assertTrue(all('circuit_cold' in codes for codes in later))
+
+    def test_normal_heat_up_after_setback_never_fires(self):
+        def curve(day, minute, phase):
+            # Setback 18 °C; in the evening the floor brings the rooms up 0.5 K/h from 15:00.
+            if phase == 'day' and minute >= 15 * 60:
+                value = min(21.0, 18.0 + 0.5 * (minute - 15 * 60) / 60)
+            elif phase == 'day':
+                value = min(21.0, 18.0 + 0.5 * (minute - 6 * 60) / 60)
+            else:
+                value = 18.0
+            return {A: value, B: value}
+        seen = self.run_days(self.harness(18.0), 3, curve)
+        self.assertFalse(any('circuit_cold' in codes for codes in seen.values()))
+
+    def test_never_judged_during_setback(self):
+        h = self.harness(14.0)                      # 4 K below even the setback target
+        h.set_circuit('hc2', phase='setback', target=18.0)
+        h.run(20 * 60)
+        self.assertFalse(h.has('circuit_cold'))
+
+    def test_cold_only_in_the_morning_window_never_fires(self):
+        def morning_cold(day, minute, phase):
+            value = 17.0 if 6 * 60 <= minute < 9 * 60 else 20.8 if phase == 'day' else 18.0
+            return {A: value, B: value}
+        seen = self.run_days(self.harness(18.0), 3, morning_cold)
+        self.assertFalse(any('circuit_cold' in codes for codes in seen.values()))
+
+    def test_cleared_when_the_next_evening_is_warm(self):
+        def recovers(day, minute, phase):
+            value = 17.0 if day == 0 else (20.8 if phase == 'day' else 18.0)
+            return {A: value, B: value}
+        seen = self.run_days(self.harness(17.0), 3, recovers)
+        self.assertTrue(any('circuit_cold' in codes for (day, _m), codes in seen.items() if day == 0))
+        self.assertFalse(seen[(2, 23 * 60 - 1)] & {'circuit_cold'})
+
+
+WINDOW = {'radiator': 60, 'floor': 360}
+
+
+def setback(h, name, kind='radiator'):
+    h.set_circuit(name, phase='setback', target=18.0, status=3, type=kind)
+
+
+def day(h, name, kind='radiator', **extra):
+    h.set_circuit(name, phase='day', target=21.0, status=1, type=kind, **extra)
+
+
+def flat(h, minutes, levels):
+    """Run with rooms flat at `levels` (entity -> °C) plus a real sensor's 0.1 K jitter."""
+    for _ in range(minutes):
+        for entity, level in levels.items():
+            h.values[entity] = round(level + (0.1 if h.steps % 2 else 0.0), 1)
+        h.step()
 
 
 class ResponseTests(unittest.TestCase):
-    def heat_up(self, options, kind='radiator', rise_per_hour=0.0, values=None, **day):
+    """no_response: failed heating starts on three days; circuit_no_response: on two."""
+
+    def heat_up(self, options, kind='radiator', rise_per_hour=0.0, values=None, **day_values):
         circuit_name = 'hc1' if 'heizkreis_1_sensoren' in options else 'hc2'
         h = Harness(options, values=values or {A: 18.5, B: 18.5})
-        h.set_circuit(circuit_name, phase='setback', target=18.0, status=3, type=kind)
+        setback(h, circuit_name, kind)
         h.run(30)
-        h.set_circuit(circuit_name, phase='day', target=21.0, status=1, **day)
+        day(h, circuit_name, kind, **day_values)
         start = dict(h.values)
         minutes = 0
 
@@ -156,19 +351,55 @@ class ResponseTests(unittest.TestCase):
             return False
         return h, advance
 
-    def test_no_response_fires_at_window_end_not_earlier(self):
-        for kind, window in (('radiator', 60), ('floor', 360)):
+    def failing_days(self, h, name, kind, days, levels, check=None, fresh=True):
+        """Daily starts (8 h setback, then the day phase) with rooms flat at
+        `levels`. check(number, end) runs just before and at each window end;
+        returns at the last day's window end. fresh=False continues a day."""
+        window = WINDOW[kind]
+        if fresh:
+            setback(h, name, kind)
+            flat(h, 30, levels)
+        for number in range(1, days + 1):
+            if number > 1 or not fresh:
+                flat(h, 16 * 60 - window, levels)
+                setback(h, name, kind)
+                flat(h, 8 * 60, levels)
+            day(h, name, kind)
+            flat(h, window - 1, levels)
+            if check:
+                check(number, False)
+            flat(h, 1, levels)
+            if check:
+                check(number, True)
+
+    def test_no_response_needs_failed_starts_on_three_days(self):
+        for kind in ('radiator', 'floor'):
             with self.subTest(kind=kind):
-                options = hc1(A, B) if kind == 'radiator' else hc2(A, B)
-                h, _advance = self.heat_up(options, kind)
-                h.run(window - 1)
-                self.assertNotIn('no_response', h.codes())
-                h.step()
-                self.assertEqual(len(h.rows('no_response')), 2)
-                circuit_rows = h.rows('circuit_no_response')
-                self.assertEqual(len(circuit_rows), 1)
-                self.assertEqual((circuit_rows[0]['level'], circuit_rows[0]['count']), ('Störung', 2))
-                self.assertIsNone(h.rows('no_response')[0]['room'])
+                options, name = (hc1(A, B), 'hc1') if kind == 'radiator' else (hc2(A, B), 'hc2')
+                h = Harness(options, values={A: 18.5, B: 18.5})
+                onsets = []
+
+                def check(number, end):
+                    if not end:
+                        self.assertNotIn('no_response', h.codes())
+                        if number < 3:
+                            self.assertNotIn('circuit_no_response', h.codes())
+                        return
+                    self.assertEqual(len(h.engine.response_fails[A]), number)
+                    if number == 1:
+                        self.assertFalse(h.codes() & {'no_response', 'circuit_no_response'})
+                    if number >= 2:
+                        row = h.rows('circuit_no_response')[0]
+                        self.assertEqual((row['level'], row['count'], row['circuit']), ('Störung', 2, name))
+                        onsets.append(h.now - row['held_s'])
+                    if number == 2:
+                        self.assertNotIn('no_response', h.codes())
+                    if number == 3:
+                        rows = h.rows('no_response')
+                        self.assertEqual(len(rows), 2)
+                        self.assertEqual((rows[0]['level'], rows[0]['room'], rows[0]['held_s']), ('Hinweis', None, 0))
+                self.failing_days(h, name, kind, 3, {A: 18.5, B: 18.5}, check)
+                self.assertEqual(onsets[0], onsets[1])   # the Störung lasted from day 2 to day 3
 
     def test_normal_heat_up_is_quiet(self):
         for kind, rise in (('radiator', 1.2), ('floor', 0.4)):
@@ -177,82 +408,157 @@ class ResponseTests(unittest.TestCase):
                 h, advance = self.heat_up(options, kind, rise)
                 h.run(400, until=advance)
                 self.assertFalse(h.codes() & {'no_response', 'circuit_no_response'})
+                self.assertFalse(h.engine.response_fails.get(A))
 
     def test_pump_off_or_cold_flow_disarms(self):
-        h, _ = self.heat_up(hc1(A), pump=False)
-        h.run(120)
-        self.assertNotIn('no_response', h.codes())
-        h, _ = self.heat_up(hc1(A), flow=25.0)   # flow < R + 8
-        h.run(120)
-        self.assertNotIn('no_response', h.codes())
-        h, _ = self.heat_up(hc1(A), pump=None)   # unknown pump pauses, never fires
+        for extra in ({'pump': False}, {'flow': 25.0}):   # flow < R + 8
+            with self.subTest(extra=extra):
+                h, _ = self.heat_up(hc1(A), **extra)
+                h.run(120)
+                self.assertNotIn(A, h.engine.windows)
+                self.assertFalse(h.engine.response_fails.get(A))
+        h, _ = self.heat_up(hc1(A), pump=None)   # unknown pump pauses, never judges
         h.run(100)
-        self.assertNotIn('no_response', h.codes())
+        self.assertIn(A, h.engine.windows)
+        self.assertFalse(h.engine.response_fails.get(A))
 
-    def test_small_deficit_is_not_armed(self):
-        h, _ = self.heat_up(hc1(A), values={A: 20.2})
-        h.run(120)
-        self.assertNotIn('no_response', h.codes())
+    def test_a_room_near_its_target_is_not_judged(self):
+        for value in (20.2, 19.6):        # 0.8 and 1.4 K below: below ARM_DEFICIT
+            with self.subTest(value=value):
+                h, _ = self.heat_up(hc1(A), values={A: value})
+                h.step()
+                self.assertNotIn(A, h.engine.windows)
+                h.run(120)
+                self.assertFalse(h.engine.response_fails.get(A))
 
     def test_min_rise_follows_sensor_resolution(self):
         def coarse(rise):
             h = Harness(hc1(A), values={A: 18.0})
-            h.set_circuit('hc1', phase='setback', target=18.0, status=3)
+            setback(h, 'hc1')
             for index in range(30):        # learn a 0.5 K step
                 h.values[A] = 18.0 if index % 2 else 18.5
                 h.step()
             self.assertEqual(h.engine.sensors[A].step_size(), 0.5)
             h.values[A] = 18.5
             h.run(20)
-            h.set_circuit('hc1', phase='day', target=21.0, status=1)
+            day(h, 'hc1')
             h.run(30)
             h.values[A] = 18.5 + rise
             h.run(31)
-            return h.codes()
-        self.assertIn('no_response', coarse(0.5))      # 0.5 < 0.75
-        self.assertNotIn('no_response', coarse(1.0))
+            self.assertNotIn(A, h.engine.windows)
+            return len(h.engine.response_fails[A])
+        self.assertEqual(coarse(0.5), 1)    # 0.5 < 0.75: a failed start
+        self.assertEqual(coarse(1.0), 0)    # warmed
 
-    def test_no_response_clears_and_expires(self):
-        h, _ = self.heat_up(hc1(A))
-        h.run(60)
-        self.assertTrue(h.has('no_response'))
-        h.values[A] = 20.5             # D < 1.0
-        h.run(16)
-        self.assertFalse(h.has('no_response'))
-        h, _ = self.heat_up(hc1(A))
-        h.run(60)
-        self.assertTrue(h.has('no_response'))
-        h.set_circuit('hc1', status=0)  # nothing else clears it
-        h.run(24 * 60 - 61)
-        self.assertTrue(h.has('no_response'))
-        h.run(2)
-        self.assertFalse(h.has('no_response'))
+    def test_airing_in_the_window_cancels_the_start(self):
+        # The bedroom is aired at every start: no start counts, nothing fires.
+        h = Harness(hc1(A, B), values={A: 18.5, B: 18.5})
+        setback(h, 'hc1')
+        flat(h, 30, {A: 18.5, B: 18.5})
+        for _day in range(4):
+            day(h, 'hc1')
+            flat(h, 20, {A: 18.5, B: 18.5})
+            self.assertIn(A, h.engine.windows)
+            flat(h, 1, {A: 16.5, B: 18.5})      # a fast drop of 2 K
+            self.assertNotIn(A, h.engine.windows)
+            flat(h, 60, {A: 16.5, B: 18.5})
+            flat(h, 16 * 60 - 81, {A: 18.5, B: 18.5})
+            setback(h, 'hc1')
+            flat(h, 8 * 60, {A: 18.5, B: 18.5})
+        self.assertFalse(h.engine.response_fails.get(A))
+        self.assertEqual(len(h.engine.response_fails[B]), 4)
+        self.assertEqual(len(h.rows('no_response')), 1)            # B, the flat room
+        self.assertNotIn('circuit_no_response', h.codes())          # one failing room is not the circuit
 
-    def test_later_trigger_with_a_rise_clears(self):
-        h, _ = self.heat_up(hc1(A))
-        h.run(60)
-        self.assertTrue(h.has('no_response'))
-        h.set_circuit('hc1', target=22.0)          # trigger (b): +1.0 K
-        for minute in range(60):
-            h.values[A] = round(18.5 + minute / 60, 2)
+    def test_a_start_not_judged_does_not_reset_the_pattern(self):
+        # Fails on days 1 and 2; day 3 the room starts near its target (not
+        # judged); day 4 fails again: the third failed day, within 4 days.
+        h = Harness(hc1(A), values={A: 18.5})
+        self.failing_days(h, 'hc1', 'radiator', 2, {A: 18.5})
+        self.failing_days(h, 'hc1', 'radiator', 1, {A: 19.6}, fresh=False)
+        self.assertEqual(len(h.engine.response_fails[A]), 2)
+        self.assertFalse(h.has('no_response'))
+        for minute in range(16 * 60):           # back down slowly, no airing signature
+            h.values[A] = round(19.6 - 1.1 * minute / (16 * 60), 2)
             h.step()
-        h.step()
+        setback(h, 'hc1')
+        flat(h, 8 * 60, {A: 18.5})
+        day(h, 'hc1')
+        flat(h, 60, {A: 18.5})
+        self.assertEqual(len(h.engine.response_fails[A]), 3)
+        self.assertTrue(h.has('no_response'))
+
+    def test_no_response_clears_at_the_day_level_and_expires(self):
+        h = Harness(hc1(A), values={A: 18.5})
+        self.failing_days(h, 'hc1', 'radiator', 3, {A: 18.5})
+        self.assertTrue(h.has('no_response'))
+        flat(h, 16, {A: 20.5})         # within 1 K of the day target
         self.assertFalse(h.has('no_response'))
+        self.assertNotIn(A, h.engine.response_fails)   # the count starts again
+        h = Harness(hc1(A), values={A: 18.5})
+        self.failing_days(h, 'hc1', 'radiator', 3, {A: 18.5})
+        self.assertTrue(h.has('no_response'))
+        # Its window started 59 min before it ended; nothing else ends the
+        # finding before 48 h after that start.
+        h.set_circuit('hc1', status=0)
+        flat(h, 47 * 60, {A: 18.5})
+        self.assertTrue(h.has('no_response'))
+        flat(h, 1, {A: 18.5})
+        self.assertFalse(h.has('no_response'))
+
+    def test_a_later_start_with_a_rise_clears(self):
+        h = Harness(hc1(A, B), values={A: 18.5, B: 18.5})
+        self.failing_days(h, 'hc1', 'radiator', 3, {A: 18.5, B: 18.5})
+        self.assertTrue(h.has('no_response') and h.has('circuit_no_response'))
+        flat(h, 16 * 60 - 60, {A: 18.5, B: 18.5})
+        setback(h, 'hc1')
+        flat(h, 8 * 60, {A: 18.5, B: 18.5})
+        day(h, 'hc1')
+        for minute in range(60):
+            flat(h, 1, {A: 18.5 + minute / 60, B: 18.5})
+        self.assertEqual([row['label'] for row in h.rows('no_response')], [h.engine.labels[B]])
+        self.assertEqual(h.engine.response_fails[A], [])
+        self.assertNotIn('circuit_no_response', h.codes())       # a room warmed: the circuit works
+
+    def test_a_room_that_reaches_its_day_level_each_day_never_reports(self):
+        # A door open every morning (or a slow start): flat for the hour after
+        # the start, at the day level by noon. Each day forgets the failure.
+        h = Harness(hc1(A, B), values={A: 18.5, B: 18.5})
+        setback(h, 'hc1')
+        flat(h, 30, {A: 18.5, B: 18.5})
+        for _day in range(5):
+            day(h, 'hc1')
+            flat(h, 61, {A: 18.5, B: 18.5})
+            self.assertEqual(len(h.engine.response_fails[A]), 1)
+            for minute in range(180):
+                level = 18.5 + 2.2 * minute / 180
+                flat(h, 1, {A: level, B: level})
+            flat(h, 16 * 60 - 241, {A: 20.7, B: 20.7})
+            self.assertNotIn(A, h.engine.response_fails)
+            for minute in range(8 * 60):
+                level = 20.7 - 2.2 * minute / (8 * 60)
+                if minute == 0:
+                    setback(h, 'hc1')
+                flat(h, 1, {A: level, B: level})
+        self.assertFalse(h.codes() & {'no_response', 'circuit_no_response', 'room_cold'})
 
     def test_trigger_after_an_hour_without_supplying(self):
         h = Harness(hc1(A), values={A: 18.5})
         h.set_circuit('hc1', status=4)
         h.run(90)
         h.set_circuit('hc1', status=1)
-        h.run(61)
-        self.assertTrue(h.has('no_response'))
+        h.step()
+        self.assertIn(A, h.engine.windows)
+        h.run(60)
+        self.assertEqual(len(h.engine.response_fails[A]), 1)
         h = Harness(hc1(A), values={A: 18.5})   # 30 min off: no trigger
         h.run(20)
         h.set_circuit('hc1', status=4)
         h.run(30)
         h.set_circuit('hc1', status=1)
         h.run(61)
-        self.assertFalse(h.has('no_response'))
+        self.assertNotIn(A, h.engine.windows)
+        self.assertFalse(h.engine.response_fails.get(A))
 
 
 class WarmTests(unittest.TestCase):
@@ -387,6 +693,27 @@ class SensorHealthTests(unittest.TestCase):
         h.values[A] = 'garbage'
         self.assertEqual(h.first('sensor_unavailable', 60), 31)
 
+    def test_a_failed_read_never_completes_the_dwell(self):
+        """HA-app review: a pause passed dwell 0, so one failed read turned a running
+        timer into an immediate finding."""
+        for pause in ('not_read', 'ha_unavailable'):
+            h = Harness(hc1(A), values={A: 'unavailable'})
+            h.run(5)
+            if pause == 'not_read':
+                h.values[A] = None          # this cycle's read failed
+            else:
+                h.ha = 'unavailable'        # Home Assistant not running: every timer pauses
+            h.step()
+            self.assertFalse(h.has('sensor_unavailable'), pause)
+            h.values[A], h.ha = 'unavailable', 'running'
+            minute = h.first('sensor_unavailable', 60)
+            self.assertGreaterEqual(minute, 24, pause)  # the full 30 min of dwell, counted only while unavailable
+        h = Harness(hc1(A), values={A: 'missing'})
+        h.run(5)
+        h.values[A] = None
+        h.step()
+        self.assertFalse(h.has('sensor_missing'))
+
     def test_stale_and_on_change_sensor(self):
         h = Harness(hc1(A), values={A: 21.0})
         h.reporting[A] = 12 * 60        # Shelly H&T style: up to 12 h between reports
@@ -427,17 +754,23 @@ class SensorHealthTests(unittest.TestCase):
         h.run(120)
         h.values[A] = 0.0               # an HA restart start value
         h.step()
-        self.assertTrue(h.has('sensor_jumping'))
         self.assertEqual(h.engine.sensors[A].unusable_reason(h.now), 'step')
         h.values[A] = 21.0
         h.step()                         # back again is a second step
         self.assertFalse(h.engine.sensors[A].usable(h.now))
         h.run(30)
         self.assertTrue(h.engine.sensors[A].usable(h.now))
+        # One restart (two steps) is not a jumping sensor; a third jump within 24 h is.
+        self.assertNotIn('sensor_jumping', h.codes())
+        h.run(60)
+        h.values[A] = 10.0
+        h.step()
         self.assertTrue(h.has('sensor_jumping'))
-        h.run(24 * 60 - 32)
+        h.values[A] = 21.0
+        h.step()                         # the fourth, which the finding lasts 24 h from
+        h.run(24 * 60 - 1)
         self.assertTrue(h.has('sensor_jumping'))
-        h.run(2)
+        h.step()
         self.assertFalse(h.has('sensor_jumping'))
         self.assertFalse(h.codes() & {code for code, (check, _l) in r.CODES.items() if check == 'Räume'})
 
@@ -466,6 +799,67 @@ class SensorHealthTests(unittest.TestCase):
         h.run(17)
         self.assertEqual(h.engine.sensors[A].value(h.now), 17.0)
         self.assertNotIn('sensor_jumping', h.codes())
+
+    def test_a_sparse_sensor_at_an_open_window_is_not_jumping(self):
+        # A sensor reporting every 10 min shows each airing as one 4 K dip that
+        # is back 10 min later: discarded as a value, never counted as a jump.
+        h = Harness(hc1(A), values={A: 21.0})
+        h.reporting[A] = 60
+        h.run(10)
+        for _ in range(5):
+            h.values[A] = 17.0
+            h.run(10)
+            h.values[A] = 20.8
+            h.run(100)
+        self.assertEqual(len(h.engine.sensors[A].spikes), 0)
+        self.assertNotIn('sensor_jumping', h.codes())
+
+    def test_an_on_change_sensor_that_changes_once_by_3_k(self):
+        # Reports only on change: 21.0, then 17.5 once and nothing for 20 min.
+        # The held-back value is taken after 15 min; nothing breaks (frost included).
+        h = Harness({'heizkreis_1_sensoren': [A], 'haus_sensoren': [C], 'haus_frost_sensoren': [C]},
+                    values={A: 21.0, C: 8.0})
+        h.reporting[A] = 60
+        h.run(10)
+        h.values[A] = 17.5
+        h.run(20)
+        self.assertEqual(h.engine.sensors[A].last_accepted, 17.5)
+        h.values[A] = 'unavailable'
+        h.values[C] = 4.0
+        self.assertIsNotNone(h.first('room_frost', 30))
+        h = Harness(hc1(A), values={A: 21.0})
+        h.reporting[A] = 60
+        h.run(10)
+        h.values[A] = 17.5
+        h.run(1)
+        h.values[A] = 'unavailable'
+        h.run(30)
+        self.assertEqual(h.engine.sensors[A].last_accepted, 17.5)
+
+    def test_glitches_of_an_on_change_sensor_count(self):
+        # Silent for 50 min, then +5 K for one minute and back: a glitch, three times.
+        h = Harness(hc1(A), values={A: 21.0})
+        h.reporting[A] = 60
+        h.run(5)
+        for _ in range(3):
+            h.run(50)
+            h.values[A] = 26.0
+            h.step()
+            h.values[A] = 21.0
+            h.step()
+        self.assertTrue(h.has('sensor_jumping'))
+
+    def test_trend_of_an_on_change_sensor(self):
+        # Reports every 10 min (on change): the trend still sees it warming.
+        h = Harness(hc1(A), values={A: 17.0})
+        h.reporting[A] = 60
+        for minute in range(240):
+            if minute % 10 == 0:
+                h.values[A] = round(17.0 + 0.6 * minute / 60, 1)
+            h.step()
+        sensor = h.engine.sensors[A]
+        self.assertGreaterEqual(sensor.trend(h.now, 3600), 0.5)
+        self.assertIsNone(r.Sensor('sensor.x', 'hc1', 1).trend(h.now, 3600))
 
     def test_stuck_only_for_fine_sensors(self):
         h = Harness(hc1(A), values={A: 21.0})
@@ -541,31 +935,32 @@ class CircuitTypeTests(unittest.TestCase):
         h.run(200)                      # 79 of 90 cold minutes
         h.set_circuit('hc1', type=None)
         h.run(100)
-        self.assertNotIn('room_cold', h.codes())
+        self.assertFalse(h.engine.cold_dwell[A].active)
         self.assertEqual(h.engine.circuits_report()['hc1']['why'], 'type')
         h.set_circuit('hc1', type='radiator')
-        self.assertEqual(h.first('room_cold', 30), 11)   # paused, not reset
+        self.assertEqual(first_dwell(h, A, 30), 11)   # paused, not reset
         h = Harness(hc1(A, heizkreis_1_art='fussboden'), values={A: 19.0})
         report = h.engine.circuits_report()
         h.step()
         report = h.engine.circuits_report()['hc1']
         self.assertEqual((report['type'], report['type_source']), ('floor', 'option'))
-        self.assertIsNone(h.first('room_cold', 600))
+        self.assertEqual(first_dwell(h, A, 600), COLD_SETTLE['floor'] + 240)
         h = Harness(hc1(A, heizkreis_1_art='heizkoerper'), values={A: 19.0})
         h.set_circuit('hc1', type=None)
-        self.assertEqual(h.first('room_cold', 300), 211)
+        self.assertEqual(first_dwell(h, A, 300), 211)
 
     def test_pause_limits_per_type(self):
-        for kind, options, limit in (('radiator', hc1(A), 120), ('floor', hc2(A), 360)):
+        # Floor room_cold pauses up to cold_pause (24 h), as floor circuit_cold.
+        for kind, options, limit in (('radiator', hc1(A), 120), ('floor', hc2(A), 24 * 60)):
             for gap, kept in ((limit, True), (limit + 2, False)):
                 with self.subTest(kind=kind, gap=gap):
                     h = Harness(options, values={A: 19.0})
-                    h.run(SETTLE[kind] + 1 + 30)
+                    h.run(COLD_SETTLE[kind] + 1 + 30)
                     h.context_state = 'none'
                     h.run(gap)
                     h.context_state = 'ok'
                     dwell = 90 if kind == 'radiator' else 240
-                    minute = h.first('room_cold', 2000)
+                    minute = first_dwell(h, A, 2000)
                     self.assertEqual(minute, dwell - 30 if kept else dwell + 1)
 
     def test_ha_outage_pauses_never_resets_or_credits(self):
@@ -576,10 +971,10 @@ class CircuitTypeTests(unittest.TestCase):
                 h.ha = ha
                 h.run(60)
                 self.assertEqual((h.engine.monitor, h.engine.reason), ('unknown', reason))
-                self.assertNotIn('room_cold', h.codes())
+                self.assertFalse(h.engine.cold_dwell[A].active)
                 self.assertEqual(h.engine.circuits_report()['hc1']['why'], 'ha')
                 h.ha = 'running'
-                self.assertEqual(h.first('room_cold', 60), 30)
+                self.assertEqual(first_dwell(h, A, 60), 30)
 
     def test_judged_grace_of_15_minutes(self):
         h = Harness(hc1(A), values={A: 21.0})
@@ -656,7 +1051,7 @@ class ReportTests(unittest.TestCase):
 
     def test_onset_numbers_frozen_while_active(self):
         h = Harness(hc1(A), values={A: 19.1})
-        h.first('room_cold', 300)
+        h.first('room_cold', 300 + PERSIST)
         self.assertEqual(h.rows('room_cold')[0]['room'], 19.0)
         h.values[A] = 18.2
         h.run(30)

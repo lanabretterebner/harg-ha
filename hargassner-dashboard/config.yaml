@@ -1,5 +1,5 @@
 name: Hargassner Dashboard
-version: "1.6.3"
+version: "1.6.5"
 slug: hargassner_dashboard
 description: Open the local Hargassner dashboard using your Home Assistant login.
 arch:
@@ -29,6 +29,7 @@ options:
   kuehlere_raeume: []
   ohne_ueberwaermung: []
   haus_frost_sensoren: []
+  notify_watch: false
 schema:
   upstream_url: url
   upstream_connect_host: "str?"
@@ -45,4 +46,5 @@ schema:
   kuehlere_raeume: ["match(^sensor\\.[a-z0-9_]{1,200}$)"]
   ohne_ueberwaermung: ["match(^sensor\\.[a-z0-9_]{1,200}$)"]
   haus_frost_sensoren: ["match(^sensor\\.[a-z0-9_]{1,200}$)"]
+  notify_watch: bool
 url: https://github.com/lanabretterebner/harg-ha/tree/main/hargassner-dashboard

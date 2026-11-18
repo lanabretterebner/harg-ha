@@ -108,6 +108,20 @@ await test("renamed and suffixed entities retain immutable identity classificati
   const { card } = mount(values); await settle(); equal(headings(card), ["Heizkreis 1", "Steuerung"]);
   equal(ids(card), ["number.custom_room_day", "sensor.aussentemperatur_2"]);
 });
+await test("always-published energy totals join their sections by immutable identity", async () => {
+  const values = [entry("pelletverbrauch_foerderzaehler", "sensor", { entity_id: "sensor.pellets_renamed", expected: "pelletslager" }),
+    entry("pelletenergie_schaetzung", "sensor", { expected: "pelletslager" }), entry("brennerstunden", "sensor", { expected: "kessel" }),
+    entry("brennerstarts", "sensor", { entity_id: "sensor.brennerstarts_2", expected: "kessel" }), entry("heizgradtage", "sensor", { expected: "steuerung" })];
+  const { card } = mount(values); await settle(); equal(headings(card), ["Kessel", "Pelletslager", "Steuerung"]);
+  let group;
+  for (const node of card.shadowRoot.querySelector("ha-list").children) {
+    if (node.dataset.hargassnerDeviceGroup) group = node.dataset.hargassnerDeviceGroup;
+    else {
+      const row = node.matches("[data-native-entity]") ? node : node.querySelector("[data-native-entity]");
+      if (row) equal(row.entry.expected, group);
+    }
+  }
+});
 await test("unknown root entities remain visible in Steuerung", async () => {
   const value = entry("future_unknown"), { card } = mount([value]); await settle();
   equal(headings(card), ["Steuerung"]); equal(ids(card), [value.entity_id]);
@@ -196,5 +210,5 @@ window.deviceGroupTestResults = { passed: results.every(x => x.passed), tests: r
 document.querySelector("#results").textContent = JSON.stringify(window.deviceGroupTestResults, null, 2);
 
 if (window.parent !== window) window.parent.postMessage({
-  type: "hargassner-device-group-tests", version: "1.4.14", groups: window.deviceGroupTestResults,
+  type: "hargassner-device-group-tests", version: "1.4.15", groups: window.deviceGroupTestResults,
 }, "*");

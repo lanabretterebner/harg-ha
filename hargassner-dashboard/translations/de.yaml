@@ -26,3 +26,6 @@ configuration:
   haus_frost_sensoren:
     name: Frostwarnung für weitere Räume
     description: "Weitere Räume, für die bei Frostgefahr gewarnt wird."
+  notify_watch:
+    name: Benachrichtigungsdienst überwachen
+    description: "Nur mit installiertem harg-notify einschalten. Meldet in der Betriebsüberwachung einen Hinweis, wenn der Dienst 90 Sekunden schweigt."

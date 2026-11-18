@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.15
+
+- Add "Korrektur ±0" to the card and the popup (owner, 2026-11-18). It is offered only for a confirmed non-zero room correction with nothing collected or requested, in °C. With a qualified target it requests the configured base (target minus the current correction) through the same shared intent and guarded `climate.set_temperature` path as a native gesture, so the native control stays inert until the coherent readback; with an unknown target the correction dial shows a "±0" step that sends 0 through its existing `number.set_value` path. A transport error leaves the request shown as unconfirmed, never as done; a definitive rejection shows the confirmed value again.
+- Group the five energy totals the adapter now always publishes (backend `energy_totals_v1`): Pelletverbrauch (Förderzähler) and Pelletenergie (Schätzung) under Pelletslager, Brennerstunden and Brennerstarts under Kessel, Heizgradtage under Steuerung. Matched by immutable MQTT identity like every other entity; without the backend update nothing changes. Device-page grouping version 1.5.0 replaces an older grouping already running in the page.
+- Include the independently versioned app 1.6.5, which also contains the unpublished 1.6.4: room checks report only lasting heating problems, the optional Benachrichtigungsdienst check (`notify_watch`, off by default) and the Betriebsüberwachung restart/clock fixes (see `hargassner-dashboard/CHANGELOG.md`). Update the app separately through Supervisor.
+
 ## 1.4.14
 
 - Include the independently versioned app 1.5.5. Its optional monitor now ignores a check kind it does not know instead of reporting all three components invalid and notifying for each; both known checks are still required and no current report changes its verdict. Update the app separately through Supervisor.

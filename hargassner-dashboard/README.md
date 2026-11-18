@@ -77,3 +77,8 @@ requested. The options stay editable in the Configuration tab.
 
 App 1.6.2: every save on the room page checks again that the user is a Home
 Assistant administrator (refused if Home Assistant does not answer).
+
+App 1.6.5: the room checks report only a heating problem that lasts. Airing,
+an open door, sun, a valve turned down for an afternoon, slow underfloor
+heating and a cold morning after the setback stay quiet (DOCS.md "What is
+checked").

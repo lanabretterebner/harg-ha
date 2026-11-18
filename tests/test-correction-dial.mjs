@@ -23,12 +23,12 @@ const climate = () => ({ entity_id: 'climate.synthetic_hc1', state: 'auto', attr
 const number = value => ({ entity_id: NUMBER, state: value, last_updated: new Date(Date.now() - 10000).toISOString(),
   attributes: { hargassner_control_schema: 'room_correction_v1', hargassner_correction_id: ID, min: -3, max: 3, step: .5, unit_of_measurement: '°C' } });
 // One synthetic HA session; every surface() is a further control for the same entity and shares its request model.
-function world(value) {
+function world(value, failure = null) {
   const timers = new Map(), calls = []; let timer = 0;
   const environment = { document: { createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
     setTimeout(fn) { timers.set(++timer, fn); return timer }, clearTimeout(id) { timers.delete(id) } };
   const c = climate(), hass = { connected: true, connection: { connected: true }, user: { id: 'synthetic' }, states: { [c.entity_id]: c, [NUMBER]: number(value) },
-    callService: (...args) => { calls.push(args); return Promise.resolve() } };
+    callService: (...args) => { calls.push(args); return failure ? Promise.reject(failure) : Promise.resolve() } };
   // Runs the timers due now; a timer started meanwhile (the 8 s confirmation limit) stays queued.
   const flush = () => { const pending = [...timers.values()]; timers.clear(); pending.forEach(fn => fn()) };
   // Client coordinates of a dial viewBox point (centre 110,100; ring radius 85).
@@ -38,9 +38,10 @@ function world(value) {
     const control = createHargassnerCorrectionControl(environment, () => ({ hass, state: c, connected: true }));
     control.render();
     const slider = control.node.children.find(node => node.getAttribute('role') === 'slider');
-    const [minus, plus] = control.node.children.find(node => node.className === 'correction-stepper').children;
+    const steps = control.node.children.find(node => node.className === 'correction-stepper').children;
+    const minus = steps[0], plus = steps.at(-1), zero = steps.find(node => node.dataset?.hargassnerCorrectionReset);
     const tap = point => { slider.dispatch('pointerdown', point); slider.dispatch('pointerup', point); flush() };
-    return { control, slider, minus, plus, note: control.node.children.at(-1), tap, text: () => slider.getAttribute('aria-valuetext') };
+    return { control, slider, minus, plus, zero, note: control.node.children.at(-1), tap, text: () => slider.getAttribute('aria-valuetext') };
   };
   const readback = next => { hass.states[NUMBER] = { ...number(next), last_updated: new Date(Date.now() + 1000).toISOString() } };
   return { calls, flush, at, polar, surface, readback, sent: () => calls.map(call => call[2].value) };
@@ -173,6 +174,40 @@ await test('plus and minus step from the real or pending value, never from an un
   assert.deepEqual(w.sent(), [-.5]);
 });
 
+await test('Korrektur ±0 is offered only for a confirmed non-zero value with nothing collected or requested', () => {
+  assert.equal(dial('0').zero.style.display, 'none');
+  const d = dial('1.5'); assert.equal(d.zero.style.display, '');
+  assert.equal(d.zero.getAttribute('aria-label'), 'Raumkorrektur auf ±0 zurücksetzen');
+  d.plus.dispatch('click', {}); assert.equal(d.zero.style.display, 'none'); // a collected step hides it
+  d.flush(); assert.deepEqual(d.sent(), [2]); assert.equal(d.zero.style.display, 'none'); // so does a pending request
+  const u = world('1'), s = u.surface(); u.calls.length = 0;
+  assert.equal(s.zero.style.display, '');
+});
+await test('Korrektur ±0 writes 0 once through number.set_value and stays locked until a newer readback', () => {
+  const d = dial('-2.5'); d.zero.dispatch('click', {}); d.zero.dispatch('click', {});
+  assert.deepEqual(d.calls, [['number', 'set_value', { entity_id: NUMBER, value: 0 }]]);
+  // The requested value, not a result: locked with the pending note.
+  assert.equal(d.text(), '0 °C'); assert.equal(d.note.textContent, 'Angefragt · Bestätigung ausstehend');
+  assert.equal(d.plus.disabled, true); assert.equal(d.minus.disabled, true); assert.equal(d.zero.style.display, 'none');
+  d.control.render(); assert.equal(d.note.textContent, 'Angefragt · Bestätigung ausstehend'); // an old echo releases nothing
+  d.readback('0'); d.control.render();
+  assert.equal(d.note.textContent, ''); assert.equal(d.plus.disabled, false); assert.equal(d.zero.style.display, 'none');
+  assert.equal(d.calls.length, 1);
+});
+await test('a rejected Korrektur ±0 shows the confirmed value and offers the reset again', async () => {
+  const w = world('1', { code: 'service_validation_error' }), a = w.surface();
+  a.zero.dispatch('click', {}); await Promise.resolve(); await Promise.resolve();
+  assert.deepEqual(w.sent(), [0]);
+  assert.equal(a.text(), '+1 °C'); assert.equal(a.note.textContent, 'Änderung abgelehnt · bestätigte Raumkorrektur');
+  assert.equal(a.zero.style.display, '');
+});
+await test('an uncertain Korrektur ±0 stays shown as requested, never as done, and is not offered again', async () => {
+  const w = world('1', { code: 'timeout' }), a = w.surface();
+  a.zero.dispatch('click', {}); await Promise.resolve(); await Promise.resolve();
+  assert.equal(a.text(), '0 °C'); assert.equal(a.note.textContent, 'Angefragt · Bestätigung unklar');
+  // As for the steps, an uncertain outcome admits a new deliberate step, but no second ±0 is offered.
+  assert.equal(a.zero.style.display, 'none'); a.zero.dispatch('click', {}); assert.deepEqual(w.sent(), [0]);
+});
 await test('card mode lock clears when the climate becomes unavailable during set_preset_mode', async () => {
   const f = fixture(); let settle;
   f.card._hass.callService = (...args) => { f.calls.push(args); return new Promise(resolve => { settle = resolve }) };

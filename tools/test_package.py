@@ -16,20 +16,20 @@ def load(relative):
 
 
 class PackageTests(unittest.TestCase):
-    def test_frontend_1414_versions_and_independent_app_163(self):
+    def test_frontend_1415_versions_and_independent_app_165(self):
         package = json.loads((ROOT / "package.json").read_text())
         lock = json.loads((ROOT / "package-lock.json").read_text())
         release = json.loads((ROOT / "release.json").read_text())
         validation = json.loads((ROOT / "validation.json").read_text())
-        self.assertEqual({package["version"], lock["version"], lock["packages"][""]["version"], release["version"], validation["version"]}, {"1.4.14"})
-        self.assertEqual(release["supervisor_app_version"], "1.6.3")
-        self.assertEqual(validation["supervisor_app_version"], "1.6.3")
+        self.assertEqual({package["version"], lock["version"], lock["packages"][""]["version"], release["version"], validation["version"]}, {"1.4.15"})
+        self.assertEqual(release["supervisor_app_version"], "1.6.5")
+        self.assertEqual(validation["supervisor_app_version"], "1.6.5")
         self.assertEqual(release["component_checkpoint"], validation["component_checkpoint"])
-        self.assertEqual(release["component_checkpoint"], "frontend-1.4.14-app-1.6.3")
-        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.6.3")
-        self.assertIn("ARG BUILD_VERSION=1.6.3\n", (ROOT / "hargassner-dashboard/Dockerfile").read_text())
-        self.assertIn("APP_VERSION = '1.6.3'", (ROOT / "hargassner-dashboard/house_rules.py").read_text())
-        self.assertIn('const VERSION = "1.4.14";', (ROOT / "dist/hargassner-thermostat-popup.js").read_text())
+        self.assertEqual(release["component_checkpoint"], "frontend-1.4.15-app-1.6.5")
+        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.6.5")
+        self.assertIn("ARG BUILD_VERSION=1.6.5\n", (ROOT / "hargassner-dashboard/Dockerfile").read_text())
+        self.assertIn("APP_VERSION = '1.6.5'", (ROOT / "hargassner-dashboard/house_rules.py").read_text())
+        self.assertIn('const VERSION = "1.4.15";', (ROOT / "dist/hargassner-thermostat-popup.js").read_text())
 
     def test_repository_and_app_are_discoverable_independently_of_hacs(self):
         repository = load("repository.yaml")
@@ -66,17 +66,17 @@ class PackageTests(unittest.TestCase):
                                            "monitor_poll_interval": 30,
                                            "raumueberwachung_modus": "beobachten",
                                            "heizkreis_1_art": "automatisch", "heizkreis_2_art": "automatisch",
-                                           **{key: [] for key in HOUSE_LISTS}})
+                                           **{key: [] for key in HOUSE_LISTS}, "notify_watch": False})
         self.assertEqual(app["schema"], {"upstream_url": "url", "upstream_connect_host": "str?", "ingress_token": "password",
                                            "monitor_enabled": "bool", "monitor_token": "password?",
                                            "monitor_poll_interval": "int(15,60)",
                                            "raumueberwachung_modus": "list(beobachten|melden)",
                                            "heizkreis_1_art": "list(automatisch|heizkoerper|fussboden)",
                                            "heizkreis_2_art": "list(automatisch|heizkoerper|fussboden)",
-                                           **{key: sensor_list for key in HOUSE_LISTS}})
+                                           **{key: sensor_list for key in HOUSE_LISTS}, "notify_watch": "bool"})
 
     def test_house_option_translations_are_complete_and_plain(self):
-        keys = {"raumueberwachung_modus", "heizkreis_1_art", "heizkreis_2_art", *HOUSE_LISTS}
+        keys = {"raumueberwachung_modus", "heizkreis_1_art", "heizkreis_2_art", *HOUSE_LISTS, "notify_watch"}
         for language in ("de", "en"):
             texts = load(f"hargassner-dashboard/translations/{language}.yaml")["configuration"]
             self.assertEqual(set(texts), keys, language)
@@ -137,6 +137,20 @@ class PackageTests(unittest.TestCase):
             self.assertEqual(value["default_entity_id"], row["default_entity_id"])
             self.assertIn(value["group"], groups["groups"])
         self.assertIn("no MQTT metadata or registry changes", groups["scope"])
+
+    def test_always_published_energy_totals_have_frontend_sections(self):
+        groups = load("examples/entity-ui-groups.json")
+        extra = groups["always_published"]["entities"]
+        self.assertEqual(set(extra), {"sensor:pelletverbrauch_foerderzaehler", "sensor:pelletenergie_schaetzung",
+                                      "sensor:brennerstunden", "sensor:brennerstarts", "sensor:heizgradtage"})
+        self.assertFalse(set(extra) & set(groups["entities"]))
+        script = (ROOT / "dist/hargassner-thermostat-popup.js").read_text()
+        block = re.search(r"const DEVICE_ENTITY_GROUPS = Object\.freeze\(\{(.*?)\n\}\);", script, re.S).group(1)
+        mapping = dict(re.findall(r'^\s*"([a-z_]+\.[a-z0-9_]+)": "([a-z_0-9]+)",?$', block, re.M))
+        for key, value in extra.items():
+            self.assertEqual(value["default_entity_id"], key.replace(":", ".", 1))
+            self.assertIn(value["group"], groups["groups"])
+            self.assertEqual(mapping.get(value["default_entity_id"]), value["group"], key)
 
     def test_complete_dashboard_has_two_custom_cards_and_eight_sections(self):
         dashboard = load("examples/hargassner-dashboard.json")

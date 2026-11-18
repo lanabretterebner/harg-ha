@@ -27,7 +27,7 @@ with the required package-install permission. An existing executable
 can be selected with `HARG_BROWSER_EXECUTABLE=/usr/bin/chromium`. The runner
 starts its own loopback HTTP server, uses synthetic card/popup/grouping fixtures
 and fails on assertion, page, console or request errors. Its structured report
-separates card113, popup59 and groups22 cases. `npm test` stays Node-only; the
+separates card113, popup59 and groups23 cases. `npm test` stays Node-only; the
 Playwright browser dependency is development tooling and is not a runtime asset.
 Actual authenticated installed-native HA checks and user-authorized physical
 changes remain separate acceptance obligations.

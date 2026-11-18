@@ -214,11 +214,11 @@ class World:
         self.monitor.cycle(self.stop)
         self.clock.advance(seconds)
 
-    def run(self, seconds, context_every=60):
-        for second in range(seconds):
+    def run(self, seconds, context_every=60, step=1):
+        for second in range(0, seconds, step):
             if context_every and second % context_every == 0:
                 self.context()
-            self.cycle()
+            self.cycle(step)
 
     def reports(self):
         return [json.loads(payload) for _topic, payload in self.published]
@@ -334,8 +334,9 @@ class WorkerTests(unittest.TestCase):
 
     def test_ha_api_unavailable_pauses_and_reports_unknown(self):
         world = World(values={e: 19.0 for e in ENTITIES})
-        world.run(215 * 60)
-        self.assertTrue(world.reports()[-1]['findings'])   # room_cold after settle and dwell
+        # room_cold after settle (2 h), dwell (90 min) and 12 h away from the day level
+        world.run((215 + r.ROOM_COLD_PERSIST_S // 60) * 60, step=10)
+        self.assertTrue(world.reports()[-1]['findings'])
         world.down = True
         world.run(600)
         report = world.reports()[-1]

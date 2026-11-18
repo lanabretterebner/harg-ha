@@ -61,7 +61,7 @@ also leaves one existing MQTT device and all registry/discovery identities intac
 
 `Sollwertbasis` identifies the currently qualified configured target context. The backend remains the only command authority. Legacy `Sollwertaktualisierung` markers are display hints; they never authorize a temperature command.
 
-Frontend 1.4.14 also understands additive `Temperaturauftrag` schemaVersion1: controller-unit `temperatureUnit: °C`, opaque `context`, monotonic operation `sequence` and full-envelope `revision`, bounded last8 `records`, plus same-snapshot `confirmedTarget`, `confirmedBasis` and `confirmedPreset` echoes. A record contains its sequence, original basis/requested target, status (`pending`, `confirmed`, `rejected`, `sent_unconfirmed`), safe reason/origin and timestamps. A confirmed correction record alone is insufficient: the displayed actual target/basis/preset must match the coherent echoes before settling. HA Fahrenheit display converts the Celsius metadata explicitly.
+Frontend 1.4.15 also understands additive `Temperaturauftrag` schemaVersion1: controller-unit `temperatureUnit: °C`, opaque `context`, monotonic operation `sequence` and full-envelope `revision`, bounded last8 `records`, plus same-snapshot `confirmedTarget`, `confirmedBasis` and `confirmedPreset` echoes. A record contains its sequence, original basis/requested target, status (`pending`, `confirmed`, `rejected`, `sent_unconfirmed`), safe reason/origin and timestamps. A confirmed correction record alone is insufficient: the displayed actual target/basis/preset must match the coherent echoes before settling. HA Fahrenheit display converts the Celsius metadata explicitly.
 
 The client captures a local draft before native debounce, keeps it pending/uncertain without automatic retry, and rejects stale snapshots/outcomes. An older rejected request cannot undo newer input. Memory-only intent is scoped to the authenticated HA connection/user/entity; nothing changes shared HA states or persists an intent. Native card/control nodes remain mounted while callback/API leases rotate. Only bound definitive rejection allows rollback. Fresh genuine mode/base/day-night changes remain truthful; no cached target grants permission.
 
@@ -95,7 +95,7 @@ and uncertainty note remain visible; independently qualified mode control stays
 available.
 
 
-## Independent correction fallback (frontend 1.4.14)
+## Independent correction fallback (frontend 1.4.15)
 
 When no active target basis is qualified, including Auto during summer shutdown,
 the card and popup offer a separately labelled Raumkorrektur dial instead of
@@ -127,6 +127,17 @@ The dial does not wrap: a drag that returns to the ring beyond the gap keeps
 its end until the pointer is nearer to it along the ring than across the gap.
 A normal qualified target restores its existing target-dial behavior. Unknown
 active target and missing actual room sensors remain labelled unknown.
+
+## Energy totals
+
+A backend with `hargassner_energy_schema: energy_totals_v1` also publishes five
+`total_increasing` sensors on the same device, outside the selectable entity
+list: Pelletverbrauch (Förderzähler, kg, not weighed), Pelletenergie
+(Schätzung, kWh, pellet kg times a configurable calorific value), Brennerstunden,
+Brennerstarts and Heizgradtage. Their values never decrease except after a
+genuine reset of the backend's own totals. The device page groups them under
+Pelletslager, Kessel and Steuerung. How to use them:
+[Energy dashboard](ENERGY-DASHBOARD.md).
 
 ## One-time charge triggers
 

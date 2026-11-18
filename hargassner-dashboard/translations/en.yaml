@@ -26,3 +26,6 @@ configuration:
   haus_frost_sensoren:
     name: Frost warning for other rooms
     description: "Other rooms that get a warning when there is a risk of frost."
+  notify_watch:
+    name: Watch the notification service
+    description: "Enable only with harg-notify installed. Adds a notice to the Betriebsüberwachung when the service is silent for 90 seconds."

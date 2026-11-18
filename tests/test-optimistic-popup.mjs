@@ -369,4 +369,29 @@ for(const flag of ['hass','connection'])await test(`legacy same-identity ${flag}
  queued();await api.callService('climate','set_temperature',{entity_id:f.entity,temperature:19.5});fireTimers(f.env,250);assert.equal(p.requests.length,0);await settle();assert.equal(p.node,n);
  n._targetTemperature.value=20;n._debouncedCallService('value');fireTimers(f.env,250);assert.equal(p.requests.length,1);f.controller.stop();
 });
+// Korrektur ±0 in the popup: target = base through the shared intent; native control inert until readback.
+const correctedState = (entity, correction = 1.5) => state(entity, 'Auto', true, { temperature: 18 + correction, Raumkorrektur: correction,
+  Temperaturauftrag: envelope([], { confirmedTarget: 18 + correction }) });
+const resetButton = popup => popup.shadowRoot.querySelectorAll('*').find(n => n.dataset?.hargassnerCorrectionReset);
+for (const entity of ['climate.synthetic_hc1', 'climate.synthetic_hc2']) await test(`${entity} popup Korrektur ±0 writes base once and holds until readback`, async () => {
+  const f = await fixture(entity), node = f.popup.node;
+  assert.equal(resetButton(f.popup), undefined); // correction 0: not offered
+  f.update(correctedState(entity)); await settle();
+  const button = resetButton(f.popup); assert(button); assert.equal(button.parentNode, node.parentNode);
+  button.dispatchEvent(Object.assign(new Event('click'), { stopPropagation() {} })); await settle();
+  assert.deepEqual(f.popup.requests, [['climate', 'set_temperature', { entity_id: entity, temperature: 18 }]]);
+  assert.equal(node.inert, true); assert.equal(node.stateObj.attributes.temperature, 18); assert.equal(resetButton(f.popup), undefined);
+  button.dispatchEvent(new Event('click')); await settle(); assert.equal(f.popup.requests.length, 1);
+  f.update(correctedState(entity)); await settle(); assert.equal(node.inert, true); // the old state releases nothing
+  f.update(state(entity, 'Auto', true, { temperature: 18, Raumkorrektur: 0, Temperaturauftrag: envelope([operation(1, 'confirmed', 18)], { confirmedTarget: 18 }) })); await settle();
+  assert.equal(node.inert, false); assert.equal(resetButton(f.popup), undefined); assert.equal(f.popup.requests.length, 1);
+  f.controller.stop(); assert.equal(resetButton(f.popup), undefined);
+});
+await test('popup Korrektur ±0 is not offered while a native gesture is collected, or in °F', async () => {
+  const f = await fixture(), node = f.popup.node; f.update(correctedState(f.entity)); await settle(); assert(resetButton(f.popup));
+  node._targetTemperature.value = 20; node._debouncedCallService('value'); f.update(correctedState(f.entity)); await settle();
+  assert.equal(resetButton(f.popup), undefined); f.controller.stop();
+  const g = await fixture(); g.popup.hass.config.unit_system.temperature = '°F'; g.update(correctedState(g.entity)); await settle();
+  assert.equal(resetButton(g.popup), undefined); g.controller.stop();
+});
 console.log(JSON.stringify({tests:results.length,passed:results.filter(r=>r.passed).length,failed:results.filter(r=>!r.passed).length,results},null,2));if(results.some(r=>!r.passed))process.exitCode=1;

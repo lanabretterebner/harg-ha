@@ -500,6 +500,23 @@ below) and **Heizkreis 1 ist / Heizkreis 2 ist**: `automatisch` takes the type
 from the controller (radiators or underfloor); choose Heizkörper or Fußboden
 only if the controller setting is wrong. Then press **Speichern**.
 
+Underfloor circuits react slowly. The whole-circuit check (**Störung**: every
+monitored room of the circuit at least 3 degrees below the day target) is
+judged only during a day phase, and only after 4 hours of heat-up from the
+start of that phase; it then needs 3 hours. 4 + 3 = 7 hours fit into an 8-hour
+evening phase (for example 15:00-23:00), so a circuit that still has not warmed
+the rooms 7 hours after the day phase began is reported. A normal heat-up after
+setback never counts, a short morning phase (for example 06:00-09:00) is never
+judged, and nothing is judged during setback. Once reported, the Störung stays
+through the night and is cleared only when a later day phase is warm enough.
+Single rooms of an underfloor circuit are judged the same way from app 1.6.5:
+only in a day phase, after its 4 hours of heat-up; setback and heat-up pause
+their 4-hour cold spell instead of restarting it, so it can add up over the
+evening phases. While the rooms are still getting warmer (for example after a
+holiday) the circuit check waits. Single rooms that stay too cold are reported
+as **Hinweis** (see "What is checked"). Radiator circuits need 2 plus 3 hours
+and are judged as before.
+
 Saving writes the app's own options through the Supervisor and keeps every
 other option (dashboard address, tokens, VM-health monitor) unchanged. The
 running room monitoring takes the new selection over at once, without a
@@ -540,35 +557,108 @@ notices count for the overall state.
 
 ### What is checked
 
-The waiting times depend on the circuit type. Radiators react within an hour;
-underfloor heating needs many hours.
+The room checks report a heating problem that lasts, not normal life in the
+house (app 1.6.5). Airing, an open door, cooking, showers, sun, guests, a valve
+turned down for an afternoon, slow underfloor heating and the first cold
+morning after the night setback stay quiet. The waiting times depend on the
+circuit type. Radiators react within an hour; underfloor heating needs many
+hours.
 
 | Check | Radiators | Underfloor |
 | --- | --- | --- |
-| No cold check after a change of day/setback phase, target or mode | 2 h | 8 h |
+| No cold check after a change of day/setback phase, target or mode | 2 h | 4 h, day phase only |
 | No warm check after a change of the day target or mode | 2 h | 8 h |
-| Room too cold (1.5 degrees below target) for | 90 min | 4 h |
-| All rooms of a circuit clearly too cold (3 degrees) for | 3 h | 8 h |
-| Room does not get warmer after heating starts, judged after | 60 min | 6 h |
+| One cold spell: room 1.5 degrees below target and not getting warmer, for | 90 min | 4 h (adds up over day phases) |
+| Room too cold: after a cold spell the room has not come back within 1 degree of the day target for | 12 h | 12 h |
+| All rooms of a circuit clearly too cold (3 degrees) and none getting warmer, for | 3 h | 3 h in a day phase |
+| Watching a room after a heating start | 60 min | 6 h |
+| Room does not get warmer: heating starts without effect on different days | 3 | 3 |
+| Circuit does not get warmer (fault): starts without effect on different days | 2 | 2 |
 | Allowance for the pump to start and the flow to warm up | 30 min | 30 min |
 | Room clearly too warm at night (21:00-06:00, 2 degrees) for | 2 h | 4 h |
 | All rooms of a circuit too warm for | 6 h | 12 h |
 | Room at 28 °C or more while heating, for | 1 h | 1 h |
 | Too cold although the heating limit switched off the circuit, for | 6 h | 12 h |
-| Pause after a window was opened (drop of 1 degree in 15 min) | 60 min | 3 h |
+| Airing: at least this long after a drop of 1 degree in 15 min, then until the room is back (at most 12 h) | 60 min | 3 h |
+| "Getting warmer": the last 15 min at least 0.3 degrees above the 15 min this long before | 1 h | 3 h |
 
-Frost (5 °C or less for 10 minutes) is checked without any VM data; frost in
-two or more rooms is a fault. Sensor checks report a sensor that is not found,
-gives no value, is silent for a day, reports impossible or jumping values, has
-shown exactly the same value for three days, or has a weak battery. A sensor
-problem never counts as a heating problem.
+**Airing.** A drop of 1 degree within 15 minutes is an opened window or door.
+From then until the room is back (within 0.5 degrees of where it was, or less
+than 1 degree below its target), at most 12 hours, the room counts neither as
+cold nor as not responding, and a heating start in that time does not count.
+This is read from the temperature alone; no window sensor is needed.
+
+**Heating starts.** A start is the change from setback to day, a target raised
+by 1 degree or more, or heating again after an hour off. A room is watched only
+when it starts at least 1.5 degrees below its target. Warming is judged on the
+whole watch: the median of its last quarter against the median of its first
+quarter, so single readings and short dips do not decide. A start without
+effect is counted; a start the room warms on, or the room getting back within
+1 degree of its day target at any time, clears the count; a start with
+airing, a cold flow, the pump off or the room near its target does not count
+either way. **Raum wird nicht wärmer** needs starts without effect on three
+different days (at least 20 hours apart) within four days without the room
+reaching its day level in between, so one aired, open or turned-down morning,
+or a door that is open every morning, never reports. It ends at the first
+start the room warms on, when the room is within 1 degree of its day target,
+or two days after the last start without effect. A room whose radiator is
+cold but which the sun brings to its day level every day is therefore not
+reported. **Heizkreis wird nicht wärmer** (a fault) needs two starts on
+different days on which at least two rooms and at least half of the circuit's
+rooms stayed flat and none warmed, and the rooms that stayed flat have not all
+been back at their day level since; aired rooms do not count, so the whole
+house aired at once is not a fault. A failed pump or mixer is reported
+from the second morning; the circuit cold check (3 degrees, 3 h) usually comes
+first.
+
+**Room too cold** needs the room to stay away from its day level: after one
+cold spell, 12 hours without getting back within 1 degree of the day target.
+A room someone turned down for an afternoon, or that was cold until a slow
+underfloor heating caught up, is back by evening and is forgotten. A room whose
+radiator stays cold is reported the same evening or the next morning, and the
+notice stays through the night setback (or a night the heating limit switches
+the circuit off) until the room is warm again, or 26 hours after the last cold
+spell, for example when the heating stays off for the summer. A room
+that is meant to stay cooler, or whose sensor sits at a cold spot such as a
+window, gets "darf kühler sein" (2 degrees allowance) on the room page, or is
+set to "nicht überwachen". The app does not learn a room's usual level by
+itself (owner decision, 2026-11-18): that would also hide a radiator that
+slowly fails.
+
+**Latencies for a real fault** (accepted by the owner, 2026-11-18), measured from
+midnight in synthetic tests:
+
+| Fault | Day 06:00-22:00 | Day 06:00-09:00 and 15:00-23:00 |
+| --- | --- | --- |
+| Radiator stays cold: **Raum zu kalt** | about 21.5 h (same evening) | about 36.5 h |
+| Radiator stays cold: **Raum wird nicht wärmer** | 55 h (third morning) | 55 h |
+| Failed pump, radiators: **Heizkreis zu kalt** (fault) | about 11 h | about 20 h |
+| Failed pump, radiators: **Heizkreis wird nicht wärmer** (fault) | 31 h (next morning) | 31 h |
+| Underfloor room without heat: **Raum zu kalt** | about 26 h | about 55 h |
+| Underfloor room without heat: **Raum wird nicht wärmer** | about 60 h | about 69 h |
+| Failed pump, underfloor: **Heizkreis zu kalt** (fault) | about 20 h | about 22 h |
+| Failed pump, underfloor: **Heizkreis wird nicht wärmer** (fault) | 36-60 h | about 45 h |
+
+A start is judged only when the room starts 1.5 degrees or more below its
+target, so with a setback of less than 1.5 degrees only the cold checks apply
+(underfloor rows: setback 2-3 degrees).
+
+Frost (5 °C or less for 10 minutes) is checked without any VM data and
+unchanged by any of the above; frost in two or more rooms is a fault. Sensor
+checks report a sensor that is not found, gives no value, is silent for a day,
+reports impossible values, jumps three times within 24 hours (8 degrees or
+more at once, or 3 degrees away and back where the shorter leg is faster than
+room air can change, 1.5 degrees a minute; a sensor at an open window is not
+jumping), has shown exactly the same
+value for three days, or has a weak battery. A sensor problem never counts as
+a heating problem.
 
 Normal night setback and a normal heat-up do not create notices: the rooms are
 compared with the circuit's current day or setback target from the
 controller, never with the internal control target. While Home Assistant
 starts, the VM data is missing or old, or a target is unknown, rooms are shown
 as **Unbekannt**, never as **Normal**, and waiting times pause. Every notice
-ends by itself when the cause is gone, at the latest after 24 hours.
+ends by itself when the cause is gone.
 
 The warm checks compare with the day target also during the night setback,
 so the daily change between day and setback does not restart their waiting
@@ -598,6 +688,32 @@ while sensors are selected, the VM keeps the checks **Räume** and
 
 The app maintains the existing MQTT entity identity and device. It subscribes through HA Core to the default `homeassistant` operation discovery topic and the VM operation reports, and redirects only this entity to its own checked state topic. No controller or settings command is possible. The VM report topic remains untouched. The app needs Home Assistant MQTT to be running; no broker credentials are stored in the app.
 
-A live report is required for Normal. Retained reports cannot start or renew that state. Without a live report for 90 seconds the state is Störung, with a message that the VM/monitoring is unreachable and the actual heating state is unknown. When the optional VM-health monitor is enabled, a failed or stale heartbeat also overrides a recent VM report. Its healthy heartbeat alone cannot clear a missing report. Recovery requires a new live report. The app publishes its checked state without retention every 15 seconds; if the app or HA connection fails, HA marks the entity unavailable after 90 seconds. No old Normal can be replayed from this topic. The independently generated verdict requires installing app 1.6.3; source publication alone changes no installed entity.
+A live report is required for Normal. Retained reports cannot start or renew that state. Without a live report for 90 seconds the state is Störung, with a message that the VM/monitoring is unreachable and the actual heating state is unknown. When the optional VM-health monitor is enabled, a failed or stale heartbeat also overrides a recent VM report. Its healthy heartbeat alone cannot clear a missing report. Recovery requires a new live report. The app publishes its checked state without retention every 15 seconds; if the app or HA connection fails, HA marks the entity unavailable after 90 seconds. No old Normal can be replayed from this topic. From app 1.6.4: after the app starts, and after a reconnect to Home Assistant (Core restart, integration reload) while the VM was reporting until then, the app waits the same 90 seconds (Unbekannt) before a missing report counts; a VM that was already silent stays Störung. When the last VM report said maintenance (a VM release restarts its services), a silence of up to 15 minutes is shown as Unbekannt ("Wartung der VM"). Freshness is measured on the app's own clock from the arrival of a report; the VM's timestamp only has to lie within 5 minutes of this host's clock and must not repeat a recent report, so clock differences or a VM clock that steps back no longer matter. A heartbeat that is still unknown in the first 90 seconds is no failure. The independently generated verdict requires installing app 1.6.3; source publication alone changes no installed entity.
 
 After VM/app restart, room evaluation waits for fresh context and an accepted current app report. Room selections remain in app options; dwell timers intentionally restart. Missing acknowledgement is not proof that the rooms are healthy.
+
+## Notification service check (app 1.6.4, optional)
+
+The harg-notify container (repository `notify/`, contract
+`proxy/NOTIFY-CONTRACT.md`) sends emails and calls and is the third
+participant in health monitoring. With the option `notify_watch: true` the app
+also subscribes through HA Core to `hargassner/+/notify/status` and adds the
+check **Benachrichtigungsdienst** to its checked verdict:
+
+- **Normal** while a live, non-retained status of the same gateway is younger
+  than 90 seconds;
+- **Unbekannt** in the first 90 seconds after the app starts without a status;
+- **Hinweis** otherwise, with one row "Der Benachrichtigungsdienst meldet sich
+  nicht." A Normal verdict becomes Hinweis; Hinweis, Unbekannt and Störung stay
+  as they are. When the VM already reports a row of that check, the app adds no
+  second one.
+
+Only freshness is judged: the signed envelope `{"notify_status": ...,
+"authorization": ...}` of contract version 2 with `schema` 1 and
+`published_at` within the lease. The app holds no notify key and does not
+check the signature (the VM adapter and API do), so on a broker where other
+accounts may write `notify/status` this check can be fooled; the broker ACL
+should let only `harg-notify` write that topic. The status holds no addresses
+or numbers. Leave the option off until the container
+is installed: otherwise the verdict shows that Hinweis permanently. The
+container in turn watches this app's checked verdict as its heartbeat.

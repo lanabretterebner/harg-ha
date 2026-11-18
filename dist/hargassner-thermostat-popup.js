@@ -1,11 +1,11 @@
-/* Hargassner thermostat popup and dashboard card, v1.4.14.
+/* Hargassner thermostat popup and dashboard card, v1.4.15.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. Qualified target gestures use guarded climate.set_temperature.
  * Unknown-target correction controls use the separately commissioned number.set_value.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.14";
+const VERSION = "1.4.15";
 // Coalesce rapid native +/- gestures while reducing the avoidable send delay.
 const TEMPERATURE_BUTTON_DEBOUNCE_MS = 250;
 const SCHEMA = "configured_room_setpoint_v1";
@@ -280,7 +280,7 @@ export function installHargassnerThermostatPopup(environment = window) {
   }
   function clearTarget(host) {
     const record = targetRecords.get(host); if (!record) return;
-    record.closed = true; record.lease?.dispose(); record.unsubscribe?.(); record.observer.disconnect(); record.note?.remove();
+    record.closed = true; record.lease?.dispose(); record.unsubscribe?.(); record.observer.disconnect(); record.note?.remove(); record.reset?.remove();
     record.node.inert = record.inert; if (record.node.style.opacity === "0.6" || record.node.style.opacity === record.opacity) record.node.style.opacity = record.opacity;
     if (record.aria === null) record.node.removeAttribute("aria-disabled"); else record.node.setAttribute("aria-disabled", record.aria);
     if (host.stateObj && record.node.isConnected) record.node.stateObj = host.stateObj;
@@ -298,6 +298,9 @@ export function installHargassnerThermostatPopup(environment = window) {
     record.note.textContent = view.note;
     if (view.note) { if (record.note.parentNode !== record.node.parentNode) record.node.insertAdjacentElement("afterend", record.note); }
     else record.note.remove();
+    const offer = !view.inert && !record.presentation.intent && targetCurrent(record) && correctionResetTarget(state, unit) !== null;
+    if (offer) { if (record.reset.parentNode !== record.node.parentNode) record.node.insertAdjacentElement("afterend", record.reset); }
+    else record.reset.remove();
     observe(record);
   }
   function makeTargetRecord(host, node, state) {
@@ -309,6 +312,12 @@ export function installHargassnerThermostatPopup(environment = window) {
     record.note = document.createElement("div"); record.note.dataset.hargassnerTargetUpdate = VERSION;
     record.note.setAttribute("role", "status"); record.note.setAttribute("aria-live", "polite");
     record.note.style.cssText = "text-align:center;color:var(--secondary-text-color);margin:8px 0;";
+    record.reset = correctionResetButton(document, () => {
+      if (!targetCurrent(record)) return;
+      requestCorrectionReset({ hass: popupHass(host), state: host.stateObj, unit: record.unit, presentation });
+      applyTargetPresentation(record);
+    });
+    record.reset.style.display = "block"; record.reset.style.margin = "8px auto 0";
     targetRecords.set(host, record);
     record.lease = temperatureLease(node, {
       current: () => targetCurrent(record), context: () => popupContext(host.stateObj, host),
@@ -665,6 +674,40 @@ export function resolveHargassnerCorrection(hass, climate) {
   return { id, entity, state, value, available };
 }
 
+// "Korrektur ±0" for a qualified target: room correction 0 is the target
+// minus the current correction (the adapter writes offset = target - base).
+// °C only, on the controller's half-degree grid, never outside min/max.
+export function correctionResetTarget(state, unit) {
+  if (unit !== "°C" || !validTarget(state)) return null;
+  const a = state.attributes, raw = a.Raumkorrektur;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw === 0 || raw < -3 || raw > 3 || !Number.isInteger(raw * 2)) return null;
+  const base = Math.round((a.temperature - raw) * 1e8) / 1e8;
+  return Number.isFinite(base) && base >= a.min_temp && base <= a.max_temp ? base : null;
+}
+// The same shared intent and service as a native target gesture: the native
+// control stays inert until the coherent readback releases the intent; a
+// transport error only makes the outcome unknown, never a success.
+export function requestCorrectionReset({ hass, state, unit, presentation }) {
+  const base = correctionResetTarget(state, unit);
+  if (base === null || !haConnected(hass) || presentation.intent || !presentation.allowsRequest(state, unit)) return null;
+  const intent = presentation.begin(state, unit, base);
+  if (!intent) return null;
+  intent.status = "pending"; intent.submitted = true; presentation.notify();
+  try {
+    Promise.resolve(hass.callService("climate", "set_temperature", { entity_id: state.entity_id, temperature: base }))
+      .catch(() => presentation.unknown(intent));
+  } catch { presentation.unknown(intent); }
+  return intent;
+}
+function correctionResetButton(document, onClick) {
+  const button = document.createElement("button");
+  button.type = "button"; button.dataset.hargassnerCorrectionReset = VERSION; button.textContent = "Korrektur ±0";
+  button.setAttribute("aria-label", "Raumkorrektur auf ±0 zurücksetzen"); button.title = "Raumkorrektur auf ±0 setzen";
+  button.style.cssText = "box-sizing:border-box;height:24px;margin:0 auto;padding:0 10px;font:inherit;font-size:12px;line-height:22px;color:var(--primary-color);background:none;border:1px solid var(--divider-color);border-radius:12px;cursor:pointer";
+  button.addEventListener("click", event => { event.stopPropagation(); onClick(); });
+  return button;
+}
+
 const correctionSessions = new WeakMap();
 function correctionPresentation(hass, link) {
   const connection = hass?.connection;
@@ -719,8 +762,15 @@ export function createHargassnerCorrectionControl(environment, current) {
     const line = document.createElementNS("http://www.w3.org/2000/svg", "path");
     line.setAttribute("d", pathData); line.setAttribute("fill", "none"); line.setAttribute("stroke", "currentColor");
     line.setAttribute("stroke-width", "2"); line.setAttribute("stroke-linecap", "round");
-    icon.append(line); button.append(icon); buttons.append(button);
+    icon.append(line); button.append(icon);
   }
+  // "Korrektur ±0": offered between the steps only for a confirmed non-zero
+  // value with nothing collected or requested; it sends 0 through submit().
+  const zero = document.createElement("button");
+  zero.type = "button"; zero.textContent = "±0"; zero.dataset.hargassnerCorrectionReset = VERSION;
+  zero.setAttribute("aria-label", "Raumkorrektur auf ±0 zurücksetzen"); zero.title = "Korrektur ±0";
+  zero.style.cssText = "display:none;font:inherit;font-size:13px;font-weight:500";
+  buttons.append(minus, zero, plus);
   const note = document.createElement("div"); note.setAttribute("role", "status"); note.setAttribute("aria-live", "polite");
   note.style.cssText = "min-height:0;font-size:11px;line-height:16px;margin-top:2px;color:var(--secondary-text-color)";
   node.append(controlStyle, label, dial, buttons, note);
@@ -769,6 +819,9 @@ export function createHargassnerCorrectionControl(environment, current) {
     if (dial.style.opacity !== (disabled ? "0.6" : "")) dial.style.opacity = disabled ? "0.6" : "";
     if (minus.disabled !== (disabled || actual <= -3)) minus.disabled = disabled || actual <= -3;
     if (plus.disabled !== (disabled || actual >= 3)) plus.disabled = disabled || actual >= 3;
+    const offerZero = !disabled && !model?.intent && draft === null && timer === null && link.value !== 0;
+    if (zero.style.display !== (offerZero ? "" : "none")) zero.style.display = offerZero ? "" : "none";
+    if (buttons.style.maxWidth !== (offerZero ? "176px" : "120px")) buttons.style.maxWidth = offerZero ? "176px" : "120px";
     const message = model?.intent ? model.intent.status === "pending" ? "Angefragt · Bestätigung ausstehend" : "Angefragt · Bestätigung unklar" :
       !link.available ? "Raumkorrektur nicht verfügbar" : model?.failure ? "Änderung abgelehnt · bestätigte Raumkorrektur" : "";
     text(note, message);
@@ -816,6 +869,11 @@ export function createHargassnerCorrectionControl(environment, current) {
     change(Math.min(3, Math.max(-3, (timer !== null ? draft : model.intent?.value ?? context.link.value) + delta)));
   };
   minus.addEventListener("click", () => increment(-0.5)); plus.addEventListener("click", () => increment(0.5));
+  zero.addEventListener("click", () => {
+    const context = allowed();
+    if (!context || draft !== null || timer !== null || model.intent || context.link.value === 0) return;
+    if (change(0, false)) submit(epoch);
+  });
   dial.addEventListener("keydown", event => {
     if (["ArrowUp", "ArrowRight", "ArrowDown", "ArrowLeft", "Home", "End"].includes(event.key)) {
       event.preventDefault();
@@ -1221,7 +1279,7 @@ export function installHargassnerThermostatCard(environment = window) {
           .retry{position:absolute;bottom:4px;max-width:calc(100% - 32px)}
           .footer{box-sizing:border-box;padding:0 16px 12px;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:56px 36px 18px;gap:6px;align-items:center;justify-items:center;text-align:center;min-height:0}
           .status-label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
-          .mode{min-width:0;width:100%;max-width:240px}.mode ha-control-select-menu{max-width:100%}.status{width:100%;height:36px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:13px;line-height:18px;overflow-wrap:anywhere}.status>div:last-child{max-height:36px;overflow:auto}.error{max-width:100%;font-size:12px;line-height:18px;height:18px;color:var(--error-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.error:empty{visibility:hidden}[hidden]{display:none!important}
+          .mode{min-width:0;width:100%;max-width:240px}.mode ha-control-select-menu{max-width:100%}.status{width:100%;height:36px;display:flex;align-items:center;justify-content:center;text-align:center;font-size:13px;line-height:18px;overflow-wrap:anywhere}.status>div:last-child{max-height:36px;overflow:auto}.error{grid-row:3;grid-column:1;max-width:100%;font-size:12px;line-height:18px;height:18px;color:var(--error-color);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.error:empty{visibility:hidden}.footer>[data-hargassner-correction-reset]{grid-row:3;grid-column:1;height:18px!important;line-height:16px!important;font-size:11px!important;padding:0 8px!important}.error:not(:empty)~[data-hargassner-correction-reset]{display:none!important}[hidden]{display:none!important}
           button{font:inherit;color:var(--primary-color);background:none;border:1px solid var(--divider-color);border-radius:8px;padding:8px;cursor:pointer}`;
         const card = document.createElement("ha-card"), title = document.createElement("h3");
         const nativeHost = document.createElement("div"), placeholder = document.createElement("div");
@@ -1244,11 +1302,13 @@ export function installHargassnerThermostatCard(environment = window) {
         statusLabel.className = "status-label"; statusLabel.textContent = "Heizkreisstatus";
         status.append(statusLabel, statusValue);
         const error = document.createElement("div"); error.className = "error"; error.setAttribute("role", "alert");
-        footer.append(menuHost, status, error);
+        // "Korrektur ±0" shares the footer's message row; an error wins.
+        const reset = correctionResetButton(document, () => this._requestCorrectionReset()); reset.hidden = true;
+        footer.append(menuHost, status, error, reset);
         controlArea.append(nativeHost, correctionHost, current, correction, updateNote, placeholder, retry);
         card.append(title, controlArea, footer);
         this.shadowRoot.append(style, card);
-        this._ui = { card, title, controlArea, nativeHost, updateNote, placeholder, retry, footer, current, correction, correctionHost, menuHost, statusValue, error };
+        this._ui = { card, title, controlArea, nativeHost, updateNote, placeholder, retry, footer, current, correction, correctionHost, menuHost, statusValue, error, reset };
       }
       _renderCorrection(state) {
         if (!this._ui?.correctionHost) return false;
@@ -1357,6 +1417,18 @@ export function installHargassnerThermostatCard(environment = window) {
         };
         this._ui.nativeHost.addEventListener("context-request", this._nativeContext);
       }
+      _correctionResetOffered(state, view = this._presentation.display(state, this._connectedHA())) {
+        return !!this._native && this.isConnected && !view.inert && !this._presentation.intent && this._connectedHA() &&
+          sameHaSession(this._haSession, this._hass) && this._presentation.allowsRequest(state) &&
+          correctionResetTarget(state, this._hass?.config?.unit_system?.temperature) !== null;
+      }
+      _requestCorrectionReset() {
+        const state = this._hass?.states?.[this._config?.entity];
+        if (!this._ui?.reset || this._ui.reset.hidden || state?.entity_id !== this._config?.entity || !this._correctionResetOffered(state)) return;
+        if (requestCorrectionReset({ hass: this._hass, state, unit: this._hass?.config?.unit_system?.temperature, presentation: this._presentation }))
+          this._ui.error.textContent = "";
+        this._render();
+      }
       _prepareTarget(target, submitted = false) {
         const state = this._hass?.states?.[this._config?.entity], unit = this._hass?.config?.unit_system?.temperature;
         if (!this._connectedHA() || !validTarget(state)) return null;
@@ -1401,6 +1473,7 @@ export function installHargassnerThermostatCard(environment = window) {
           this._controlLease?.rotate(context, this._makeNativeApi(this._native, this._generation));
         }
         const view = this._presentation.display(state, this._connectedHA());
+        if (this._ui.reset) this._ui.reset.hidden = !this._correctionResetOffered(state, view);
         this._held = view.inert ? { id: "presentation_only" } : null;
         this._native.hass = view.state === state ? this._hass : { ...this._hass, states: { ...this._hass.states, [state.entity_id]: view.state } };
         this._native.inert = view.inert; if (this._native.style) this._native.style.opacity = view.inert ? "0.6" : "";
@@ -1441,6 +1514,7 @@ export function installHargassnerThermostatCard(environment = window) {
         ui.current.hidden = false;
         ui.footer.hidden = !scoped;
         ui.retry.hidden = !this._failed || !scoped || !!this._native;
+        if (ui.reset) ui.reset.hidden = true; // Offered again only by _renderNative for a qualified target.
         if (!scoped) {
           ui.correction.textContent = ""; ui.correction.hidden = true;
           ui.updateNote.textContent = ""; ui.updateNote.hidden = true;
@@ -1571,7 +1645,7 @@ if (typeof window !== "undefined") {
  * Pinned native contract: frontend20260930.3 ha-device-entities-card.
  * No discovery, entity/device registry, data fetch or service changes.
  */
-const DEVICE_GROUP_VERSION = "1.4.0";
+const DEVICE_GROUP_VERSION = "1.5.0";
 const DEVICE_GROUP_KEY = Symbol.for("hargassner.device.groups.v1");
 const DEVICE_GROUP_LABELS = Object.freeze({
   "heizkreis_1": "Heizkreis 1",
@@ -1673,7 +1747,13 @@ const DEVICE_ENTITY_GROUPS = Object.freeze({
   "text.name_heizkreis_2": "heizkreis_2",
   "text.name_boiler_1": "warmwasser",
   "text.name_zentralpuffer": "puffer",
-  "text.name_pwm_diffreg_kreis_1": "solar"
+  "text.name_pwm_diffreg_kreis_1": "solar",
+  // Always-published energy totals (adapter energy_totals_v1, HA-ENERGY.md).
+  "sensor.pelletverbrauch_foerderzaehler": "pelletslager",
+  "sensor.pelletenergie_schaetzung": "pelletslager",
+  "sensor.brennerstunden": "kessel",
+  "sensor.brennerstarts": "kessel",
+  "sensor.heizgradtage": "steuerung"
 });
 const DEVICE_ENTITY_SUFFIXES = Object.entries(DEVICE_ENTITY_GROUPS).map(([id, group]) => {
   const [domain, slug] = id.split(".");

@@ -11,7 +11,7 @@ import json
 import math
 import re
 
-APP_VERSION = '1.6.3'
+APP_VERSION = '1.6.5'
 REPORT_SCHEMA = 'harg-house-report/1'
 CONTEXT_SCHEMA_PREFIX = 'harg-house-context/'
 CONTEXT_MAJORS = (1,)
@@ -48,28 +48,81 @@ STUCK_S = 259200
 BATTERY_DWELL_S = 3600
 ALL_UNAVAILABLE_DWELL_S = 1800
 FROST_DWELL_S = 600
-NO_RESPONSE_EXPIRY_S = 86400
+# A no_response finding ends 48 h after the last heating start the room did not
+# warm on (daily starts keep it; one day without a failed start does not end it).
+NO_RESPONSE_EXPIRY_S = 172800
 MEDIAN_WINDOW_S = 900
 HISTORY_MAX = 12000
 HISTORY_AGE_S = 7 * 86400
 NOT_SUPPLYING_RESTART_S = 3600
 MAX_ELAPSED_S = 300
 
+# Robustness against normal household behaviour (owner, 2026-11-18): the room
+# rules report a persistent heating problem, never one aired, cooled or
+# turned-down afternoon. See DOCS.md "What is checked".
+# Airing: a drop of AIRING_DROP within 15 min starts an episode. It lasts at
+# least the type's 'airing' time after the last drop, then until the room is
+# back (within AIRING_BACK of its level before, or less than 1 K below the
+# target), at most AIRING_MAX_S. Room rules neither accrue nor count meanwhile.
+AIRING_DROP = 1.0
+AIRING_BACK = 0.5
+AIRING_MAX_S = 43200
+# Heating starts: a room is judged only when it starts at least ARM_DEFICIT
+# below its target. no_response needs failed starts on NO_RESPONSE_DAYS
+# different days (starts at least DAY_GAP_S apart), all within
+# NO_RESPONSE_SPAN_S, without a start the room warmed on and without the room
+# back within 1 K of its day target in between.
+# circuit_no_response needs CIRCUIT_NO_RESPONSE_DAYS such starts of the circuit.
+ARM_DEFICIT = 1.5
+NO_RESPONSE_DAYS = 3
+CIRCUIT_NO_RESPONSE_DAYS = 2
+DAY_GAP_S = 72000
+NO_RESPONSE_SPAN_S = 345600
+# room_cold: the room has been cold (the type's 'cold_room' dwell) and has not
+# come back to within 1 K of its day target for ROOM_COLD_PERSIST_S; it ends
+# when the room gets there, or COLD_FORGET_S after the last cold dwell (also
+# while the context is missing or the circuit is off).
+ROOM_COLD_PERSIST_S = 43200
+COLD_FORGET_S = 93600
+# sensor_jumping: JUMP_EVENTS jumps within 24 h. A step (8 K or more) is one;
+# a 3 K excursion that returns is one only when it is faster than JUMP_RATE
+# K/min, which room air at a sensor cannot do (an open window can).
+JUMP_EVENTS = 3
+JUMP_RATE = 1.5
+
 # Per circuit type (spec 6.2).
 TYPE_CONSTANTS = {
     'radiator': {'settle': 7200, 'airing': 3600, 'cold_room': 5400, 'cold_circuit': 10800,
                  'window': 3600, 'flow_margin': 8.0, 'warm_flow': 5.0, 'warm_night': 7200,
                  'warm_circuit': 21600, 'hot': 3600, 'limit_cold': 21600, 'pause': 7200,
-                 'startup': 1800},
-    'floor': {'settle': 28800, 'airing': 10800, 'cold_room': 14400, 'cold_circuit': 28800,
+                 'startup': 1800, 'trend': 3600},
+    'floor': {'settle': 28800, 'airing': 10800, 'cold_room': 14400, 'cold_circuit': 10800,
               'window': 21600, 'flow_margin': 3.0, 'warm_flow': 2.0, 'warm_night': 14400,
               'warm_circuit': 43200, 'hot': 3600, 'limit_cold': 43200, 'pause': 21600,
-              'startup': 1800},
+              'startup': 1800, 'cold_day_only': True, 'cold_settle': 14400, 'cold_pause': 86400,
+              'trend': 10800},
 }
+# Underfloor circuit_cold (owner decision 2026-11-18; designed for split daily
+# programmes such as 06:00-09:00 and 15:00-23:00 with setback between). With the general 8 h settle
+# and 8 h dwell the check needed one 16 h phase and could never fire. Now it is
+# judged only in a day phase, against the day target:
+# - cold_settle 4 h after the day phase starts (or the target rises): a floor
+#   circuit brings rooms back from setback within this time (a few tenths of a
+#   degree per hour); the heat-up never counts, so the 3-hour morning window is
+#   never judged at all;
+# - cold_circuit 3 h of every usable room at least 3 K below the day target
+#   (2.5 K holds), so 4 h + 3 h = 7 h fit into the 8 h evening phase: a circuit
+#   that is still that cold 7 h after the day phase began does not heat;
+# - never judged during setback; an active finding holds through setback and the
+#   next heat-up (pause up to cold_pause 24 h) and is cleared only when the next
+#   day phase is judged warm enough, so it does not end and return every night.
 # 'startup': after a heat-up trigger the pump may still be starting and the
 # flow still cold. During this allowance a pump off or a flow below the margin
 # pauses the response window instead of disarming it (W starts counting once
 # the circuit really supplies).
+# 'trend': a room counts as warming when the median of its last 15 min is at
+# least the minimum rise above the median 15 min ending 'trend' earlier. A room
+# that warms is not "staying cold" (room_cold, circuit_cold wait meanwhile).
 # Warm rules settle on a change of U = max(T, day), the mode or a restart of
 # supplying, not on every phase change: U stays the day target across a normal
 # day/setback cycle, so the night setback is no reason to stop judging them.
@@ -446,11 +499,14 @@ class Sensor:
         self.last_key = None
         self.last_update = None                     # mono of the last distinct update
         self.last_accepted = None
-        self.pending = None                         # spike candidate (mono, value, previous)
-        self.spikes = deque()
+        self.last_accepted_mono = None
+        self.pending = None                         # spike candidate (mono, value, previous, previous mono)
+        self.spikes = deque()                       # jump events (counted spikes and steps) of the last 24 h
         self.step_until = None
         self.jump_first = self.jump_last = None
-        self.airing_drop = None
+        self.airing_drop = None                     # mono of the last fast drop
+        self.airing_start = None                    # first drop of the current airing episode
+        self.airing_ref = None                      # the level before that episode
         self.same_since = None
         self.same_count = 0
         self.presence = 'unknown'                   # ok, missing, unknown
@@ -499,27 +555,41 @@ class Sensor:
         else:
             self.same_since, self.same_count = mono, 0
         recent = self.recent(mono)
-        if recent and max(recent) - value >= 1.0:
+        if recent and max(recent) - value >= AIRING_DROP - 1e-9:
+            if self.airing_start is None:
+                self.airing_start, self.airing_ref = mono, max(recent)
             self.airing_drop = mono
         self.history.append((mono, value))
         self.last_accepted = value
+        self.last_accepted_mono = mono
 
     def _occurrence(self, mono):
         if self.jump_last is None or mono - self.jump_last >= EVENT_EXPIRY_S:
             self.jump_first = mono
         self.jump_last = mono
 
+    def _event(self, mono):
+        """One jump; JUMP_EVENTS of them within 24 h make the sensor jumping."""
+        self.spikes.append(mono)
+        while self.spikes and mono - self.spikes[0] > EVENT_EXPIRY_S:
+            self.spikes.popleft()
+        if len(self.spikes) >= JUMP_EVENTS:
+            self._occurrence(mono)
+
     def ingest(self, mono, value):
         """One distinct numeric in-range update."""
         if self.pending is not None:
-            when, candidate, before = self.pending
+            when, candidate, before, before_mono = self.pending
             if mono - when <= SPIKE_WINDOW_S and abs(value - before) <= 1.0 and abs(value - candidate) >= 3.0:
+                # Discarded either way; counted only when faster than room air
+                # can change (a sparse sensor at an open window is not jumping).
+                # The shorter leg: an on-change sensor may have been silent
+                # for an hour before a glitch that is gone a minute later.
                 self.pending = None
-                self.spikes.append(when)
-                while self.spikes and mono - self.spikes[0] > EVENT_EXPIRY_S:
-                    self.spikes.popleft()
-                if len(self.spikes) >= 3:
-                    self._occurrence(mono)
+                legs = [mono - when] + ([when - before_mono] if before_mono is not None else [])
+                gap = max(60.0, min(legs))
+                if abs(candidate - before) * 60.0 / gap >= JUMP_RATE - 1e-9:
+                    self._event(when)
             else:
                 self.pending = None
                 self._accept(when, candidate)
@@ -530,17 +600,19 @@ class Sensor:
             self.history.clear()
             self.same_since, self.same_count = mono, 0
             self.last_accepted = value
+            self.last_accepted_mono = mono
+            self.airing_start = self.airing_ref = None
             self.history.append((mono, value))
             self.step_until = mono + STEP_UNUSABLE_S
-            self._occurrence(mono)
+            self._event(mono)
         elif abs(value - self.last_accepted) >= 3.0:
-            self.pending = (mono, value, self.last_accepted)
+            self.pending = (mono, value, self.last_accepted, self.last_accepted_mono)
         else:
             self._accept(mono, value)
 
     def settle_pending(self, now):
         if self.pending is not None and now - self.pending[0] > SPIKE_WINDOW_S:
-            when, candidate, _before = self.pending
+            when, candidate = self.pending[0], self.pending[1]
             self.pending = None
             self._accept(when, candidate)
 
@@ -589,7 +661,54 @@ class Sensor:
         return self.unusable_reason(now) is None
 
     def airing(self, now, recovery):
+        """The short pause after the last fast drop (circuit-wide rules)."""
         return self.airing_drop is not None and now - self.airing_drop < recovery
+
+    def airing_episode(self, now, recovery, recovered):
+        """An airing episode (room rules): at least `recovery` after the last fast
+        drop, then until the room is back, at most AIRING_MAX_S. `recovered`:
+        the room is less than 1 K below its current target. Once over, it stays
+        over until the next fast drop."""
+        if self.airing_start is None:
+            return False
+        if self.airing_drop is not None and now - self.airing_drop < recovery and now - self.airing_start < AIRING_MAX_S:
+            return True
+        value = self.value(now)
+        if (recovered or now - self.airing_start >= AIRING_MAX_S
+                or (value is not None and value >= self.airing_ref - AIRING_BACK - 1e-9)):
+            self.airing_start = self.airing_ref = None
+            return False
+        return True
+
+    def trend(self, now, span):
+        """Median of the last 15 min minus the median of the 15 min ending
+        `span` earlier. A window without an update takes the last value before
+        its end (an on-change sensor reports only changes); None without one."""
+        later, earlier, before_later, before_earlier = [], [], None, None
+        for when, value in reversed(self.history):
+            if when > now:
+                continue
+            if when > now - MEDIAN_WINDOW_S:
+                later.append(value)
+                continue
+            if before_later is None:
+                before_later = value
+            if when > now - span:
+                continue
+            if when > now - span - MEDIAN_WINDOW_S:
+                earlier.append(value)
+                continue
+            before_earlier = value
+            break
+        later = later or ([before_later] if before_later is not None else [])
+        earlier = earlier or ([before_earlier] if before_earlier is not None else [])
+        if not later or not earlier:
+            return None
+        return median(later) - median(earlier)
+
+    def min_rise(self):
+        """The smallest rise that counts as warming, for this sensor's resolution."""
+        return max(0.3, 1.5 * self.step_size())
 
     def jumping(self, now):
         return self.jump_last is not None and now - self.jump_last < EVENT_EXPIRY_S
@@ -641,10 +760,21 @@ class Window:
 
 
 class NoResponse:
-    __slots__ = ('trigger', 'onset')
+    """A no_response finding. last: start of the latest heating start without effect."""
+    __slots__ = ('trigger', 'onset', 'last')
 
-    def __init__(self, trigger, onset):
+    def __init__(self, trigger, onset, last=None):
         self.trigger, self.onset = trigger, onset
+        self.last = onset if last is None else last
+
+
+def distinct_days(times):
+    """How many of the (sorted) start times lie at least DAY_GAP_S apart."""
+    count, anchor = 0, None
+    for when in times:
+        if anchor is None or when - anchor >= DAY_GAP_S:
+            count, anchor = count + 1, when
+    return count
 
 
 class Circuit:
@@ -662,6 +792,10 @@ class Circuit:
         self.circuit_cold = Latch()
         self.circuit_warm = Latch()
         self.circuit_no_response = None   # (trigger, onset mono, count, members)
+        self.no_response_last = None      # start of the circuit's latest heating start without effect
+        self.starts = {}                  # trigger -> {'start', 'armed', 'fail', 'pass'} until resolved
+        self.failed_starts = []           # start times of heating starts without effect in any room
+        self.failed_rooms = set()         # the rooms that failed those starts
         self.absent_since = None
         self.last_kind = None             # last known radiator/floor, for pause limits
 
@@ -684,6 +818,10 @@ class HouseEngine:
         self.latches = {}       # (code, entity) -> Latch for per-room rules
         self.windows = {}       # entity -> Window
         self.no_response = {}   # entity -> NoResponse
+        self.response_fails = {}  # entity -> start times of heating starts without effect
+        self.cold_dwell = {}    # entity -> Latch: the room_cold dwell (one cold occasion)
+        self.cold_since = {}    # entity -> first cold occasion since the room last reached its day level
+        self.cold_seen = {}     # entity -> last time a cold occasion was active
         self.frost = None       # (since, onset dict)
         self.all_unavailable = Latch()
         self.pump_off = {}      # entity -> mono since the pump is reported off (room_warm)
@@ -735,8 +873,14 @@ class HouseEngine:
         """
         elapsed = 0.0 if self.last_now is None else min(MAX_ELAPSED_S, max(0.0, now - self.last_now))
         self.last_now, self.wall = now, wall
-        for entity in [e for e, f in self.no_response.items() if now - f.onset >= NO_RESPONSE_EXPIRY_S]:
+        for entity in [e for e, f in self.no_response.items() if now - f.last >= NO_RESPONSE_EXPIRY_S]:
             del self.no_response[entity]
+        for circuit in self.circuits.values():
+            current = circuit.circuit_no_response
+            if current is not None:
+                last = current[1] if circuit.no_response_last is None else circuit.no_response_last
+                if now - last >= NO_RESPONSE_EXPIRY_S:
+                    circuit.circuit_no_response = None
         self.paused = ha != 'running'
         if ha == 'starting':
             self.monitor, self.reason = 'unknown', 'ha_starting'
@@ -764,17 +908,19 @@ class HouseEngine:
     def _pause_all(self, now, elapsed):
         for sensor in self.sensors.values():
             for latch in (sensor.missing, sensor.unavailable, sensor.implausible_latch, sensor.battery_latch):
-                latch.update(None, None, now, elapsed, 0, CONTEXT_FREE_PAUSE_S)
+                latch.update(None, None, now, elapsed, math.inf, CONTEXT_FREE_PAUSE_S)  # a pause never completes a dwell
         for (code, entity), latch in self.latches.items():
             circuit = self.sensors[entity].role
             limit = self._pause_limit(circuit, code)
             latch.update(None, None, now, elapsed, math.inf, limit)
+        for entity, latch in self.cold_dwell.items():
+            latch.update(None, None, now, elapsed, math.inf, self._pause_limit(self.sensors[entity].role, 'room_cold'))
         for circuit in self.circuits.values():
             limit = self._pause_limit(circuit.name, 'circuit')
             circuit.circuit_cold.update(None, None, now, elapsed, math.inf, limit)
             circuit.circuit_warm.update(None, None, now, elapsed, math.inf, limit)
         for entity in list(self.windows):
-            self._window_pause(entity, elapsed)
+            self._window_pause(entity, elapsed, now)
         self.all_unavailable.update(None, None, now, elapsed, math.inf, CONTEXT_FREE_PAUSE_S)
 
     def _pause_limit(self, role, code):
@@ -790,7 +936,7 @@ class HouseEngine:
             if sample is None:
                 # Not read this cycle: pause this sensor's timers.
                 for latch in (sensor.missing, sensor.unavailable, sensor.implausible_latch, sensor.battery_latch):
-                    latch.update(None, None, now, elapsed, 0, CONTEXT_FREE_PAUSE_S)
+                    latch.update(None, None, now, elapsed, math.inf, CONTEXT_FREE_PAUSE_S)  # a pause never completes a dwell
                 continue
             if sample == 'missing':
                 presence, numeric, value, battery, name = 'missing', False, None, None, None
@@ -951,34 +1097,70 @@ class HouseEngine:
             return (target - allowance) - values[entity]
 
         recovery = constants['airing']
-        # Heat-up trigger: arm the response windows.
+        # Underfloor rules by the last known type (an unknown type falls back
+        # to the floor constants above, which must not change a radiator's pause).
+        floor_rules = TYPE_CONSTANTS.get(kind if kind in TYPE_CONSTANTS else circuit.last_kind, {})
+        day_only = bool(floor_rules.get('cold_day_only'))
+        cold_settling = day_only and (circuit.settle_start is None
+                                      or now - circuit.settle_start < floor_rules['cold_settle'])
+        # Per room this step: in an airing episode, warming, back at its day level.
+        airing, warming, reached = {}, {}, {}
+        for entity in entities:
+            sensor = self.sensors[entity]
+            d = deficit(entity)
+            airing[entity] = sensor.airing_episode(now, recovery, d is not None and d < 1.0)
+            rise = sensor.trend(now, constants['trend']) if entity in values else None
+            warming[entity] = rise is not None and rise >= sensor.min_rise() - 1e-9
+            allowance = COOLER_ALLOWANCE if entity in self.options.cooler else 0.0
+            reached[entity] = (usable_ctx and entity in values and upper is not None
+                               and values[entity] >= upper - allowance - 1.0 - 1e-9)
+        for key in [k for k, start in circuit.starts.items() if now - start['start'] > NO_RESPONSE_SPAN_S]:
+            del circuit.starts[key]
+        # Heat-up trigger: arm the response windows (never in an airing episode).
         if trigger and known and not absent:
             circuit.triggers += 1
+            key = (circuit.name, circuit.triggers)
+            circuit.starts[key] = {'start': now, 'armed': set(), 'fail': set(), 'pass': set(),
+                                   'usable': len(usable)}
             for entity in usable:
+                self._close(circuit, entity, self.windows.pop(entity, None), None, now)
                 sensor = self.sensors[entity]
                 d0 = deficit(entity)
-                min_rise = max(0.3, 1.5 * sensor.step_size())
-                if d0 is not None and d0 >= max(1.0, min_rise + 0.5) - 1e-9:
-                    self.windows[entity] = Window((circuit.name, circuit.triggers), now, values[entity])
-                else:
-                    self.windows.pop(entity, None)
+                if (d0 is not None and not airing[entity]
+                        and d0 >= max(ARM_DEFICIT, sensor.min_rise() + 0.5) - 1e-9):
+                    self.windows[entity] = Window(key, now, values[entity])
+                    circuit.starts[key]['armed'].add(entity)
+            if not circuit.starts[key]['armed']:
+                del circuit.starts[key]
         for entity in entities:
             sensor = self.sensors[entity]
             ok = entity in values
-            airing = sensor.airing(now, recovery)
+            aired = airing[entity]
             d = deficit(entity)
-            # room_cold
-            if base is not True:
+            # room_cold: one cold occasion is the type's dwell of a room 1.5 K
+            # below its target that does not warm; the finding needs the room
+            # to stay away from its day level for ROOM_COLD_PERSIST_S.
+            # Underfloor (cold_day_only, as circuit_cold): judged only in a day
+            # phase after cold_settle; setback and heat-up pause the dwell (up
+            # to cold_pause), so it can add up over the evening phases of a
+            # programme like 06:00-09:00 and 15:00-23:00 instead of never
+            # completing behind an 8 h settle.
+            if day_only and base is not None and source['phase'] != 'day':
+                fire = hold = None
+            elif base is not True:
                 fire = hold = base
-            elif settling:
+            elif day_only and cold_settling:
+                fire = hold = None
+            elif settling and not day_only:
                 fire = hold = False
-            elif not ok or airing or d is None:
+            elif not ok or aired or d is None:
                 fire = hold = None
             else:
-                fire, hold = d >= 1.5, d >= 1.0
-            self.latch('room_cold', entity).update(
-                fire, hold, now, elapsed, constants['cold_room'], limit,
-                lambda e=entity: {'room': half(values[e]), 'target': half(target)})
+                fire, hold = d >= 1.5 and not warming[entity], d >= 1.0
+            dwell = self.cold_dwell.setdefault(entity, Latch())
+            dwell.update(fire, hold, now, elapsed, constants['cold_room'],
+                         floor_rules['cold_pause'] if day_only else limit)
+            self._room_cold(entity, dwell, base, reached[entity], now, values.get(entity), target)
             # limit_cold
             if absent or not known or cls in (UNKNOWN, TRANSITION):
                 fire = hold = None
@@ -988,7 +1170,7 @@ class HouseEngine:
                 fire = hold = None
             elif source['phase'] != 'day':
                 fire = hold = False
-            elif not ok or airing or d is None:
+            elif not ok or aired or d is None:
                 fire = hold = None
             else:
                 if outdoor_avg is None:
@@ -1053,20 +1235,41 @@ class HouseEngine:
                 latch.update(fire, hold, now, elapsed, constants['hot'], limit,
                              lambda e=entity: {'room': half(values[e])})
             # no_response window and finding
-            self._response(circuit, entity, sensor, now, elapsed, base, ok, airing, d,
+            self._response(circuit, entity, sensor, now, elapsed, base, ok, aired, d,
                            values.get(entity), pump, flow, constants, limit)
         # Circuit-wide cold.
+        cold_limit = limit
         if base is not True:
             fire = hold = base
+        elif constants.get('cold_day_only'):
+            # Underfloor (see TYPE_CONSTANTS): day phase only, after cold_settle.
+            cold_limit = constants['cold_pause']
+            day_phase = bool(source) and source['phase'] == 'day'
+            if not day_phase:
+                fire = hold = None          # setback or unknown phase: never judged, a finding holds
+            elif cold_settling:
+                fire, hold = False, None    # heat-up: no new finding, an existing one holds
+            elif (len(usable) < 2 or target is None or source.get('day_target') is None
+                  or any(self.sensors[e].airing(now, recovery) for e in usable)):
+                fire = hold = None
+            else:
+                deficits = [deficit(e) for e in usable]   # target is the day target in the day phase
+                fire, hold = all(x >= 3.0 for x in deficits), all(x >= 2.5 for x in deficits)
+                if fire and any(warming[e] for e in usable):
+                    fire = None  # still warming (back from a holiday): wait, a working circuit
         elif settling:
             fire = hold = False
         elif len(usable) < 2 or target is None or any(self.sensors[e].airing(now, recovery) for e in usable):
+            # The short pause after a fast drop only: a failed pump must not
+            # wait until an aired room has come back.
             fire = hold = None
         else:
             deficits = [deficit(e) for e in usable]
             fire, hold = all(x >= 3.0 for x in deficits), all(x >= 2.5 for x in deficits)
+            if fire and any(warming[e] for e in usable):
+                fire = None      # still warming up (after a holiday, a cold morning): wait
         circuit.circuit_cold.update(
-            fire, hold, now, elapsed, constants['cold_circuit'], limit,
+            fire, hold, now, elapsed, constants['cold_circuit'], cold_limit,
             lambda: {'room': half(min(values[e] for e in usable)), 'target': half(target), 'count': len(usable)})
         # Circuit-wide warm.
         warm = [e for e in usable if e not in self.options.no_warm]
@@ -1083,20 +1286,40 @@ class HouseEngine:
         circuit.circuit_warm.update(
             fire, hold, now, elapsed, constants['warm_circuit'], limit,
             lambda: {'room': half(median(values[e] for e in warm)), 'target': half(upper)})
-        # Circuit-wide no response: every usable sensor for the same trigger.
-        current = circuit.circuit_no_response
-        if current is not None:
-            trig, _onset, _count, members = current
-            if not all(e in self.no_response and self.no_response[e].trigger == trig for e in members):
-                circuit.circuit_no_response = None
-        if circuit.circuit_no_response is None and len(usable) >= 2:
-            triggers = {self.no_response[e].trigger if e in self.no_response else None for e in usable}
-            if len(triggers) == 1 and None not in triggers:
-                trig = triggers.pop()
-                onset = min(self.no_response[e].onset for e in usable)
-                circuit.circuit_no_response = (trig, onset, len(usable), tuple(usable))
+        # A room back at its day level heats well enough: its failed starts
+        # (a door open every morning, a slow start) and its finding are over.
+        for entity in entities:
+            if reached[entity]:
+                self.response_fails.pop(entity, None)
+                self.no_response.pop(entity, None)
+        # The circuit's: once every room that failed is back at its day level.
+        if circuit.failed_rooms and all(reached.get(e) for e in circuit.failed_rooms):
+            circuit.failed_starts, circuit.failed_rooms = [], set()
+            circuit.circuit_no_response = None
 
-    def _window_pause(self, entity, elapsed):
+    def _room_cold(self, entity, dwell, base, reached, now, value, target):
+        """The room_cold finding from its dwell latch (see ROOM_COLD_PERSIST_S)."""
+        if dwell.active:
+            self.cold_since.setdefault(entity, now)
+            self.cold_seen[entity] = now
+        if reached or (entity in self.cold_seen and now - self.cold_seen[entity] > COLD_FORGET_S):
+            self.cold_since.pop(entity, None)
+            self.cold_seen.pop(entity, None)
+        latch = self.latch('room_cold', entity)
+        if latch.active:
+            # Only the room itself ends it (back at its day level), or no cold
+            # spell for COLD_FORGET_S: a night off (heating limit) does not.
+            if entity not in self.cold_since:
+                latch.clear()
+            else:
+                latch.timer.paused = 0.0
+        elif (dwell.active and entity in self.cold_since and now - self.cold_since[entity] >= ROOM_COLD_PERSIST_S
+              and value is not None and target is not None):
+            latch.timer.reset()
+            latch.timer.since = now
+            latch.active, latch.onset = True, {'room': half(value), 'target': half(target)}
+
+    def _window_pause(self, entity, elapsed, now):
         window = self.windows.get(entity)
         if window is None:
             return
@@ -1104,16 +1327,19 @@ class HouseEngine:
         role = self.sensors[entity].role
         if window.paused > self._pause_limit(role, 'window'):
             del self.windows[entity]
+            self._close(self.circuits.get(role), entity, window, None, now)
 
-    def _response(self, circuit, entity, sensor, now, elapsed, base, ok, airing, d, r, pump, flow, constants, limit):
-        finding = self.no_response.get(entity)
-        if finding is not None:
-            if now - finding.onset >= NO_RESPONSE_EXPIRY_S or (d is not None and ok and d < 1.0):
-                del self.no_response[entity]
+    def _response(self, circuit, entity, sensor, now, elapsed, base, ok, aired, d, r, pump, flow,
+                  constants, limit):
         window = self.windows.get(entity)
         if window is None:
             return
-        if base is None or not ok or airing:
+        if aired:
+            # An airing in the window: this heating start does not count.
+            del self.windows[entity]
+            self._close(circuit, entity, window, None, now)
+            return
+        if base is None or not ok:
             condition = None
         elif base is False:
             condition = False
@@ -1127,29 +1353,79 @@ class HouseEngine:
             condition = True
         if condition is False:
             del self.windows[entity]
+            self._close(circuit, entity, window, None, now)
             return
         if condition is None:
             window.paused += elapsed
             if window.paused > limit:
                 del self.windows[entity]
+                self._close(circuit, entity, window, None, now)
             return
         window.paused = 0.0
         window.active += elapsed
         window.samples.append((window.active, r))
         if window.active < constants['window']:
             return
+        # The trend over the window: median of its last quarter minus median of
+        # its first quarter (at least 10 min each), robust to noise and dips.
         length = constants['window']
-        first = median(v for t, v in window.samples if t <= 600)
-        last = median(v for t, v in window.samples if t >= length - 600)
+        quarter = max(600.0, length / 4)
+        first = median([v for t, v in window.samples if t <= quarter])
+        last = median([v for t, v in window.samples if t >= length - quarter])
         del self.windows[entity]
-        min_rise = max(0.3, 1.5 * sensor.step_size())
         if first is None or last is None:
-            return
-        rise = last - first
-        if rise >= min_rise - 1e-9:
-            self.no_response.pop(entity, None)
+            outcome = None
+        elif last - first >= sensor.min_rise() - 1e-9:
+            outcome = 'pass'
         elif d is not None and d >= 1.0:
-            self.no_response[entity] = NoResponse(window.trigger, window.start)
+            outcome = 'fail'
+        else:
+            outcome = None     # still short, but near its target: not "not responding"
+        self._close(circuit, entity, window, outcome, now)
+
+    def _close(self, circuit, entity, window, outcome, now):
+        """Book one ended response window: 'pass', 'fail' or None (does not count)."""
+        if window is None:
+            return
+        fails = self.response_fails.setdefault(entity, [])
+        if outcome == 'pass':
+            fails.clear()
+            self.no_response.pop(entity, None)
+        elif outcome == 'fail':
+            fails.append(window.start)
+            fails[:] = [when for when in fails if now - when <= NO_RESPONSE_SPAN_S]
+            if distinct_days(fails) >= NO_RESPONSE_DAYS:
+                finding = self.no_response.get(entity)
+                if finding is None:
+                    self.no_response[entity] = NoResponse(window.trigger, now, window.start)
+                else:
+                    finding.trigger, finding.last = window.trigger, window.start
+        start = circuit.starts.get(window.trigger) if circuit is not None else None
+        if start is None:
+            return
+        start['armed'].discard(entity)
+        if outcome is not None:
+            start[outcome].add(entity)
+        if start['armed']:
+            return
+        # Every room armed at this start has ended: judge the circuit's start.
+        del circuit.starts[window.trigger]
+        if start['pass']:
+            circuit.failed_starts, circuit.failed_rooms = [], set()
+            circuit.circuit_no_response = None
+        elif len(start['fail']) >= 2 and 2 * len(start['fail']) >= start['usable']:
+            circuit.failed_starts.append(start['start'])
+            circuit.failed_rooms |= start['fail']
+            circuit.failed_starts = [when for when in circuit.failed_starts if now - when <= NO_RESPONSE_SPAN_S]
+            if distinct_days(circuit.failed_starts) >= CIRCUIT_NO_RESPONSE_DAYS:
+                members = tuple(e for e in self.options.circuit_entities(circuit.name) if e in start['fail'])
+                current = circuit.circuit_no_response
+                if current is None:
+                    circuit.circuit_no_response = (window.trigger, now, len(members), members)
+                else:
+                    # Onset and count stay frozen while the finding lasts.
+                    circuit.circuit_no_response = (window.trigger, current[1], current[2], members)
+                circuit.no_response_last = start['start']
 
     # -- frost and aggregation (context-free)
     def _frost(self, now, elapsed):

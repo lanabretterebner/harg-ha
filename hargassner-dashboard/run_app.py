@@ -15,7 +15,7 @@ import threading
 from ingress_proxy import ProxyServer, ProxyHandler, trusted_identity, one_header, Rejected
 from app_monitor import MonitorSettings, Monitor, supervisor_token
 from house_monitor import HouseMonitor, load_house_options
-from operation_watchdog import OperationWatchdog
+from operation_watchdog import OperationWatchdog, load_notify_watch
 from room_picker import RoomPicker, SAVE_BODY_CAP, TOKEN_HEADER, same_origin, announce_room_page
 
 STATUS_PATH = '/api/local-monitor/status'
@@ -160,7 +160,8 @@ def main():
             # WebSocket connect still waiting must not delay the app's exit.
             worker = threading.Thread(target=house.run, args=(stop,), name='house-monitor', daemon=True)
             workers.append(worker); worker.start()
-        watchdog = OperationWatchdog(heartbeat=monitor.operation_heartbeat if monitor else lambda: None)
+        watchdog = OperationWatchdog(heartbeat=monitor.operation_heartbeat if monitor else lambda: None,
+                                     notify_watch=load_notify_watch())
         worker = threading.Thread(target=watchdog.run, args=(stop,), name='operation-watchdog', daemon=True)
         workers.append(worker); worker.start()
         print('Home Assistant ingress proxy listening.', flush=True)

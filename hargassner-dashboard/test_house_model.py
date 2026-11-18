@@ -192,8 +192,10 @@ class FaultTests(unittest.TestCase):
         house.rooms[1].fault = 'closed'
         self.assertIsNotNone(house.until('room_cold', DAY, gaps=False))
         self.assertTrue(house.h.has('room_cold', circuit='hc1'))
-        house.until('no_response', DAY, gaps=False)
+        # no_response: failed heating starts (06:00 every day) on three days.
+        house.until('no_response', 3 * DAY, gaps=False)
         self.assertTrue(house.h.has('no_response'))
+        self.assertEqual(len(house.h.engine.response_fails['sensor.kueche']), 3)
         house.rooms[1].fault = None
         house.run(2 * DAY, gaps=False)
         self.assertFalse(house.h.codes() & HEATING_CODES)
@@ -254,6 +256,15 @@ class FaultTests(unittest.TestCase):
         house.run(3 * DAY, gaps=False)
         self.assertFalse(house.h.codes() & HEATING_CODES)
 
+    def off_and_on(self, house):
+        """Off from the next 08:00 to 11:00, then back on; returns the armed rooms."""
+        house.run((8 * 60 - house.minute % DAY) % DAY, gaps=False)
+        house.heating_off = True
+        house.run(180, gaps=False)
+        house.heating_off = False
+        house.tick(gaps=False)
+        return set(house.h.engine.windows)
+
     def heat_up_after_off(self, fault=None):
         # Off from 08:00 to 11:00 (rooms lose about 2 K), then back on: the
         # pump starts 2 min late and the flow is cold for the first 20 min.
@@ -290,8 +301,19 @@ class FaultTests(unittest.TestCase):
         self.assertFalse(armed & set(house.h.engine.windows))   # every window completed
         self.assertEqual(house.findings_seen, [])
 
-    def test_floor_actuator_closed_during_heat_up_gives_no_response(self):
+    def test_floor_actuator_closed_during_heat_ups_gives_no_response_on_the_third_day(self):
         house, armed = self.heat_up_after_off('closed')
+        house.run(8 * 60, gaps=False)
+        # One heat-up without effect is recorded, but raises nothing.
+        self.assertEqual(len(house.h.engine.response_fails['sensor.flur']), 1)
+        self.assertNotIn('no_response', house.h.codes())
+        # Mild days follow: in this model the closed room then stays at what its
+        # neighbours give it instead of warming back from an outdoor-cooled dip.
+        house.outdoor = 6.0
+        self.assertIn('sensor.flur', self.off_and_on(house))
+        house.run(8 * 60, gaps=False)
+        self.assertNotIn('no_response', house.h.codes())
+        self.assertIn('sensor.flur', self.off_and_on(house))
         self.assertIsNotNone(house.until('no_response', 8 * 60, gaps=False))
         self.assertEqual([row['label'] for row in house.h.rows('no_response')], [house.h.engine.labels['sensor.flur']])
         house.rooms[0].fault = None

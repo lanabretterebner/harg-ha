@@ -372,5 +372,30 @@
       "default_entity_id": "text.name_pwm_diffreg_kreis_1",
       "group": "solar"
     }
+  },
+  "always_published": {
+    "scope": "Published by the adapter outside the Settings selection (energy_totals_v1); not selectable",
+    "entities": {
+      "sensor:pelletverbrauch_foerderzaehler": {
+        "default_entity_id": "sensor.pelletverbrauch_foerderzaehler",
+        "group": "pelletslager"
+      },
+      "sensor:pelletenergie_schaetzung": {
+        "default_entity_id": "sensor.pelletenergie_schaetzung",
+        "group": "pelletslager"
+      },
+      "sensor:brennerstunden": {
+        "default_entity_id": "sensor.brennerstunden",
+        "group": "kessel"
+      },
+      "sensor:brennerstarts": {
+        "default_entity_id": "sensor.brennerstarts",
+        "group": "kessel"
+      },
+      "sensor:heizgradtage": {
+        "default_entity_id": "sensor.heizgradtage",
+        "group": "steuerung"
+      }
+    }
   }
 }

@@ -1,5 +1,58 @@
 # Changelog
 
+## 1.6.5
+
+- Room checks report a heating problem that lasts, not normal life in the
+  house (owner, 2026-11-18). Before, one aired or open-door morning, a whole
+  house aired at once (as a fault) or a valve turned down for an afternoon
+  could raise a notice.
+- Airing: a drop of 1 degree within 15 minutes starts an airing episode that
+  lasts until the room is back (at most 12 hours), not a fixed hour. Neither
+  "too cold" nor "does not get warmer" counts in it, and a heating start in it
+  does not count.
+- "Raum wird nicht wärmer": a heating start is judged on the trend of the
+  whole watch (median of its last against its first quarter), only for a room
+  that starts 1.5 degrees or more below target. The notice needs starts without
+  effect on three different days within four days; a start the room warms on,
+  or the room getting back near its day target, clears the count. It ends at
+  such a start, near the day target, or two days after the last start without
+  effect.
+- "Heizkreis wird nicht wärmer" (fault): two starts on different days on which
+  at least two rooms and at least half of the circuit's rooms stayed flat and
+  none warmed. Aired rooms do not count.
+- "Raum zu kalt": a room that is still getting warmer is not "staying cold";
+  after one cold spell (90 min radiator, 4 h underfloor) the room must also
+  stay more than 1 degree below the day target for 12 hours. It then stays
+  through the night (setback or heating limit) until the room is warm again,
+  or 26 hours after the last cold spell.
+- "Heizkreis zu kalt" (fault) waits while the rooms are getting warmer (after
+  a holiday or a cold morning).
+- "Sensor springt": three jumps within 24 hours (a single HA restart value is
+  no longer enough); an excursion that returns counts only when its shorter
+  leg is faster than room air can change (1.5 degrees a minute), so a sensor at
+  an open window is not jumping.
+- Underfloor "Raum zu kalt" follows the underfloor circuit check of 1.6.4:
+  judged only in a day phase after 4 hours of heat-up, its cold spell paused
+  (not restarted) by setback and heat-up for up to 24 hours. Before, with a
+  programme like 06:00-09:00 and 15:00-23:00, an 8-hour settle filled every
+  day phase and a cold underfloor room was never reported. The underfloor
+  circuit check also waits while the rooms are getting warmer.
+- Owner decisions (2026-11-18): a room kept cooler on purpose, or with its
+  sensor at a cold spot, gets "darf kühler sein" or is not monitored; the app
+  does not learn rooms' usual levels. The latencies for real faults (DOCS.md
+  "What is checked") are accepted as designed.
+- Frost checks, the other sensor checks, options, report format and codes are
+  unchanged. Room thresholds in the VM's rule catalogue are unchanged; its rule
+  descriptions explain the new conditions.
+
+## 1.6.4
+
+- The VM's signature on its verdict (`authorization`) is not copied into the app's checked verdict or the HA attributes.
+- Betriebsüberwachung: no Störung after a Home Assistant restart or reconnect while the VM was reporting (90-second grace as at start), and up to 15 minutes of silence after a VM report in maintenance (release restart) show Unbekannt; a VM that was already silent stays Störung. Report freshness is measured on the app's clock; the VM timestamp may differ by up to 5 minutes and may step back, only an exact repeat is refused (a VM clock a few seconds ahead, a step back or one report from the future gave a lasting Störung).
+- Room monitoring: a failed sensor read no longer completes a running waiting time (a pause passed a zero dwell, so one failed read made a sensor finding immediate). Underfloor circuits (owner decision): the circuit-wide Störung is now judged only in a day phase, against the day target, after 4 hours of heat-up and for 3 hours (was 8 + 8 hours in one phase, which a daily programme never reached); never during setback, and an active Störung holds through the night.
+- Start-up: until the heartbeat monitor has polled once it answers "unknown"; within the 90-second start-up grace that no longer counts as a failure, so starting or updating the app no longer publishes a false "VM nicht erreichbar" (Störung).
+- Optional option `notify_watch` (off by default): with the harg-notify notification container installed, the Betriebsüberwachung shows its status freshness as the check Benachrichtigungsdienst. After 90 seconds without a live status it becomes a Hinweis; it never lowers a worse state. Without the option nothing changes.
+
 ## 1.6.3
 
 - Home Assistant now owns the existing Betriebsüberwachung verdict: a VM outage or missing live reports becomes Störung within 90 seconds, even while the VM is off. An enabled health check can detect it sooner.

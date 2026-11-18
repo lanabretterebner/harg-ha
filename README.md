@@ -1,6 +1,6 @@
 # Hargassner for Home Assistant
 
-Frontend 1.4.14 and the optional ingress/monitor app 1.6.2 include the HA clients for an existing Hargassner local-control
+Frontend 1.4.15 and the optional ingress/monitor app 1.6.5 include the HA clients for an existing Hargassner local-control
 backend: a discoverable thermostat dashboard card, the matching native popup,
 one-device page grouping, the optional dashboard Ingress app and reference examples.
 
@@ -16,11 +16,17 @@ both stores independently. HACS downloads the browser module; Supervisor
 builds the included app. Installing either does not install the other or the
 MQTT/backend services. No live backend identity, configuration or token is included.
 
-Frontend 1.4.14 keeps an independent room-correction control available when
+Frontend 1.4.15 adds **Korrektur ±0** to the card and the popup: offered only
+for a confirmed non-zero room correction, it returns the correction to 0 through
+the same guarded paths as a native gesture and shows the request as unconfirmed
+until the readback confirms it. The device page also groups the five energy
+totals of a backend with `energy_totals_v1` (Pelletslager, Kessel, Steuerung);
+without that backend nothing changes. The frontend keeps an independent
+room-correction control available when
 Auto has no qualified day/setback target basis, including summer phases.
 The configured target remains unknown until the backend qualifies that basis.
 Install/update the HACS resource and fully reload the frontend. The separately
-versioned ingress/monitor app 1.6.2 contains separate notification-outbox, strict
+versioned ingress/monitor app (1.6.5) contains separate notification-outbox, strict
 configuration and incomplete-response fixes, treats an empty optional connection
 host as unset, rejects raw non-ASCII request paths with HTTP400, recovers its
 optional monitor from clock skew and backward clock steps and makes that monitor
@@ -39,7 +45,7 @@ Existing tags and release assets remain immutable.
    this URL as a **JavaScript module**:
 
    ```text
-   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.4.14
+   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.4.15
    ```
 
 3. Remove older manual resource URLs, fully reload each browser/Companion App,
@@ -54,7 +60,7 @@ loading before a dashboard is visited.
 
 For manual installation, copy `dist/hargassner-thermostat-popup.js` to
 `/config/www/hargassner-thermostat-popup.js` and use
-`/local/hargassner-thermostat-popup.js?v=1.4.14` instead. Remove that manual
+`/local/hargassner-thermostat-popup.js?v=1.4.15` instead. Remove that manual
 registration when switching to HACS.
 
 The single **Modus** menu offers **Aus · Auto · Heizen · Absenken · 1x Heizen ·
@@ -109,7 +115,8 @@ one native category card. No entity is moved to another HA device, renamed or
 republished, and no MQTT reload is required.
 
 Grouping uses immutable MQTT identity suffixes and the entity domain, so renamed
-entity IDs and numeric collision suffixes remain supported. Unknown matching
+entity IDs and numeric collision suffixes remain supported. The five always-published energy totals join Pelletslager,
+Kessel and Steuerung ([Energy dashboard](docs/ENERGY-DASHBOARD.md)). Unknown matching
 entries stay visible. [Frontend group reference](examples/entity-ui-groups.json).
 Only selected/published entities appear; the90-entry reference does not enable
 additional entities. Unsupported device/layout contexts retain the native view.
@@ -174,7 +181,7 @@ entity. MQTT discovery, freshness and correction-only dial writes remain backend
 
 The popup contract was researched against HA frontend20260930.3. The preceding
 1.2.0 release was downloaded in HA2026.9.3/HACS2.0.5, with both matching native
-popups showing one Modus menu, icons and status. Current 1.4.14 installation and native-component acceptance must be recorded separately from this source package. Release-specific fixture checks are in
+popups showing one Modus menu, icons and status. Current 1.4.15 installation and native-component acceptance must be recorded separately from this source package. Release-specific fixture checks are in
 [validation.json](validation.json). Unsupported layouts and unknown current
 presets retain native controls. Future HA DOM changes may require an update.
 
@@ -221,7 +228,7 @@ assertions plus page/console/request errors. It emits a structured result.
 open the HTML fixtures manually. These synthetic checks contact no live HA or
 controller and do not establish installed-native rendering or physical heating
 response. See [browser checks](tests/README.md).
-Frontend 1.4.14 and app 1.6.2 are published independently. Installation and
+Frontend 1.4.15 and app 1.6.5 are published as independent components. Installation and
 served-byte acceptance are separate from source checks; consult the installed
 version in HACS and Supervisor. Existing tags and assets remain immutable.
 The app is updated through Supervisor; HACS updates only the browser resource.
@@ -234,3 +241,7 @@ Historical release details belong in [CHANGELOG.md](CHANGELOG.md).
 [Third-party icon licenses](THIRD-PARTY-NOTICES.md).
 
 App 1.6.3 makes Betriebsüberwachung independent of the VM: missing live reports or failed VM heartbeat cannot remain Normal. Update the Supervisor app separately; HACS frontend 1.4.14 is unchanged. The app uses the existing default `homeassistant` MQTT discovery prefix.
+
+App 1.6.4 adds the optional check Benachrichtigungsdienst (option `notify_watch`, off by default) for the separate harg-notify notification container, no false Störung after app starts, Home Assistant reconnects or VM maintenance restarts, tolerance for small clock differences, and a room-monitor dwell fix (see [CHANGELOG.md](hargassner-dashboard/CHANGELOG.md)). It was not published on its own; app 1.6.5 contains it.
+
+App 1.6.5 makes the room checks report only lasting heating problems: airing, open doors, sun, a valve turned down for an afternoon and slow underfloor heating no longer raise notices. Frost checks are unchanged. Update the Supervisor app. It is published together with frontend 1.4.15.

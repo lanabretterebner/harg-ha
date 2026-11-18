@@ -694,7 +694,7 @@ class UnitTests(unittest.TestCase):
         self.assertNotIn('token', self.state.read_text())
 
     def test_home_assistant_http_requires_explicit_private_literal(self):
-        for url in ['http://10.10.0.124:8123', 'http://127.0.0.1:8123', 'http://[::1]:8123', 'http://[fd00::1]:8123']:
+        for url in ['http://192.168.1.10:8123', 'http://127.0.0.1:8123', 'http://[::1]:8123', 'http://[fd00::1]:8123']:
             with self.subTest(url=url):
                 with self.assertRaises(h.Refusal): self.ha(url)
                 self.assertIn('home_assistant', self.ha(url, allow_insecure_local=True))

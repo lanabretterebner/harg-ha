@@ -9,7 +9,7 @@ import { runBrowserFixtures } from "../tools/test_browser.mjs";
 const complete = `
   const group = (n) => ({passed:true, tests:n, results:Array.from({length:n},(_,i)=>({name:'case '+i,passed:true}))});
   window.hargassnerFrontendTests={version:'1.4.2',popup:group(59),card:group(113)};
-  window.deviceGroupTestResults=group(22);
+  window.deviceGroupTestResults=group(23);
 `;
 async function fixture(before = "", after = "", options = {}) {
   const root = await mkdtemp(join(tmpdir(), "harg-browser-runner-"));
@@ -27,7 +27,7 @@ test("accepts complete passing fixture reports from both pages", async () => {
   const report = await fixture();
   assert.equal(report.suites.length, 2);
   assert.equal(report.suites[0].results.card.tests, 113);
-  assert.equal(report.suites[1].results.groups.tests, 22);
+  assert.equal(report.suites[1].results.groups.tests, 23);
 });
 test("assertion failures fail even when the fixture summary claims success", async () => {
   await assert.rejects(fixture("", "window.hargassnerFrontendTests.popup.results[0].passed=false;"), /popup: case 0/);
