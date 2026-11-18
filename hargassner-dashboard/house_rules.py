@@ -11,7 +11,7 @@ import json
 import math
 import re
 
-APP_VERSION = '1.6.5'
+APP_VERSION = '1.6.6'
 REPORT_SCHEMA = 'harg-house-report/1'
 CONTEXT_SCHEMA_PREFIX = 'harg-house-context/'
 CONTEXT_MAJORS = (1,)
@@ -1439,8 +1439,11 @@ class HouseEngine:
             latch.update(None if r is None else r <= 5.0, None if r is None else r <= 6.0,
                          now, elapsed, FROST_DWELL_S, CONTEXT_FREE_PAUSE_S,
                          lambda value=r: {'room': half(value)})
-            if latch.active and ok:
-                in_frost.append((entity, r))
+            if latch.active:
+                # A room in frost stays counted while its sensor is unusable: its
+                # latch only pauses (at most CONTEXT_FREE_PAUSE_S), so must the
+                # fault, or a sensor that drops out in the cold ends it.
+                in_frost.append((entity, r if ok else latch.onset['room']))
         if len(in_frost) >= 2:
             if self.frost is None:
                 self.frost = (now, {'room': half(min(r for _e, r in in_frost)), 'count': len(in_frost)})

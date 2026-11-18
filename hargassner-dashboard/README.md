@@ -82,3 +82,8 @@ App 1.6.5: the room checks report only a heating problem that lasts. Airing,
 an open door, sun, a valve turned down for an afternoon, slow underfloor
 heating and a cold morning after the setback stay quiet (DOCS.md "What is
 checked").
+
+App 1.6.6: the room checks continue after an app restart (state saved in the
+app's `/data`), so a lasting room notice is neither ended by an app update,
+an app restart or a host reboot nor reported again days later (DOCS.md "Room checks
+after an app restart").

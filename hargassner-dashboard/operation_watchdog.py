@@ -34,6 +34,9 @@ STATES = ('Normal', 'Hinweis', 'Störung', 'Unbekannt')
 # container's live status, shown as its own check when `notify_watch` is on.
 NOTIFY = 'hargassner/+/notify/status'
 NOTIFY_CHECK = 'Benachrichtigungsdienst'
+# The VM rule notify.offline reports the same silence under its own check
+# (`Benachrichtigung`, proxy/monitor_policy.py); one row is enough.
+NOTIFY_VM_ROW = 'notify.offline:offline'
 NOTIFY_TEXT = ('Der Benachrichtigungsdienst meldet sich nicht. E-Mails und Anrufe '
                'bei Störungen sind nicht sichergestellt.')
 
@@ -143,8 +146,9 @@ class Verdict:
             return False
         self.report, self.received = report, self.monotonic()
         self.recent_reports = (self.recent_reports + [report['published_at']])[-RECENT:]
-        if report.get('maintenance') is True:
-            self.maintenance_at = self.received
+        # Only the last report counts (DOCS.md): a VM that left maintenance and
+        # then falls silent is a failure after the lease, not "Wartung der VM".
+        self.maintenance_at = self.received if report.get('maintenance') is True else None
         return True
 
     def notify_ingest(self, topic, payload, retained=False):
@@ -194,7 +198,8 @@ class Verdict:
         if self.notify_stale_since is None:
             self.notify_stale_since = self.clock()
         problems = result.get('problems') if isinstance(result.get('problems'), list) else []
-        if not any(isinstance(row, dict) and row.get('check') == NOTIFY_CHECK for row in problems):
+        if not any(isinstance(row, dict) and (row.get('check') == NOTIFY_CHECK or row.get('id') == NOTIFY_VM_ROW)
+                   for row in problems):
             # The VM rule notify.offline may already report it; one row is enough.
             problems.append({'check': NOTIFY_CHECK, 'level': 'Hinweis', 'text': NOTIFY_TEXT,
                              'since': iso(self.notify_stale_since)})

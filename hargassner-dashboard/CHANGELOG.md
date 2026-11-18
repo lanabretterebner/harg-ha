@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.6.6
+
+- Room checks continue after an app restart (owner question 2026-11-18: "why
+  do they need days?"). Before, the checks kept what they had seen in memory
+  only, so an app update, an app restart or a host reboot started every
+  waiting time and every pattern over: a room that does not get warmer needed starts
+  without effect on three new days, the notification service sent "wieder in
+  Ordnung" and days later the same problem as new. Now the app saves the
+  checks' state in its own `/data` (at most every 5 minutes and when it
+  stops, owner decision 2026-11-18; written as a whole, below 4 MB; after a
+  crash or power cut the minutes since the last save count as stopped time) and continues from it as if Home Assistant
+  had been unavailable for the time it was stopped: open notices keep their
+  start time, waiting times run on. A first start starts fresh as before;
+  a stop of more than 24 hours, a clock more than 5 minutes before the save
+  after a reboot, other check rules or an unreadable file also start fresh,
+  with one log line. A changed room selection starts again only the rooms it
+  changes (and the circuit-wide checks of a circuit whose rooms changed), both
+  after a restart and when the room page saves; beobachten or melden keeps
+  everything. DOCS.md "Room checks after an app restart".
+- Frost (Störung): a room already counted in frost stays counted while its
+  sensor drops out for a while, so one sensor dropout no longer ends the fault
+  or gives it a new start time.
+- Betriebsüberwachung: the 15-minute grace for a silent VM applies only when
+  the last VM report said maintenance; a VM that left maintenance and then
+  falls silent is a Störung after the usual 90 seconds. With `notify_watch`,
+  a silent notification service is shown once (the VM's own row), not twice.
+- Options, room page, report format and codes are unchanged.
+
 ## 1.6.5
 
 - Room checks report a heating problem that lasts, not normal life in the

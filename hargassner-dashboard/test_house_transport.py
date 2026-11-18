@@ -627,8 +627,8 @@ class AppIntegrationTests(unittest.TestCase):
                 pass
 
         class House:
-            def __init__(self, options):
-                self.options = options
+            def __init__(self, options, **kwargs):
+                self.options, self.kwargs = options, kwargs
             def page(self):
                 return b''
             def run(self, stop):

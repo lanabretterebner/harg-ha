@@ -443,9 +443,10 @@ no `hassio_role` is requested. The app does not restart itself and cannot
 change any other app, Home Assistant setting or entity.
 
 It has no broker password, no controller connection and no call that can
-change a heating setting. Its rule timers and sensor observations are in memory; after a restart or a
-new sensor selection every waiting time starts again. Sensor selections persist
-in the app options; the separate VM-health monitor retains its durable outbox. Home Assistant's MQTT integration
+change a heating setting. From app 1.6.6 its rule timers and sensor
+observations are saved in the app's own `/data` (see "Room checks after an app
+restart"); a new sensor selection starts again only the rooms it changes.
+Sensor selections persist in the app options; the separate VM-health monitor retains its durable outbox. Home Assistant's MQTT integration
 must be connected to the same broker as the VM. The thread runs even when no
 sensor is selected, so that the VM learns that room monitoring is off.
 
@@ -520,7 +521,8 @@ and are judged as before.
 Saving writes the app's own options through the Supervisor and keeps every
 other option (dashboard address, tokens, VM-health monitor) unchanged. The
 running room monitoring takes the new selection over at once, without a
-restart; its waiting times start again. The page says whether the save
+restart. Rooms and circuits the new selection changes start their waiting
+times again; all other rooms continue (app 1.6.6). The page says whether the save
 worked. If Home Assistant refuses or does not answer, the page says so and
 nothing is assumed saved; reload the page to see the stored state. Sensors
 that are selected but no longer exist in Home Assistant stay listed under
@@ -675,6 +677,53 @@ the circuit types and how many minutes in the last 24 hours and 7 days the
 target was unknown. The log shows only fixed lines such as
 `House monitor: ha_api_unavailable.`, at most once per 5 minutes each.
 
+### Room checks after an app restart
+
+From app 1.6.6 a restart of the app (an update, a restart of the app, a
+reboot of the host) no longer starts the room checks over. A restart of Home
+Assistant Core alone never did: the checks pause while Core is unavailable. Before, they kept what they had
+seen in memory only: a problem that lasts, such as a room that does not get
+warmer (starts without effect on three days), had to be seen for days again, so
+the notification service sent "wieder in Ordnung" after a restart and, days
+later, the same problem as new.
+
+The app saves what the checks have seen (waiting times, the starts without
+effect, cold spells, airing, the last hours of each sensor and the open
+notices with their start time) in `/data/house_state.json`, at most every 5
+minutes and when it stops (owner decision 2026-11-18). The file is written as a whole (temporary file, then
+renamed), is readable only by the app, holds no address or password and stays
+below 4 MB. After a restart the checks continue from it as if Home Assistant
+had been unavailable for the time the app was stopped: waiting times pause for
+that time and run on, those that would have ended during an outage that long
+end, and an open notice keeps its start time. Nothing is credited for the
+stopped time; every check is judged again on current readings. If the app
+cannot save when it stops (a crash, a power cut), the minutes since the last
+save (at most 5) are lost and count as part of the stopped time, exactly as
+if Home Assistant had been unavailable from that save on.
+
+The saved state is used only when it fits:
+
+- the app was stopped for at most 24 hours (measured on the host's monotonic
+  clock when the host did not reboot, so a clock change does not matter;
+  after a reboot by the clock, which must not lie more than 5 minutes before
+  the save, and at least the time since the reboot);
+- the room settings: a room whose circuit, circuit type, "darf kühler sein",
+  "ohne Überwärmung" or frost setting changed starts fresh. A circuit whose
+  type changed starts fresh with its rooms; when only its rooms changed, its
+  circuit-wide checks (all rooms too cold or too warm, heating starts without
+  effect) start fresh, and every unchanged room continues with its own
+  notices. Switching between beobachten and melden keeps everything;
+- the check rules of the installed version (an update that changes a waiting
+  time or limit starts fresh).
+
+Without a file (first start) the checks start fresh, as before 1.6.6, without
+a log line. An unreadable or unsuitable file starts them fresh with one log
+line such as `House monitor: state_unreadable.` (`state_incompatible`,
+`state_clock`, `state_too_old`); a restored state is
+logged as `House monitor: state_restored.` (`state_partly_restored` when some
+rooms start fresh). A failed save is logged as `state_save_failed`. Deleting
+the file is harmless: the checks then start fresh at the next start.
+
 ### Removing the app
 
 Raumsensoren leeren, dann App entfernen: set every sensor on the room page to
@@ -690,7 +739,7 @@ The app maintains the existing MQTT entity identity and device. It subscribes th
 
 A live report is required for Normal. Retained reports cannot start or renew that state. Without a live report for 90 seconds the state is Störung, with a message that the VM/monitoring is unreachable and the actual heating state is unknown. When the optional VM-health monitor is enabled, a failed or stale heartbeat also overrides a recent VM report. Its healthy heartbeat alone cannot clear a missing report. Recovery requires a new live report. The app publishes its checked state without retention every 15 seconds; if the app or HA connection fails, HA marks the entity unavailable after 90 seconds. No old Normal can be replayed from this topic. From app 1.6.4: after the app starts, and after a reconnect to Home Assistant (Core restart, integration reload) while the VM was reporting until then, the app waits the same 90 seconds (Unbekannt) before a missing report counts; a VM that was already silent stays Störung. When the last VM report said maintenance (a VM release restarts its services), a silence of up to 15 minutes is shown as Unbekannt ("Wartung der VM"). Freshness is measured on the app's own clock from the arrival of a report; the VM's timestamp only has to lie within 5 minutes of this host's clock and must not repeat a recent report, so clock differences or a VM clock that steps back no longer matter. A heartbeat that is still unknown in the first 90 seconds is no failure. The independently generated verdict requires installing app 1.6.3; source publication alone changes no installed entity.
 
-After VM/app restart, room evaluation waits for fresh context and an accepted current app report. Room selections remain in app options; dwell timers intentionally restart. Missing acknowledgement is not proof that the rooms are healthy.
+After VM/app restart, room evaluation waits for fresh context and an accepted current app report. Room selections remain in app options; from app 1.6.6 the room checks continue from their saved state ("Room checks after an app restart"), on a first start or without a usable saved state they start fresh. Missing acknowledgement is not proof that the rooms are healthy.
 
 ## Notification service check (app 1.6.4, optional)
 

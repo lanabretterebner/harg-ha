@@ -56,6 +56,7 @@ class Harness:
         self.last_sent = {}
         self.findings = []
         self.steps = 0
+        self.stopped = False   # the app is not running: time and HA go on, nothing is evaluated
 
     def set_circuit(self, name, **values):
         self.context['circuits'][name].update(values)
@@ -96,6 +97,9 @@ class Harness:
             sample = self.sample(entity)
             if sample is not None:
                 samples[entity] = sample
+        if self.stopped:
+            self.findings = []
+            return self.findings
         self.findings = self.engine.step(self.now, wall=self.wall, ha=self.ha, samples=samples, context=context,
                                          context_state=state, local_minutes=self.local)
         return self.findings

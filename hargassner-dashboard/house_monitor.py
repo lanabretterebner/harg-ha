@@ -6,8 +6,9 @@ WebSocket `mqtt/subscribe` and sends codes and numbers through Core's
 `mqtt.publish`. It has no broker credentials, no controller access and no
 control-capable call. The allowlist in CoreApi.allowed is the complete set of
 requests of the worker; the room page adds the requests in room_picker.py.
-Nothing is persisted; a restart or a new sensor selection restarts every dwell
-time.
+The rules' state is saved in /data (house_state.py) at most every 5 minutes
+and on stop, and a restart continues from it as after an HA outage of the same
+length. A new sensor selection restarts only the rooms and circuits it changes.
 """
 from datetime import datetime, timezone
 import html
@@ -20,6 +21,7 @@ import threading
 import time
 
 import house_rules as rules
+import house_state
 from ha_websocket import Backoff, ContextSubscription, WebSocketError
 from ingress_proxy import read_options
 
@@ -41,7 +43,9 @@ STATES_PATH = '/core/api/states'
 PUBLISH_PATH = '/core/api/services/mqtt/publish'
 LOG_CATEGORIES = frozenset({
     'config_invalid', 'ha_api_unavailable', 'websocket_unavailable', 'publish_failed',
-    'context_version_unsupported', 'report_not_accepted', 'internal', 'ready'})
+    'context_version_unsupported', 'report_not_accepted', 'internal', 'ready',
+    'state_restored', 'state_partly_restored', 'state_unreadable', 'state_incompatible', 'state_clock',
+    'state_too_old', 'state_save_failed'})
 
 
 class ApiError(Exception):
@@ -200,14 +204,21 @@ class HouseMonitor:
 
     def __init__(self, options, *, token_source=default_token, api_factory=CoreApi,
                  subscription_factory=ContextSubscription, clock=time.time, monotonic=time.monotonic,
-                 instance=None, log=None):
+                 instance=None, log=None, state_path=None, boot_id=house_state.boot_id,
+                 uptime=house_state.uptime):
         self.options = options
         self.token_source, self.api_factory = token_source, api_factory
         self.subscription_factory = subscription_factory
         self.clock, self.monotonic = clock, monotonic
         self.instance = instance or secrets.token_hex(16)
         self.log = log or (lambda line: print(line, flush=True))
-        self.engine = rules.HouseEngine(options) if options.valid else None
+        self.logged = {}
+        # Without a path (tests, tools) nothing is read or written.
+        self.state_file = house_state.StateFile(state_path) if state_path else None
+        self.boot = boot_id() if self.state_file is not None else None
+        self.uptime = uptime
+        self.next_save = monotonic() + house_state.SAVE_PERIOD_S
+        self.engine = self._start_engine(options)
         self.started = monotonic()
         self.lock = threading.Lock()
         self.token = None
@@ -234,7 +245,6 @@ class HouseMonitor:
         self.publish_state = None
         self.ack = None
         self.ack_wall = None
-        self.logged = {}
         self.findings = []
         self.candidates = None
         self.candidate_lock = threading.Lock()
@@ -253,6 +263,48 @@ class HouseMonitor:
         self.logged[category] = now
         self.log(f'House monitor: {category}.')
 
+    # -- saved state (house_state.py)
+    def _start_engine(self, options):
+        """The engine at start: continued from the saved state when it fits."""
+        if not options.valid:
+            return None
+        if self.state_file is None:
+            return rules.HouseEngine(options)
+        try:
+            document, problem = self.state_file.load()
+            if document is None:
+                if problem is not None:
+                    self._log(problem)
+                return rules.HouseEngine(options)
+            engine, outcome = house_state.restore(options, document, mono=self.monotonic(), wall=self.clock(),
+                                                  boot=self.boot, since_boot=self.uptime())
+            self._log(outcome)
+            return engine
+        except Exception:
+            self._log('state_unreadable')
+            return rules.HouseEngine(options)
+
+    def save_state(self, force=False):
+        """Write the engine's state, at most once per SAVE_PERIOD_S unless forced."""
+        if self.state_file is None:
+            return False
+        now = self.monotonic()
+        if not force and now < self.next_save:
+            return False
+        self.next_save = now + house_state.SAVE_PERIOD_S
+        with self.lock:
+            engine = self.engine
+            if engine is None:
+                return False
+            try:
+                document = house_state.export(engine, mono=now, wall=self.clock(), boot=self.boot)
+            except Exception:
+                document = None
+        if document is None or not self.state_file.save(document):
+            self._log('state_save_failed')
+            return False
+        return True
+
     # -- main loop
     def run(self, stop):
         while not stop.is_set():
@@ -262,6 +314,10 @@ class HouseMonitor:
                 self._log('internal')
                 stop.wait(1)
         self._close_socket()
+        try:
+            self.save_state(force=True)
+        except Exception:
+            self._log('internal')
 
     def _ensure_token(self):
         if self.token is None:
@@ -292,10 +348,12 @@ class HouseMonitor:
                 return False
             options, done = pending
             now = self.monotonic()
+            previous = self.engine
             self.options = options
-            # A fresh engine: every waiting time starts again, as after a
-            # restart. The entity allowlist of the Core API follows the new set.
-            self.engine = rules.HouseEngine(options) if options.valid else None
+            # Rooms and circuits the new selection does not change continue;
+            # the others start again (house_state.py). The entity allowlist of
+            # the Core API follows the new set.
+            self.engine = self._carry_over(previous, options, now)
             self.api = None
             self.findings = []
             self.sampled = False
@@ -307,6 +365,19 @@ class HouseMonitor:
             self._log('config_invalid')
         done.set()
         return True
+
+    def _carry_over(self, previous, options, now):
+        if not options.valid:
+            return None
+        if previous is None:
+            return rules.HouseEngine(options)
+        try:
+            wall = self.clock()
+            document = house_state.export(previous, mono=now, wall=wall, boot=None)
+            engine, _outcome = house_state.restore(options, document, mono=now, wall=wall, boot=None)
+            return engine
+        except Exception:
+            return rules.HouseEngine(options)
 
     def cycle(self, stop):
         self._apply_pending()
@@ -323,6 +394,7 @@ class HouseMonitor:
             self.sample(stop)
         if not stop.is_set():
             self.maybe_report()
+            self.save_state()
 
     # -- context
     def _close_socket(self):

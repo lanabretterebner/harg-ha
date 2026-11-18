@@ -44,7 +44,7 @@ remain read-only; the unknown configured target stays explicitly unknown.
 
 Frontend 1.4.15 keeps the refined card spacing and alignment; resource loading, entity
 selection and command eligibility keep the existing contracts. Fully reload the
-frontend after the HACS update. The optional app (1.6.5) has separate ingress/monitor fixes and its own Supervisor
+frontend after the HACS update. The optional app (1.6.6) has separate ingress/monitor fixes and its own Supervisor
 update; it is not installed by HACS.
 
 

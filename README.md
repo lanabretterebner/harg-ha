@@ -1,6 +1,6 @@
 # Hargassner for Home Assistant
 
-Frontend 1.4.15 and the optional ingress/monitor app 1.6.5 include the HA clients for an existing Hargassner local-control
+Frontend 1.4.15 and the optional ingress/monitor app 1.6.6 include the HA clients for an existing Hargassner local-control
 backend: a discoverable thermostat dashboard card, the matching native popup,
 one-device page grouping, the optional dashboard Ingress app and reference examples.
 
@@ -26,7 +26,7 @@ room-correction control available when
 Auto has no qualified day/setback target basis, including summer phases.
 The configured target remains unknown until the backend qualifies that basis.
 Install/update the HACS resource and fully reload the frontend. The separately
-versioned ingress/monitor app (1.6.5) contains separate notification-outbox, strict
+versioned ingress/monitor app (1.6.6) contains separate notification-outbox, strict
 configuration and incomplete-response fixes, treats an empty optional connection
 host as unset, rejects raw non-ASCII request paths with HTTP400, recovers its
 optional monitor from clock skew and backward clock steps and makes that monitor
@@ -228,7 +228,7 @@ assertions plus page/console/request errors. It emits a structured result.
 open the HTML fixtures manually. These synthetic checks contact no live HA or
 controller and do not establish installed-native rendering or physical heating
 response. See [browser checks](tests/README.md).
-Frontend 1.4.15 and app 1.6.5 are published as independent components. Installation and
+Frontend 1.4.15 and app 1.6.6 are published as independent components. Installation and
 served-byte acceptance are separate from source checks; consult the installed
 version in HACS and Supervisor. Existing tags and assets remain immutable.
 The app is updated through Supervisor; HACS updates only the browser resource.
@@ -245,3 +245,5 @@ App 1.6.3 makes Betriebsüberwachung independent of the VM: missing live reports
 App 1.6.4 adds the optional check Benachrichtigungsdienst (option `notify_watch`, off by default) for the separate harg-notify notification container, no false Störung after app starts, Home Assistant reconnects or VM maintenance restarts, tolerance for small clock differences, and a room-monitor dwell fix (see [CHANGELOG.md](hargassner-dashboard/CHANGELOG.md)). It was not published on its own; app 1.6.5 contains it.
 
 App 1.6.5 makes the room checks report only lasting heating problems: airing, open doors, sun, a valve turned down for an afternoon and slow underfloor heating no longer raise notices. Frost checks are unchanged. Update the Supervisor app. It is published together with frontend 1.4.15.
+
+App 1.6.6 keeps the room checks across an app restart: their state is saved in the app's `/data`, so an app update, an app restart or a host reboot no longer ends a lasting room notice and reports it days later as new. It also carries the frost and Betriebsüberwachung fixes in [CHANGELOG.md](hargassner-dashboard/CHANGELOG.md). Update the Supervisor app; frontend 1.4.15 is unchanged.

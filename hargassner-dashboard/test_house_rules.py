@@ -664,6 +664,26 @@ class LimitAndFrostTests(unittest.TestCase):
         self.assertFalse(h.has('frost'))
         self.assertTrue(h.has('room_frost', 'Sensor 1'))
 
+    def test_frost_stays_while_a_frozen_room_sensor_is_unusable(self):
+        # Audit 2026-11-18: one dropout ended the frost fault (and it returned
+        # with a new onset); a sensor that dies in the cold ended it for good.
+        h = Harness({'heizkreis_1_sensoren': [A, B]}, values={A: 4.0, B: 4.0})
+        h.context_state, h.context = 'none', None
+        self.assertIsNotNone(h.first('frost', 30))
+        h.run(5)
+        held = h.rows('frost')[0]['held_s']
+        h.values[B] = 'unavailable'
+        h.step()
+        self.assertTrue(h.has('room_frost', 'Sensor 2'))
+        # The same finding: its onset (held time) continues, no new identity.
+        self.assertEqual([(row['count'], row['held_s'] > held) for row in h.rows('frost')], [(2, True)])
+        h.run(30)
+        self.assertTrue(h.has('frost'))
+        # Bounded like its room's latch: after the pause limit both end.
+        h.run(r.CONTEXT_FREE_PAUSE_S // 60 + 2)
+        self.assertFalse(h.has('room_frost', 'Sensor 2'))
+        self.assertFalse(h.has('frost'))
+
     def test_single_frost_sensor_is_only_a_hint(self):
         h = Harness(hc1(A, B), values={A: 4.0, B: 15.0})
         h.set_circuit('hc1', status=0, mode='off')

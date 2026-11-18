@@ -6,7 +6,7 @@ import os
 import tempfile
 
 from operation_watchdog import (Verdict, WatchdogApi, OperationWatchdog, LEASE, DISCOVERY, NOTIFY,
-                                NOTIFY_CHECK, load_notify_watch, SKEW, MAINTENANCE_GRACE)
+                                NOTIFY_CHECK, NOTIFY_VM_ROW, load_notify_watch, SKEW, MAINTENANCE_GRACE)
 from house_monitor import PUBLISH_PATH
 
 
@@ -61,6 +61,17 @@ class WatchdogTests(unittest.TestCase):
     def advance(self, seconds):
         self.tick += seconds
         self.wall += seconds
+
+    def test_a_crash_after_maintenance_ended_is_a_failure(self):
+        # Audit 2026-11-18: only the last report decides the maintenance grace.
+        self.advance(3600)
+        payload = dict(state='Normal', summary='synthetic', problems=[], checks={}, published_at=self.wall, maintenance=True)
+        self.assertTrue(self.v.ingest(self.config['state_topic'], json.dumps(payload)))
+        for _ in range(5):
+            self.advance(60)
+            self.assertTrue(self.report())
+        self.advance(LEASE + 30)
+        self.assertEqual(self.v.document()['state'], 'Störung')
 
     def test_vm_crash_cannot_leave_normal(self):
         self.assertTrue(self.report())
@@ -289,6 +300,17 @@ class NotifyWatchTests(unittest.TestCase):
         self.assertEqual(row[0]['level'], 'Hinweis')
         self.assertRegex(row[0]['since'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$')
         self.assertEqual(document['summary'], row[0]['text'])
+
+    def test_the_vm_notify_offline_row_is_not_duplicated(self):
+        # Audit 2026-11-18: the VM rule notify.offline reports the same silence
+        # under its own check; the app adds no second row.
+        self.advance(LEASE)
+        row = {'check': 'Benachrichtigung', 'level': 'Hinweis', 'id': NOTIFY_VM_ROW, 'rule': 'notify.offline',
+               'text': 'Der Benachrichtigungsdienst (E-Mail und Anruf) meldet sich nicht mehr. Container und Netzwerk prüfen.'}
+        self.report(self.v, 'Hinweis', [row])
+        document = self.v.document()
+        self.assertEqual([r['check'] for r in document['problems']], ['Benachrichtigung'])
+        self.assertEqual(document['checks'][NOTIFY_CHECK], 'Hinweis')
 
     def test_stale_after_lease_and_recovery(self):
         self.assertTrue(self.status(self.v))

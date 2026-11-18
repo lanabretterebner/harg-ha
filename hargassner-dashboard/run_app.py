@@ -15,6 +15,7 @@ import threading
 from ingress_proxy import ProxyServer, ProxyHandler, trusted_identity, one_header, Rejected
 from app_monitor import MonitorSettings, Monitor, supervisor_token
 from house_monitor import HouseMonitor, load_house_options
+import house_state
 from operation_watchdog import OperationWatchdog, load_notify_watch
 from room_picker import RoomPicker, SAVE_BODY_CAP, TOKEN_HEADER, same_origin, announce_room_page
 
@@ -119,7 +120,7 @@ def disabled_status():
 def start_house_monitor():
     """Never raises: ingress keeps running without the house monitor."""
     try:
-        return HouseMonitor(load_house_options())
+        return HouseMonitor(load_house_options(), state_path=house_state.STATE_PATH)
     except Exception:
         print('House monitor: internal.', flush=True)
         return None
@@ -156,8 +157,9 @@ def main():
             worker = threading.Thread(target=monitor.run, args=(stop,), name='health-monitor', daemon=False)
             workers.append(worker); worker.start()
         if house is not None:
-            # Nothing to finish on shutdown: the house monitor stores nothing, so a
-            # WebSocket connect still waiting must not delay the app's exit.
+            # The house monitor saves its state when its loop ends (within the
+            # join below) and at most 5 minutes before; a WebSocket connect still
+            # waiting must not delay the app's exit, so it is a daemon thread.
             worker = threading.Thread(target=house.run, args=(stop,), name='house-monitor', daemon=True)
             workers.append(worker); worker.start()
         watchdog = OperationWatchdog(heartbeat=monitor.operation_heartbeat if monitor else lambda: None,
