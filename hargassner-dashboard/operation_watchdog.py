@@ -38,7 +38,7 @@ NOTIFY_CHECK = 'Benachrichtigungsdienst'
 # (`Benachrichtigung`, proxy/monitor_policy.py); one row is enough.
 NOTIFY_VM_ROW = 'notify.offline:offline'
 NOTIFY_TEXT = ('Der Benachrichtigungsdienst meldet sich nicht. E-Mails und Anrufe '
-               'bei Störungen sind nicht sichergestellt.')
+               'bei Störungen sind nicht sichergestellt. Container harg-notify und Netzwerk prüfen.')
 
 
 def load_notify_watch(filename='/data/options.json'):
@@ -231,7 +231,8 @@ class Verdict:
         maintenance = self.maintenance_at is not None and 0 <= now - self.maintenance_at < MAINTENANCE_GRACE
         failed = not maintenance and (heartbeat_failed or (self.received is not None and not fresh)
                                       or now - self.epoch >= LEASE)
-        text = ('VM nicht erreichbar oder keine aktuellen Betriebsdaten. Heizungszustand unbekannt.' if failed
+        text = ('VM nicht erreichbar oder keine aktuellen Betriebsdaten. Heizungszustand unbekannt. '
+                'Prüfen, ob die VM läuft und im Netzwerk erreichbar ist.' if failed
                 else 'Wartung der VM: Betriebsdaten folgen nach dem Neustart. Heizungszustand unbekannt.' if maintenance
                 else 'Warte auf aktuelle Betriebsdaten der VM. Heizungszustand unbekannt.')
         return {'state': 'Störung' if failed else 'Unbekannt', 'summary': text,

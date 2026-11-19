@@ -445,6 +445,17 @@ From 1.6.1 the room page adds, only while it is opened or saved:
   the app reads its own stored options and, when an administrator saves,
   writes them back with only the room settings changed.
 
+From 1.6.9 **Raum anlernen** (see below) adds, only when an administrator
+presses it for one room:
+
+- `GET /core/api/states` once, to find the VM's two heating-circuit climate
+  entities (by the attributes the VM publishes, not by their names);
+- `GET /core/api/history/period/...` for that room's sensor and the two climate
+  entities only, in pieces of 12 hours (at most 60 pieces for 30 days, each at
+  most 4 MB and 5 seconds). Nothing is written to Home Assistant; the learning
+  state is kept in the app's own `/data/room_learning.json` (readable only by
+  the app).
+
 The Supervisor lets every app read and change its own options with the token
 it already has, so 1.6.1 needs no new permission: `hassio_api` stays off and
 no `hassio_role` is requested. The app does not restart itself and cannot
@@ -499,29 +510,50 @@ name, area or entity ID. For each sensor choose:
   sensors away from radiators, windows, doors and direct sun. Weitere Räume
   are rooms without a heating circuit or with closed valves, for example
   cellar or garage; only the sensor itself is checked there.
-- For rooms on a heating circuit: **Raumtemperatur** (app 1.6.8) and
-  **Ofen oder viel Sonne** (no notice when the room is too warm).
-  **Raumtemperatur** says how far the room may stay below the circuit's set
-  temperature:
-  - **normal**: no allowance (default);
-  - **darf 2 °C kühler sein**: kept cooler on purpose, such as a bedroom
-    (the "darf kühler sein" checkbox of earlier versions; rooms that had it
-    show this choice);
-  - **darf 4 °C kühler sein** and **darf 6 °C kühler sein**: rooms kept
-    clearly cooler, such as a sunroom or a hall;
-  - **nur Frost und Sensor prüfen**: the room is only checked for frost and
-    for its sensor, like a room under Weitere Räume, but stays on its
-    circuit: never "too cold", "too warm", "very warm" or "does not get
-    warmer", and it does not count for the circuit-wide checks.
+- For rooms on a heating circuit (app 1.6.9): **Darf kühler sein um**,
+  **Einfluss Heizkreis 1**, **Einfluss Heizkreis 2** and **Ofen oder viel
+  Sonne** (no notice when the room is too warm).
+  - **Darf kühler sein um** (0 to 10 °C in steps of 0.5 °C, default 0) says
+    how far the room may stay below the circuit's set temperature, for
+    example 2 for a bedroom kept cooler on purpose or 6 for a sunroom.
+  - **Einfluss Heizkreis 1/2** (0 to 100 %, default 100 % on the room's own
+    circuit and 0 % on the other) says how strongly that circuit heats the
+    room. A room heated by both circuits gets a value on both, for example
+    60 % and 40 %. The room's own circuit (the group it is in) must have at
+    least the other circuit's influence; otherwise put the room in the other
+    group. 0 % on both circuits means frost and sensor checks only (what
+    "nur Frost und Sensor prüfen" was in 1.6.8).
 
   The room is "too cold" only 1.5 degrees below the set temperature minus its
-  allowance: with 23 °C set and **darf 6 °C kühler sein**, at 15.5 °C or
-  below. The notice then names the allowed temperature and the set one, for
-  example "Wintergarten ist seit längerem zu kalt (16,5 °C; erlaubt ab
-  21,0 °C, Ziel 23,0 °C)" for a room that may be 2 degrees cooler. Without an
-  allowance the text stays "(16,5 °C statt 23,0 °C)". The VM shows the
-  allowed temperature from its release with this feature on; an older VM
-  keeps the old text, and both versions work together in any order.
+  allowance: with 23 °C set and 3.5 °C allowed, at 18.0 °C or below. The
+  notice then names the allowed temperature and the set one, for example
+  "Wintergarten ist seit längerem zu kalt (16,5 °C; erlaubt ab 21,0 °C, Ziel
+  23,0 °C)" for a room that may be 2 degrees cooler. Without an allowance the
+  text stays "(16,5 °C statt 23,0 °C)". The VM shows the allowed temperature
+  from its release room-allowance-20261119 on (it accepts 0.5 to 10 degrees);
+  an older VM keeps the old text, and both versions work together in any
+  order. Influence and learning stay inside the app; the VM needs no update
+  for 1.6.9.
+
+  **What influence changes** (the same thresholds for both circuit types):
+
+  | Influence | Effect |
+  | --- | --- |
+  | 0 % on both circuits | frost and sensor checks only |
+  | below 30 % on a circuit | that circuit's heating starts do not judge the room ("Raum wird nicht wärmer"); below 30 % in total the room is also never "too cold" |
+  | 30 % or more | judged; after a heating start the room must rise in proportion to its influence (at 100 % the rise of earlier versions, at 50 % half of it, never less than 0.2 degrees, the noise of a sensor) |
+  | 50 % or more on a circuit | counts for that circuit's checks "Heizkreis zu kalt" and "Heizkreis zu warm", with the cold limits scaled by its influence (at 60 % "3 degrees too cold" becomes 1.8 degrees) |
+  | 80 % or more | a strong room: when a circuit has two or more strong rooms with at most 2 degrees allowance, only those decide "Heizkreis zu kalt" and "Heizkreis wird nicht wärmer" |
+  | 30 % or more on the other circuit too | when the circuit has two or more rooms that only it heats, the room neither decides nor holds off that circuit's checks "Heizkreis zu kalt" and "Heizkreis wird nicht wärmer": the other circuit may keep it warm while this one has failed |
+
+  The last two rules are the safety rules: a failed pump or mixer is still
+  found through the rooms the circuit heats strongly and alone, even when a
+  weakly heated room stays warm by the sun, a stove, a neighbour room or the
+  other circuit, and such a room warming after a heating start never ends a
+  circuit fault. A room of the other group counts for this circuit's checks
+  against this circuit's target minus its allowance.
+  With the defaults (0 °C or a 1.6.8 choice, 100 % on the own circuit) every
+  check is exactly that of 1.6.8.
 - For Weitere Räume: **Frostwarnung** (warn about frost in that room).
 
 Above the list choose **Raumüberwachung** (`beobachten` or `melden`, see
@@ -568,14 +600,42 @@ Who sees what:
 The same settings remain visible and editable in the app's **Configuration**
 tab as lists of entity IDs (`heizkreis_1_sensoren`, `heizkreis_2_sensoren`,
 `haus_sensoren`, `kuehlere_raeume`, `ohne_ueberwaermung`,
-`haus_frost_sensoren`, and from app 1.6.8 `kuehler_4_raeume`,
-`kuehler_6_raeume`, `nur_frost_raeume`). A change made there takes effect after the app is
-restarted (or when the room page saves); the room page names such a change
-that is not active yet. The room page lists every room with an allowance
-(2, 4 or 6 degrees or frost only) in `kuehlere_raeume` as well, and the larger
-choice also in its own list. That way an older app version, which does not
-know the new lists, still treats these rooms as 2 degrees cooler after a
-downgrade. A room may be in at most one of the three new lists.
+`haus_frost_sensoren`, from app 1.6.8 `kuehler_4_raeume`,
+`kuehler_6_raeume`, `nur_frost_raeume`) and from app 1.6.9
+`raum_einstellungen`, one entry per room with `sensor`, `kuehler` (0 to 10 in
+steps of 0.5), `einfluss_hk1` and `einfluss_hk2` (0 to 100). A change made
+there takes effect after the app is restarted (or when the room page saves);
+the room page names such a change that is not active yet.
+
+The room page writes a `raum_einstellungen` entry only for a room the 1.6.8
+lists cannot express (another allowance than 0, 2, 4 or 6, or another
+influence than 100 % on its own circuit and 0 % on the other). A room
+without an entry keeps the 1.6.8 meaning of the lists, so 1.6.8 settings
+need no change: 2, 4 or 6 degrees stay that number at 100 % on the own
+circuit, "nur Frost" becomes 0 % on both circuits. An entry wins over the
+lists. For a downgrade the page also writes the lists: the allowance rounded
+down to 0, 2, 4 or 6 degrees (every one of them also in `kuehlere_raeume`, so
+1.6.7 treats it as 2 degrees), 0 % on both circuits as `nur_frost_raeume`.
+
+**Downgrade from 1.6.9.** The Supervisor drops the unknown option
+`raum_einstellungen` when an older version is installed. Then 1.6.8 sees each
+room with its allowance rounded down to 0, 2, 4 or 6 degrees and 100 % on its
+own circuit (influence and a room's second circuit are lost; a room with 0 %
+on both stays frost only); 1.6.7 sees every room with an allowance as 2
+degrees cooler and every room as fully heated. Rounding down is stricter,
+never more lenient, except that a room with low influence is judged fully
+again; such a room can give notices the 1.6.9 settings had avoided. The saved
+room state of a room with a free setting starts fresh once in the older
+version; `/data/room_learning.json` is ignored by it and used again after an
+upgrade. A room may be in at most one of `kuehler_4_raeume`,
+`kuehler_6_raeume` and `nur_frost_raeume`.
+
+An invalid `raum_einstellungen` entry entered in the Configuration tab (an
+allowance off the 0.5 grid, more than 10, an influence that is not a whole
+number from 0 to 100, a room not on a circuit, or a room whose own circuit has
+less influence than the other) makes the whole room configuration invalid,
+like any other invalid room list: the room checks stop and the
+Betriebsüberwachung says so. The room page never saves such a value.
 
 At most 24 sensors can be selected in total. A sensor may be in only one
 group. The page refuses selections that break these rules. If the
@@ -646,18 +706,20 @@ house aired at once is not a fault. A failed pump or mixer is reported
 from the second morning; the circuit cold check (3 degrees, 3 h) usually comes
 first.
 
-**Rooms with an allowance and the circuit checks** (app 1.6.8). "All rooms of
-a circuit clearly too cold" (a fault) is judged over the circuit's rooms with
-**normal** or **darf 2 °C kühler sein**, each against its own limit, as in
-earlier versions. A room with 4 or 6 degrees is one the owner keeps unusually
-cool, often warmed by sun or a stove: it neither raises the fault while it sits
-at its allowed temperature nor holds it off when sun or a stove keeps it warm
-while the heating has failed. Only on a circuit with fewer than two such rooms
-do the 4- and 6-degree rooms count, each 3 degrees below its own allowed
-temperature (a sensor of such a room that drops out pauses the check, as
-before, instead of letting the other rooms decide). **nur Frost und Sensor prüfen** rooms never count for any
-circuit check. Rooms with an allowance are watched after a heating start only
-when they start 1.5 degrees below their allowed temperature.
+**Rooms with an allowance and the circuit checks** (app 1.6.8, influence
+1.6.9). "All rooms of a circuit clearly too cold" (a fault) is judged over
+the circuit's strong rooms (80 % or more) with at most 2 degrees allowance,
+each against its own limit, as in earlier versions. A room with more than 2
+degrees is one the owner keeps unusually cool, often warmed by sun or a
+stove: it neither raises the fault while it sits at its allowed temperature
+nor holds it off when sun or a stove keeps it warm while the heating has
+failed. Only on a circuit with fewer than two such rooms do the other rooms
+with 50 % or more count, each against its own allowed temperature and with
+limits scaled by its influence (a sensor of such a room that drops out
+pauses the check, as before, instead of letting the other rooms decide).
+Rooms without influence never count for any circuit check. Rooms with an
+allowance are watched after a heating start only when they start 1.5
+degrees below their allowed temperature.
 
 **Room too cold** needs the room to stay away from its day level: after one
 cold spell, 12 hours without getting back within 1 degree of the day target.
@@ -668,10 +730,90 @@ notice stays through the night setback (or a night the heating limit switches
 the circuit off) until the room is warm again, or 26 hours after the last cold
 spell, for example when the heating stays off for the summer. A room
 that is meant to stay cooler, or whose sensor sits at a cold spot such as a
-window, gets an allowance on the room page (**darf 2, 4 or 6 °C kühler
-sein**, or **nur Frost und Sensor prüfen**), or is set to "nicht überwachen". The app does not learn a room's usual level by
-itself (owner decision, 2026-11-18): that would also hide a radiator that
-slowly fails.
+window, gets an allowance or a lower influence on the room page, or is set
+to "nicht überwachen". The app never learns a room's usual level by itself
+(owner decision, 2026-11-18): that would also hide a radiator that slowly
+fails. From 1.6.9 the owner can let it propose values for one room
+(**Raum anlernen**, below); nothing changes until the owner accepts.
+
+### Raum anlernen (app 1.6.9)
+
+Every room saved on a heating circuit has a **Raum anlernen** part on the
+room page. Only a Home Assistant administrator can use it, and only for one
+room at a time; it never starts by itself.
+
+1. Choose the **Zeitraum** (the longest history Home Assistant holds up to
+   30 days, the default, or the last 3, 7, 14 or 30 days) and press **Raum
+   anlernen**. The app reads the room sensor's history and the history of the
+   two heating circuits (phase Tag/Absenken, target, status), which the VM
+   publishes to Home Assistant and its recorder keeps. Usually the result is
+   there within seconds; otherwise reload the page later.
+2. The room page shows a **Vorschlag** with its evidence, for example:
+   "darf 4 °C kühler sein, Einfluss Heizkreis 1 10 %, Heizkreis 2 0 % (bisher
+   0 °C, 100 %, 0 %)", "Tagesmittel 18,2 °C bei Ziel 23,0 °C (12 Tage mit
+   Tagbetrieb ausgewertet)", "Anstieg beim Aufheizen 0,4 K/h, HK2 (9
+   Aufheizvorgänge)".
+3. Press **Übernehmen** to write the values to the settings (the monitoring
+   uses them at once), or **Verwerfen**. Nothing changes without
+   **Übernehmen**. Afterwards the room shows "Angelernt am ..." with the
+   values and a **Zurücksetzen** button that sets the room back to 0 °C and
+   100 % on its own circuit.
+
+How the proposal is made:
+
+- **Allowance**: from the day-phase level of the room against the circuit's
+  target, 2 hours after a day phase starts (4 hours for underfloor), on days
+  with at least 2 hours of such readings: the deficit that 4 days in 5 stay
+  within, minus 1 degree (a room is "too cold" 1.5 degrees below its limit),
+  rounded up to 0.5 degrees, 0 to 10 degrees. At least 3 such days are
+  needed; otherwise the allowance stays as it is.
+- **Influence per circuit**: from the heating starts of that circuit (setback
+  to day, or a target 1 degree higher) with the room at least 1 degree below
+  the new target: the rise of the room over 2 hours (6 hours for underfloor),
+  as a median over the starts. 0.8 degrees per hour (radiators) or 0.25
+  degrees per hour (underfloor) is 100 %. At least 3 starts are needed. A
+  start within an hour of the other circuit's start cannot be split between
+  the circuits and is not used for either, unless the room has no influence
+  from the other circuit: then it counts for the room's own circuit. If the
+  other circuit turns out to heat the room more, the proposal moves the room
+  to that circuit's group.
+- Gaps in the history (a sensor offline, a restart of Home Assistant) are left
+  out; a history piece that cannot be read is a gap, and when more than a
+  quarter of the pieces cannot be read the app says so instead of guessing.
+
+**Zu wenig Daten**: with fewer than 3 days of day phase and fewer than 3
+heating starts per circuit (for example a recorder that keeps only a few
+days, or a new sensor) the page says so and offers **Ab jetzt aufzeichnen**
+for 3, 7 or 14 days. During the recording the room reports no heating problem
+of its own ("zu kalt", "wird nicht wärmer", "zu warm"); frost and sensor checks
+stay on and the room still counts for its circuit's checks. At the end of the
+recording the next opening of the room page analyses exactly that period (Home
+Assistant's recorder must keep it: by default it keeps 10 days). A recording
+can be cancelled (**Aufzeichnung abbrechen**); a running analysis too
+(**Abbrechen**).
+
+**Learning sees what the room did, not what it should do.** A room whose
+radiator, valve or actuator fails would be learned as a cold room that the
+circuit hardly heats, and the checks would then stay quiet about it. That is
+why learning is manual, shows its evidence and needs the owner's acceptance.
+Warnings mark every proposal that loosens the checks noticeably: "Der Raum
+erreicht das Ziel nie" (on no day within 1 degree of the target) or "...
+selten" (on fewer than half of the days), "Der Vorschlag erlaubt deutlich
+mehr Abweichung" (more than 1 degree more than now, or more than 2 degrees),
+"Der Einfluss von Heizkreis N sinkt unter 80 %" (the room leaves the strong
+rooms of its circuit), "Der Raum wird beim Aufheizen von Heizkreis N kaum
+wärmer" (below 50 % on its own circuit) and "Laut Verlauf heizt auch
+Heizkreis N den Raum" (a second circuit of 30 % or more). With a warning,
+**Übernehmen** works only after ticking "Ich habe den Raum geprüft; die Werte
+sind gewollt". Check the radiator first. A proposal older than 7 days, or one
+for a room whose settings changed since, is refused: learn again.
+Only an administrator's visit to the room page starts the analysis of an
+ended recording; a 30-day history is read in at most 60 pieces of at most 4
+MB each, and a very busy climate entity can exceed that and leave gaps.
+
+The learning state (a running recording, a proposal, "angelernt am") is kept
+in `/data/room_learning.json` and survives an app restart; a room taken off a
+circuit forgets it. Deleting the file is harmless.
 
 **Latencies for a real fault** (accepted by the owner, 2026-11-18), measured from
 midnight in synthetic tests:
@@ -753,9 +895,12 @@ The saved state is used only when it fits:
   clock when the host did not reboot, so a clock change does not matter;
   after a reboot by the clock, which must not lie more than 5 minutes before
   the save, and at least the time since the reboot);
-- the room settings: a room whose circuit, circuit type, **Raumtemperatur**
-  choice, "ohne Überwärmung" or frost setting changed starts fresh. A state
-  saved by app 1.6.6 or 1.6.7 continues after the update to 1.6.8. After a
+- the room settings: a room whose circuit, circuit type, allowance,
+  influence, "ohne Überwärmung" or frost setting changed starts fresh; a
+  circuit whose rooms or influences changed starts its circuit-wide checks
+  fresh. A state saved by app 1.6.6, 1.6.7 or 1.6.8 continues after the update
+  to 1.6.9 (the rule constants and the marks of 1.6.8 settings are
+  unchanged). A state saved by app 1.6.6 or 1.6.7 continues after the update to 1.6.8. After a
   downgrade to 1.6.7 while a room uses 4 or 6 degrees or frost only, 1.6.7
   starts the checks fresh once (it does not know these choices). A circuit whose
   type changed starts fresh with its rooms; when only its rooms changed, its

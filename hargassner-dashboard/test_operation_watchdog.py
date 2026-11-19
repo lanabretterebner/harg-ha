@@ -80,6 +80,16 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(self.v.document()['state'], 'Störung')
         self.assertIn('Heizungszustand unbekannt', self.v.document()['summary'])
 
+    def test_vm_outage_text_says_what_to_do(self):
+        """Alert text audit 2026-11-19 (unreleased): the outage Störung names the next step."""
+        self.assertTrue(self.report())
+        self.advance(LEASE)
+        document = self.v.document()
+        self.assertEqual(document['summary'], 'VM nicht erreichbar oder keine aktuellen Betriebsdaten. '
+                                              'Heizungszustand unbekannt. Prüfen, ob die VM läuft und im '
+                                              'Netzwerk erreichbar ist.')
+        self.assertEqual(document['problems'][0]['text'], document['summary'])
+
     def test_retained_normal_never_proves_liveness_even_after_restart(self):
         self.assertFalse(self.report(retained=True))
         self.assertEqual(self.v.document()['state'], 'Unbekannt')
@@ -298,6 +308,10 @@ class NotifyWatchTests(unittest.TestCase):
         row = [r for r in document['problems'] if r['check'] == NOTIFY_CHECK]
         self.assertEqual(len(row), 1)
         self.assertEqual(row[0]['level'], 'Hinweis')
+        # Alert text audit 2026-11-19 (unreleased): what is affected and what to check.
+        self.assertEqual(row[0]['text'], 'Der Benachrichtigungsdienst meldet sich nicht. E-Mails und Anrufe bei '
+                                         'Störungen sind nicht sichergestellt. Container harg-notify und '
+                                         'Netzwerk prüfen.')
         self.assertRegex(row[0]['since'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$')
         self.assertEqual(document['summary'], row[0]['text'])
 

@@ -1,4 +1,5 @@
-"""Room page with the sensor picker (app 1.6.1; per-room allowance 1.6.8).
+"""Room page with the sensor picker (app 1.6.1; per-room allowance 1.6.8; free
+allowance, circuit influence and room learning 1.6.9).
 
 The page lists every temperature sensor of Home Assistant and lets a Home
 Assistant administrator choose which ones the room monitoring watches. It
@@ -13,6 +14,8 @@ The complete set of requests of this module (PickerApi.allowed, list_users):
 - POST /core/api/template         one fixed read-only template: the area name
                                   of each temperature sensor (Core)
 - Core WebSocket config/auth/list whether the ingress user is an administrator
+- GET  /core/api/states and /core/api/history/period/...  only for "Raum
+                                  anlernen", read-only (room_learning.py)
 
 Every other request of the page (the list of states) uses the worker's
 CoreApi. A write is accepted only from an administrator, through Supervisor
@@ -31,8 +34,9 @@ import unicodedata
 from urllib.parse import urlsplit
 
 import house_rules as rules
+import room_learning as learning
 from ha_websocket import WebSocketError, list_users
-from house_monitor import (ApiError, CoreApi, CANDIDATE_CACHE_S, PAGE_STYLE, default_token, status_html)
+from house_monitor import (ApiError, CoreApi, CANDIDATE_CACHE_S, PAGE_STYLE, default_token, status_html, _time)
 
 INFO_PATH = '/addons/self/info'
 OPTIONS_PATH = '/addons/self/options'
@@ -56,31 +60,34 @@ ADMIN_RETRY_S = 10
 PAGE_CANDIDATE_AGE_S = 60
 APPLY_WAIT_S = 5
 TOKEN_HEADER = 'X-Raumsensoren-Token'
-HOUSE_KEYS = ('raumueberwachung_modus', 'heizkreis_1_art', 'heizkreis_2_art') + rules.LIST_KEYS
+SETTINGS_KEY = rules.ROOM_SETTINGS['key']
+HOUSE_KEYS = ('raumueberwachung_modus', 'heizkreis_1_art', 'heizkreis_2_art') + rules.LIST_KEYS + (SETTINGS_KEY,)
 HOUSE_DEFAULTS = {'raumueberwachung_modus': 'beobachten', 'heizkreis_1_art': 'automatisch',
-                  'heizkreis_2_art': 'automatisch', **{key: [] for key in rules.LIST_KEYS}}
+                  'heizkreis_2_art': 'automatisch', **{key: [] for key in rules.LIST_KEYS}, SETTINGS_KEY: []}
 GROUPS = {'heizkreis_1': 'heizkreis_1_sensoren', 'heizkreis_2': 'heizkreis_2_sensoren', 'weitere': 'haus_sensoren'}
 GROUP_TEXT = (('', 'nicht überwachen'), ('heizkreis_1', 'Heizkreis 1'), ('heizkreis_2', 'Heizkreis 2'),
               ('weitere', 'Weitere Räume'))
 FLAGS = (('ofen', 'ohne_ueberwaermung', 'kreis', 'Ofen oder viel Sonne'),
          ('frost', 'haus_frost_sensoren', 'weitere', 'Frostwarnung'))
-# The allowance of a room on a circuit (app 1.6.8; replaces the checkbox
-# "darf kühler sein"): page value, option list, text. Every value but '0' is
-# also stored in kuehlere_raeume (see house_rules.ALLOWANCE_LISTS).
-ALLOWANCE_LABEL = 'Raumtemperatur'
-ALLOWANCE_CHOICES = (('0', None, 'normal'),
-                     ('2', 'kuehlere_raeume', 'darf 2 °C kühler sein'),
-                     ('4', 'kuehler_4_raeume', 'darf 4 °C kühler sein'),
-                     ('6', 'kuehler_6_raeume', 'darf 6 °C kühler sein'),
-                     ('frost', rules.FROST_ONLY_LIST, 'nur Frost und Sensor prüfen'))
-ALLOWANCE_VALUES = frozenset(value for value, _key, _text in ALLOWANCE_CHOICES)
+# The 1.6.8 choice lists, read for display (migration) and still written as a
+# mirror for a downgrade: page value, option list.
+ALLOWANCE_CHOICES = (('0', None), ('2', 'kuehlere_raeume'), ('4', 'kuehler_4_raeume'),
+                     ('6', 'kuehler_6_raeume'), ('frost', rules.FROST_ONLY_LIST))
+# The free settings of a room on a circuit (app 1.6.9).
+ALLOWANCE_LABEL = 'Darf kühler sein um'
+INFLUENCE_LABEL = 'Einfluss Heizkreis {index}'
+INFLUENCE_FIELDS = ('einfluss_hk1', 'einfluss_hk2')
 TYPE_CHOICES = (('automatisch', 'automatisch (aus der Steuerung)'), ('heizkoerper', 'Heizkörper'),
                 ('fussboden', 'Fußboden'))
 BODY_KEYS = frozenset(('revision', 'modus', 'heizkreis_1_art', 'heizkreis_2_art', 'sensoren'))
-ROW_KEYS = frozenset(('entity_id', 'gruppe', 'kuehler', 'ofen', 'frost'))
+ROW_KEYS = frozenset(('entity_id', 'gruppe', 'kuehler', 'einfluss_hk1', 'einfluss_hk2', 'ofen', 'frost'))
+LEARN_KEYS = frozenset(('aktion', 'entity_id', 'tage', 'geprueft', 'revision'))
+LEARN_ACTIONS = ('anlernen', 'aufzeichnen', 'abbrechen', 'verwerfen', 'uebernehmen', 'zuruecksetzen')
+LEARN_PERIOD_TEXT = ((0, 'längster verfügbarer Verlauf (bis 30 Tage)'), (3, 'letzte 3 Tage'), (7, 'letzte 7 Tage'),
+                     (14, 'letzte 14 Tage'), (30, 'letzte 30 Tage'))
 REVISION_PATTERN = re.compile(r'[0-9a-f]{64}')
 LOG_CATEGORIES = frozenset(('saved', 'save_refused', 'save_unconfirmed', 'admin_lookup_failed',
-                            'options_unreadable', 'areas_unavailable'))
+                            'options_unreadable', 'areas_unavailable', 'learning'))
 
 VIEWER_TEXT = {
     'admin': 'Sie sind Administrator von Home Assistant und können die Auswahl hier ändern.',
@@ -327,15 +334,86 @@ def selection_of(options):
 
 
 def allowances_of(options):
-    """entity -> the room page's allowance value ('2', '4', '6' or 'frost';
-    absent: normal). The larger choice wins, as in house_rules (tolerant of an
-    invalid selection); a 1.6.7 kuehlere_raeume entry alone is '2'."""
+    """entity -> the 1.6.8 choice ('2', '4', '6' or 'frost'; absent: normal).
+    The larger choice wins, as in house_rules (tolerant of an invalid
+    selection); a 1.6.7 kuehlere_raeume entry alone is '2'."""
     lists = _configured_lists(options)
     levels = {}
-    for value, key, _text in ALLOWANCE_CHOICES[1:]:
+    for value, key in ALLOWANCE_CHOICES[1:]:
         for entity in lists[key]:
             levels[entity] = value
     return levels
+
+
+def _entries(options):
+    """entity -> (allowance, hc1, hc2) of well-formed 1.6.9 entries (tolerant)."""
+    raw = options.get(SETTINGS_KEY) if isinstance(options, dict) else None
+    entries = {}
+    for entry in raw if isinstance(raw, list) else ():
+        if not isinstance(entry, dict) or set(entry) != rules.ROOM_SETTING_KEYS or not isinstance(entry['sensor'], str):
+            continue
+        values = (rules.allowance_value(entry['kuehler']), rules.influence_value(entry['einfluss_hk1']),
+                  rules.influence_value(entry['einfluss_hk2']))
+        if None not in values:
+            entries.setdefault(entry['sensor'], values)
+    return entries
+
+
+def default_values(group):
+    """A room new on a circuit: no allowance, 100 % on its own circuit."""
+    return (0.0, 100 if group == 'heizkreis_1' else 0, 100 if group == 'heizkreis_2' else 0)
+
+
+def room_values(options):
+    """entity -> (allowance, hc1 %, hc2 %) of every room on a circuit.
+
+    A 1.6.9 entry wins; otherwise the 1.6.8 lists are migrated: 0/2/4/6 K keep
+    their number with 100 % on the room's circuit, "nur Frost" is no
+    influence on either circuit."""
+    chosen, _flags = selection_of(options)
+    levels, entries = allowances_of(options), _entries(options)
+    values = {}
+    for entity, group in chosen.items():
+        if group == 'weitere':
+            continue
+        if entity in entries:
+            values[entity] = entries[entity]
+            continue
+        level = levels.get(entity, '0')
+        if level == 'frost':
+            values[entity] = (0.0, 0, 0)
+        else:
+            base = default_values(group)
+            values[entity] = (float(level),) + base[1:]
+    return values
+
+
+def mirror_keys(allowance, first, second):
+    """The 1.6.8 lists a room is written to, so a downgrade keeps the nearest
+    stricter choice: no influence = nur Frost; else the allowance rounded down
+    to 0/2/4/6 K. Every one of them is also in kuehlere_raeume (1.6.7: 2 K)."""
+    if min(100, first + second) == 0:
+        return ('kuehlere_raeume', rules.FROST_ONLY_LIST)
+    if allowance >= 6:
+        return ('kuehlere_raeume', 'kuehler_6_raeume')
+    if allowance >= 4:
+        return ('kuehlere_raeume', 'kuehler_4_raeume')
+    if allowance >= 2:
+        return ('kuehlere_raeume',)
+    return ()
+
+
+def legacy_exact(values, group):
+    """True when the 1.6.8 lists alone say exactly this (no entry needed):
+    0/2/4/6 K at 100 % on the own circuit, or no influence without allowance."""
+    if tuple(values) == (0.0, 0, 0):
+        return True
+    return values[0] in (0.0, 2.0, 4.0, 6.0) and tuple(values[1:]) == default_values(group)[1:]
+
+
+def settings_entry(entity, values):
+    return {'sensor': entity, 'kuehler': float(values[0]), 'einfluss_hk1': int(values[1]),
+            'einfluss_hk2': int(values[2])}
 
 
 def options_of(parsed):
@@ -348,7 +426,8 @@ def options_of(parsed):
             'heizkreis_2_sensoren': list(parsed.hc2), 'haus_sensoren': list(parsed.haus),
             'kuehlere_raeume': sorted(parsed.cooler), 'ohne_ueberwaermung': sorted(parsed.no_warm),
             'haus_frost_sensoren': sorted(parsed.frost), 'kuehler_4_raeume': sorted(parsed.cooler4),
-            'kuehler_6_raeume': sorted(parsed.cooler6), rules.FROST_ONLY_LIST: sorted(parsed.frost_only)}
+            'kuehler_6_raeume': sorted(parsed.cooler6), rules.FROST_ONLY_LIST: sorted(parsed.frost_only),
+            SETTINGS_KEY: [settings_entry(row[0], row[1:]) for row in parsed.settings]}
 
 
 def parse_request(document):
@@ -378,15 +457,23 @@ def parse_request(document):
             raise SelectionError('Unbekannte Zuordnung eines Sensors.')
         if any(type(row[name]) is not bool for name, _key, _scope, _text in FLAGS):
             raise SelectionError('Ungültige Anfrage.')
-        if not isinstance(row['kuehler'], str) or row['kuehler'] not in ALLOWANCE_VALUES:
-            raise SelectionError('Ungültige Anfrage.')
+        if rules.allowance_value(row['kuehler']) is None:
+            raise SelectionError('"Darf kühler sein um" muss zwischen 0 und 10 °C in Schritten von 0,5 °C liegen.')
+        if any(rules.influence_value(row[name]) is None for name in INFLUENCE_FIELDS):
+            raise SelectionError('Der Einfluss eines Heizkreises muss eine ganze Zahl von 0 bis 100 % sein.')
         if entity in seen:
             raise SelectionError('Ein Sensor kann nur einer Gruppe zugeordnet werden.')
         seen.add(entity)
         circuit = row['gruppe'] != 'weitere'
-        if not circuit and (row['kuehler'] != '0' or row['ofen']):
-            raise SelectionError('"Raumtemperatur" und "Ofen oder viel Sonne" gelten nur für Räume an einem '
-                                 'Heizkreis.')
+        if not circuit and (row['kuehler'] != 0 or row['ofen'] or row['einfluss_hk1'] or row['einfluss_hk2']):
+            raise SelectionError('"Darf kühler sein um", der Einfluss und "Ofen oder viel Sonne" gelten nur für '
+                                 'Räume an einem Heizkreis.')
+        if circuit:
+            own, other = ((row['einfluss_hk1'], row['einfluss_hk2']) if row['gruppe'] == 'heizkreis_1'
+                          else (row['einfluss_hk2'], row['einfluss_hk1']))
+            if own < other:
+                raise SelectionError('Der Einfluss des eigenen Heizkreises muss mindestens so groß sein wie der des '
+                                     'anderen. Den Raum dem anderen Heizkreis zuordnen.')
         if circuit and row['frost']:
             raise SelectionError('"Frostwarnung" gilt nur für weitere Räume.')
     return document
@@ -401,7 +488,7 @@ def _ordered(previous, chosen):
 
 
 def build_house(stored, request):
-    """Map the page's rows to the nine room options."""
+    """Map the page's rows to the room options."""
     previous = _configured_lists(stored)
     rows = request['sensoren']
     house = {'raumueberwachung_modus': request['modus'], 'heizkreis_1_art': request['heizkreis_1_art'],
@@ -410,12 +497,38 @@ def build_house(stored, request):
         house[key] = _ordered(previous[key], [row['entity_id'] for row in rows if row['gruppe'] == group])
     for name, key, _scope, _text in FLAGS:
         house[key] = _ordered(previous[key], [row['entity_id'] for row in rows if row[name]])
-    # Every room with an allowance stays in kuehlere_raeume (an older app
-    # version reads it as 2 K); the larger choices add their own list.
-    house['kuehlere_raeume'] = _ordered(previous['kuehlere_raeume'],
-                                        [row['entity_id'] for row in rows if row['kuehler'] != '0'])
-    for value, key, _text in ALLOWANCE_CHOICES[2:]:
-        house[key] = _ordered(previous[key], [row['entity_id'] for row in rows if row['kuehler'] == value])
+    values = {row['entity_id']: (float(row['kuehler']), int(row['einfluss_hk1']), int(row['einfluss_hk2']))
+              for row in rows if row['gruppe'] != 'weitere'}
+    groups = {row['entity_id']: row['gruppe'] for row in rows}
+    _write_settings(house, previous, stored, values, groups)
+    return house
+
+
+def _write_settings(house, previous, stored, values, groups):
+    """The 1.6.9 entries (a room the 1.6.8 lists cannot express) and the 1.6.8
+    mirror lists, in stored order (house_rules.ROOM_SETTINGS)."""
+    order = list(values)
+    for key in ('kuehlere_raeume',) + tuple(key for _value, key in ALLOWANCE_CHOICES[2:]):
+        house[key] = _ordered(previous[key], [e for e in order if key in mirror_keys(*values[e])])
+    stored_order = [entity for entity in _entries(stored)]
+    chosen = [e for e in order if not legacy_exact(values[e], groups[e])]
+    house[SETTINGS_KEY] = [settings_entry(e, values[e]) for e in _ordered(stored_order, chosen)]
+
+
+def with_room(stored, entity, values, group):
+    """The room options with one room's values (and circuit) replaced."""
+    house = json.loads(json.dumps(house_part(stored)))
+    previous = _configured_lists(stored)
+    chosen, _flags = selection_of(stored)
+    current = room_values(stored)
+    groups = {e: g for e, g in chosen.items() if g != 'weitere'}
+    if groups.get(entity) != group:
+        for key in (GROUPS['heizkreis_1'], GROUPS['heizkreis_2']):
+            house[key] = [e for e in house[key] if e != entity]
+        house[GROUPS[group]].append(entity)
+        groups[entity] = group
+    current[entity] = tuple(values)
+    _write_settings(house, previous, stored, current, groups)
     return house
 
 
@@ -460,12 +573,34 @@ SCRIPT = r"""
       label.hidden = !on;
       if (!on) {
         var box = label.querySelector('input');
-        var choice = label.querySelector('select');
-        if (box) { box.checked = false; }
-        if (choice) { choice.value = '0'; }
+        if (box && box.type === 'checkbox') { box.checked = false; }
+        if (box && box.type === 'number') { box.value = '0'; }
       }
     });
     row.classList.toggle('aktiv', chosen !== '');
+  }
+  function defaults(row) {
+    // A room new on a circuit: no allowance, 100 % on its own circuit. Moved
+    // between the circuits it keeps its allowance and swaps the influences.
+    var chosen = group(row).value;
+    var before = row.getAttribute('data-vorher') || '';
+    row.setAttribute('data-vorher', chosen);
+    if (chosen !== 'heizkreis_1' && chosen !== 'heizkreis_2') { return; }
+    var first = row.querySelector('input[name="einfluss_hk1"]');
+    var second = row.querySelector('input[name="einfluss_hk2"]');
+    if (before === 'heizkreis_1' || before === 'heizkreis_2') {
+      var value = first.value;
+      first.value = second.value;
+      second.value = value;
+      return;
+    }
+    row.querySelector('input[name="kuehler"]').value = '0';
+    first.value = chosen === 'heizkreis_1' ? '100' : '0';
+    second.value = chosen === 'heizkreis_2' ? '100' : '0';
+  }
+  function numeric(row, name) {
+    var text = row.querySelector('input[name="' + name + '"]').value.replace(',', '.');
+    return text === '' ? null : Number(text);
   }
   function selected() {
     return rows.filter(function (row) { return group(row).value !== ''; });
@@ -491,7 +626,8 @@ SCRIPT = r"""
     bad.textContent = success ? '' : text;
   }
   rows.forEach(function (row) {
-    group(row).addEventListener('change', function () { sync(row); counted(); });
+    row.setAttribute('data-vorher', group(row).value);
+    group(row).addEventListener('change', function () { sync(row); defaults(row); counted(); });
     sync(row);
   });
   document.getElementById('suchfeld').hidden = false;
@@ -516,7 +652,9 @@ SCRIPT = r"""
         return {
           entity_id: row.getAttribute('data-entity'),
           gruppe: group(row).value,
-          kuehler: row.querySelector('select[name="kuehler"]').value,
+          kuehler: numeric(row, 'kuehler'),
+          einfluss_hk1: numeric(row, 'einfluss_hk1'),
+          einfluss_hk2: numeric(row, 'einfluss_hk2'),
           ofen: row.querySelector('input[name="ofen"]').checked,
           frost: row.querySelector('input[name="frost"]').checked
         };
@@ -548,6 +686,43 @@ SCRIPT = r"""
       show(false, 'Keine Verbindung zur App. Ob gespeichert wurde, ist unklar. Bitte die Seite neu laden.');
     }).then(function () { button.disabled = false; });
   });
+  // Room learning (app 1.6.9): one action per button; the page reloads after it.
+  form.addEventListener('click', function (event) {
+    var target = event.target;
+    if (!target || !target.getAttribute || !target.getAttribute('data-aktion') || !token) { return; }
+    var panel = target.closest('.anlernen');
+    var period = panel.querySelector('select[name="zeitraum"]');
+    var record = panel.querySelector('select[name="aufzeichnung"]');
+    var checked = panel.querySelector('input[name="geprueft"]');
+    var action = target.getAttribute('data-aktion');
+    var days = action === 'aufzeichnen' ? (record ? parseInt(record.value, 10) : null)
+      : (action === 'anlernen' && period ? parseInt(period.value, 10) : null);
+    var body = { aktion: action, entity_id: panel.getAttribute('data-raum'), tage: days,
+                 geprueft: checked ? checked.checked : false, revision: form.getAttribute('data-revision') };
+    target.disabled = true;
+    show(true, action === 'anlernen' ? 'Der Verlauf wird ausgewertet ...' : 'Bitte warten ...');
+    fetch(window.location.pathname + '/anlernen', {
+      method: 'POST', credentials: 'same-origin', cache: 'no-store', referrerPolicy: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Raumsensoren-Token': token },
+      body: JSON.stringify(body)
+    }).then(function (response) {
+      return response.text().then(function (text) {
+        var data = null;
+        try { data = JSON.parse(text); } catch (error) { data = null; }
+        return { status: response.status, data: data };
+      });
+    }).then(function (result) {
+      var data = result.data;
+      if (data && typeof data.message === 'string') {
+        show(data.ok === true, data.message);
+        if (data.ok === true) { window.setTimeout(function () { window.location.reload(); }, 1500); }
+      } else {
+        show(false, 'Nicht möglich (Fehler ' + result.status + '). Es wurde nichts geändert.');
+      }
+    }).catch(function () {
+      show(false, 'Keine Verbindung zur App. Bitte die Seite neu laden.');
+    }).then(function () { target.disabled = false; });
+  });
 }());
 """
 
@@ -565,6 +740,12 @@ PICKER_STYLE = (
     '.wahl label{display:block;margin:4px 0}'
     'button{background:var(--accent);color:#000;border-color:var(--accent);font-weight:bold;padding:8px 20px}'
     'button:disabled{opacity:.6;cursor:wait}'
+    'input[type=number]{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);'
+    'border-radius:6px;padding:6px 8px;min-height:2.5rem;width:5.5rem;box-sizing:border-box}'
+    '.anlernen{border-top:1px dashed var(--line);margin-top:8px;padding-top:6px;overflow-wrap:anywhere}'
+    '.anlernen p{margin:4px 0}.lern-titel{font-weight:bold}.beleg{margin:4px 0;padding-left:1.2rem}'
+    '.warnung{border-left:4px solid var(--bad);padding:4px 10px;background:var(--card)}'
+    'button.zweit{background:var(--bg);color:var(--fg);border-color:var(--line);font-weight:normal}'
     ':focus-visible{outline:3px solid var(--accent);outline-offset:2px}'
     '.hinweis{border-left:4px solid var(--accent);padding:4px 10px;background:var(--card)}'
     '#meldung{color:var(--ok);font-weight:bold}#fehler{color:var(--bad);font-weight:bold}'
@@ -573,7 +754,85 @@ PICKER_STYLE = (
     'margin-top:8px}[hidden]{display:none!important}')
 
 
-def render_picker(status, rows, areas, stored, viewer, nonce, *, zone=None, zones=None, running=None):
+SETTINGS_HELP = (
+    'Nur Räume an einem Heizkreis: "Darf kühler sein um" (0 bis 10 °C) sagt, wie weit der Raum unter dem '
+    'Sollwert des Heizkreises bleiben darf; die Meldung "zu kalt" nennt dann die erlaubte Temperatur. '
+    '"Einfluss Heizkreis 1/2" (0 bis 100 %) sagt, wie stark der Heizkreis den Raum heizt; ein Raum kann an '
+    'beiden Heizkreisen hängen. Unter 30 % wird der Raum für diesen Heizkreis nicht bewertet, ab 50 % zählt er '
+    'für "Heizkreis zu kalt". 0 % bei beiden Heizkreisen: nur Frost und Sensor werden geprüft.')
+LEARN_HELP = (
+    '"Raum anlernen" wertet den Verlauf des Raums aus Home Assistant aus und schlägt Werte vor. Übernommen wird '
+    'nur, was Sie bestätigen. Achtung: Ein Raum mit defektem Heizkörper oder Ventil würde als "kühler Raum" '
+    'angelernt. Deshalb zeigt der Vorschlag seine Grundlage und warnt, wenn der Raum das Ziel nie erreicht.')
+
+
+def _number_text(value):
+    return ('%g' % value).replace('.', ',')
+
+
+def learning_html(entity, index, view, editable, zone, zones):
+    """The learning part of one room on a circuit (status, evidence, actions)."""
+    escape = html.escape
+    entry, learned, analysing = view
+    out = [f'<div class="anlernen" data-raum="{escape(entity)}"><p class="lern-titel">Raum anlernen</p>']
+    if learned is not None:
+        values = learned['values']
+        out.append(f'<p>Angelernt am {escape(_time(learned["wall"], zone, zones))} '
+                   f'({escape(_number_text(values[0]))} °C, Heizkreis 1 {values[1]} %, Heizkreis 2 {values[2]} %).'
+                   + (' <button type="button" class="zweit" data-aktion="zuruecksetzen">Zurücksetzen</button>'
+                      if editable else '') + '</p>')
+    if analysing:
+        out.append('<p role="status">Wird ausgewertet ...</p>')
+        if editable:
+            out.append('<button type="button" class="zweit" data-aktion="abbrechen">Abbrechen</button>')
+    elif entry is None:
+        if editable:
+            out.append(f'<label for="z{index}">Zeitraum</label> <select id="z{index}" name="zeitraum">')
+            for days, text in LEARN_PERIOD_TEXT:
+                out.append(f'<option value="{days}">{escape(text)}</option>')
+            out.append('</select> <button type="button" data-aktion="anlernen">Raum anlernen</button>')
+        elif learned is None:
+            out.append('<p>Noch nicht angelernt.</p>')
+    elif entry['state'] == 'recording':
+        out.append(f'<p>Aufzeichnung läuft bis {escape(_time(entry["end"], zone, zones))}. Bis dahin meldet dieser '
+                   'Raum keine Heizungsprobleme; Frost und Sensor werden weiter geprüft.</p>')
+        if editable:
+            out.append('<button type="button" class="zweit" data-aktion="abbrechen">Aufzeichnung abbrechen</button>')
+    else:
+        period = (f'Verlauf {escape(_time(entry["start"], zone, zones))} bis '
+                  f'{escape(_time(entry["end"], zone, zones))}')
+        if entry['state'] == 'proposal':
+            value = entry['proposal']
+            current = entry['current']
+            out.append(f'<p><strong>Vorschlag</strong> ({period}): darf {escape(_number_text(value[0]))} °C kühler '
+                       f'sein, Einfluss Heizkreis 1 {value[1]} %, Heizkreis 2 {value[2]} %'
+                       + (f' (bisher {escape(_number_text(current[0]))} °C, {current[1]} %, {current[2]} %)'
+                          if current else '') + '.</p>')
+        else:
+            out.append(f'<p><strong>Zu wenig Daten</strong> ({period}) für einen Vorschlag. Mindestens '
+                       f'{learning.DAYS_MIN} Tage mit Tagbetrieb oder {learning.EVENTS_MIN} Aufheizvorgänge sind '
+                       'nötig. Sie können stattdessen ab jetzt aufzeichnen.</p>')
+        out.append('<ul class="beleg">' + ''.join(f'<li>{escape(line)}</li>' for line in entry['evidence']) + '</ul>')
+        for warning in entry['warnings']:
+            out.append(f'<p class="warnung">{escape(warning)}</p>')
+        if editable and entry['state'] == 'proposal':
+            if entry['warnings']:
+                out.append(f'<label><input type="checkbox" name="geprueft" id="p{index}">Ich habe den Raum geprüft; '
+                           'die Werte sind gewollt.</label>')
+            out.append('<button type="button" data-aktion="uebernehmen">Übernehmen</button> '
+                       '<button type="button" class="zweit" data-aktion="verwerfen">Verwerfen</button>')
+        elif editable:
+            out.append(f'<label for="a{index}">Aufzeichnen für</label> <select id="a{index}" name="aufzeichnung">')
+            for days in learning.RECORD_PERIODS:
+                out.append(f'<option value="{days}">{days} Tage</option>')
+            out.append('</select> <button type="button" data-aktion="aufzeichnen">Ab jetzt aufzeichnen</button> '
+                       '<button type="button" class="zweit" data-aktion="verwerfen">Verwerfen</button>')
+    out.append('</div>')
+    return ''.join(out)
+
+
+def render_picker(status, rows, areas, stored, viewer, nonce, *, zone=None, zones=None, running=None,
+                  learning_view=None):
     """The complete room page.
 
     rows: candidate rows (entity, name, value) or None; areas: entity -> area
@@ -584,7 +843,8 @@ def render_picker(status, rows, areas, stored, viewer, nonce, *, zone=None, zone
     editable = viewer['kind'] == 'admin' and stored is not None and viewer.get('token')
     shown = stored if stored is not None else (options_of(running) if running is not None else HOUSE_DEFAULTS)
     chosen, flags = selection_of(shown)
-    levels = allowances_of(shown)
+    values = room_values(shown)
+    stored_groups = selection_of(stored)[0] if stored is not None else {}
     candidates = {row[0]: row for row in rows} if rows is not None else {}
     areas_unavailable = areas is None and bool(rows)
     areas = areas or {}
@@ -608,14 +868,14 @@ def render_picker(status, rows, areas, stored, viewer, nonce, *, zone=None, zone
                          'Speichern durch einen Administrator oder nach dem nächsten Neustart der App.')
     for note in notes:
         lines.append(f'<p class="hinweis">{escape(note)}</p>')
+    learn_hint = learning_view is not None
     lines.append('<p>Jeder Sensor gehört höchstens zu einer Gruppe: Heizkreis 1, Heizkreis 2 oder Weitere Räume '
                  '(Räume ohne Heizkreis, z. B. Keller). Nach dem Speichern gilt die Auswahl sofort; die Wartezeiten '
                  'der Überwachung beginnen dann neu. Die Einstellungen bleiben im Tab Konfiguration der App sichtbar '
                  'und dort änderbar.</p>')
-    lines.append('<p>Raumtemperatur (nur Räume an einem Heizkreis): "normal" vergleicht mit dem Sollwert des '
-                 'Heizkreises. "darf 2 °C, 4 °C oder 6 °C kühler sein" gilt für Räume, die absichtlich kühler '
-                 'bleiben; die Meldung "zu kalt" nennt dann die erlaubte Temperatur. "nur Frost und Sensor prüfen" '
-                 'meldet für den Raum nur Frostgefahr und Sensorfehler; er zählt nicht für "Heizkreis zu kalt".</p>')
+    lines.append(f'<p>{escape(SETTINGS_HELP)}</p>')
+    if learn_hint:
+        lines.append(f'<p>{escape(LEARN_HELP)}</p>')
     attributes = ''
     if editable:
         attributes = (f' data-token="{escape(viewer["token"])}" data-revision="{escape(revision(stored))}"')
@@ -672,21 +932,26 @@ def render_picker(status, rows, areas, stored, viewer, nonce, *, zone=None, zone
             selected = ' selected' if group == value_ else ''
             out.append(f'<option value="{value_}"{selected}>{escape(text)}</option>')
         out.append('</select>')
-        # Allowance (rooms on a circuit): a choice instead of a checkbox.
-        level = levels.get(entity, '0') if scope == 'kreis' else '0'
+        # Free settings (rooms on a circuit, app 1.6.9): allowance and influence.
+        current = values.get(entity, (0.0, 0, 0)) if scope == 'kreis' else (0.0, 0, 0)
         hidden = '' if scope == 'kreis' else ' hidden'
         out.append(f'<label data-gilt="kreis"{hidden}>{escape(ALLOWANCE_LABEL)} '
-                   f'<select name="kuehler"{disabled}>')
-        for value_, _key, text in ALLOWANCE_CHOICES:
-            selected = ' selected' if level == value_ else ''
-            out.append(f'<option value="{value_}"{selected}>{escape(text)}</option>')
-        out.append('</select></label>')
+                   f'<input type="number" name="kuehler" min="0" max="10" step="0.5" inputmode="decimal" '
+                   f'value="{_number_text(current[0]).replace(",", ".")}"{disabled}> °C</label>')
+        for number, name in enumerate(INFLUENCE_FIELDS, 1):
+            out.append(f'<label data-gilt="kreis"{hidden}>{escape(INFLUENCE_LABEL.format(index=number))} '
+                       f'<input type="number" name="{name}" min="0" max="100" step="5" inputmode="numeric" '
+                       f'value="{current[number]}"{disabled}> %</label>')
         for flag, _key, flag_scope, text in FLAGS:
             checked = ' checked' if entity in flags[flag] and flag_scope == scope else ''
             hidden = '' if flag_scope == scope else ' hidden'
             out.append(f'<label data-gilt="{flag_scope}"{hidden}><input type="checkbox" name="{flag}"'
                        f'{checked}{disabled}>{escape(text)}</label>')
-        out.append('</div></fieldset>')
+        out.append('</div>')
+        # Learning only for a room saved on a circuit (its history and circuit are known).
+        if learning_view is not None and stored_groups.get(entity) in ('heizkreis_1', 'heizkreis_2'):
+            out.append(learning_html(entity, index, learning_view(entity), editable, zone, zones))
+        out.append('</fieldset>')
         return ''.join(out)
 
     configured = [entity for key in rules.LIST_KEYS[:3] for entity in _configured_lists(shown)[key]]
@@ -720,8 +985,10 @@ class RoomPicker:
     """GET renders the page; save() is the only write. One save at a time."""
 
     def __init__(self, monitor, *, token_source=default_token, api_factory=PickerApi, admin=None, tokens=None,
-                 monotonic=time.monotonic, log=None, apply_wait=APPLY_WAIT_S):
+                 monotonic=time.monotonic, log=None, apply_wait=APPLY_WAIT_S, learning=None, learn_wait=20.0):
         self.monitor = monitor
+        self.learning = learning
+        self.learn_wait = learn_wait
         self.token_source, self.api_factory = token_source, api_factory
         self.monotonic = monotonic
         self.log_sink = log or (lambda line: print(line, flush=True))
@@ -777,8 +1044,25 @@ class RoomPicker:
         rows = self.monitor._candidates(PAGE_CANDIDATE_AGE_S)
         areas = self._areas(api) if rows else None
         viewer = {'kind': kind, 'name': name, 'token': self.tokens.issue(user) if kind == 'admin' else None}
+        learning_view = None
+        if self.learning is not None and stored is not None:
+            if kind == 'admin':
+                # Writes and history reads only on an administrator's visit.
+                self._learning_upkeep(stored)
+            learning_view = self.learning.view
         return render_picker(self.monitor.status(), rows, areas, stored, viewer, nonce,
-                             zone=self.monitor.zone, zones=self.monitor.zones, running=self.monitor.options)
+                             zone=self.monitor.zone, zones=self.monitor.zones, running=self.monitor.options,
+                             learning_view=learning_view)
+
+    def _learning_upkeep(self, stored):
+        """Forget rooms no longer on a circuit; analyse a recording that ended."""
+        groups = {e: g for e, g in selection_of(stored)[0].items() if g != 'weitere'}
+        self.learning.prune(set(groups))
+        values = room_values(stored)
+        for entity, entry in self.learning.due():
+            home = 'hc1' if groups.get(entity) == 'heizkreis_1' else 'hc2'
+            self.learning.start(entity, home, values[entity], wait=0, period=(entry['start'], entry['end']))
+            break
 
     def save(self, user, token, raw):
         """Return (HTTP status, {'ok', 'message'[, 'revision']}). Never raises for bad input."""
@@ -822,7 +1106,10 @@ class RoomPicker:
                     message = ('Die Liste der Temperatursensoren ist gerade nicht verfügbar; neue Sensoren '
                                'können deshalb nicht gespeichert werden. Es wurde nichts gespeichert.')
                 return refuse(400, message)
-        house = build_house(stored, request)
+        return self._write(stored, build_house(stored, request), api, refuse)
+
+    def _write(self, stored, house, api, refuse):
+        """Save the room options (when changed), confirm, hand them to the monitor."""
         merged = {**stored, **house}
         parsed = rules.parse_house_options(merged)
         if not parsed.valid:
@@ -853,3 +1140,95 @@ class RoomPicker:
                         if applied else 'Die Überwachung übernimmt die neue Auswahl in wenigen Sekunden.')
         self._log('saved')
         return 200, {'ok': True, 'message': message, 'revision': revision(confirmed)}
+
+    # -- room learning (app 1.6.9)
+    def learn(self, user, token, raw):
+        """One learning action. Return (HTTP status, {'ok', 'message'}). Never raises for bad input."""
+        if not self.save_lock.acquire(blocking=False):
+            return 409, {'ok': False, 'message': 'Es wird gerade gespeichert. Bitte kurz warten.'}
+        try:
+            return self._learn(user, token, raw)
+        finally:
+            self.save_lock.release()
+
+    def _learn(self, user, token, raw):
+        def refuse(status, message, category='learning'):
+            self._log(category)
+            return status, {'ok': False, 'message': message}
+        if self.learning is None:
+            return refuse(503, 'Anlernen ist gerade nicht verfügbar. Es wurde nichts geändert.')
+        kind, _name = self.admin.lookup(user, refresh=True)
+        if kind != 'admin':
+            return refuse(403, REFUSED_TEXT[kind].replace('gespeichert', 'geändert'))
+        if not self.tokens.valid(user, token):
+            return refuse(403, 'Die Seite ist abgelaufen. Bitte neu laden. Es wurde nichts geändert.')
+        try:
+            document = rules.strict_json(raw)
+        except (ValueError, UnicodeError, RecursionError):
+            document = None
+        if (not isinstance(document, dict) or set(document) != LEARN_KEYS or document['aktion'] not in LEARN_ACTIONS
+                or not isinstance(document['entity_id'], str) or not rules.ENTITY_PATTERN.fullmatch(document['entity_id'])
+                or type(document['geprueft']) is not bool
+                or not (document['tage'] is None or type(document['tage']) is int)
+                or not isinstance(document['revision'], str) or not REVISION_PATTERN.fullmatch(document['revision'])):
+            return refuse(400, 'Ungültige Anfrage. Es wurde nichts geändert.')
+        action, entity, days = document['aktion'], document['entity_id'], document['tage']
+        if action == 'abbrechen':
+            status, message = self.learning.cancel(entity)
+            return status, {'ok': True, 'message': message}
+        if action == 'verwerfen':
+            status, message = self.learning.discard(entity)
+            return status, {'ok': status == 200, 'message': message}
+        api = self._api()
+        stored = self._stored(api)
+        if stored is None:
+            return refuse(503, 'Die gespeicherten Einstellungen der App sind gerade nicht lesbar. '
+                               'Es wurde nichts geändert.')
+        groups = {e: g for e, g in selection_of(stored)[0].items() if g != 'weitere'}
+        if entity not in groups:
+            return refuse(400, 'Nur ein gespeicherter Raum an einem Heizkreis kann angelernt werden. '
+                               'Erst speichern.')
+        home = 'hc1' if groups[entity] == 'heizkreis_1' else 'hc2'
+        current = room_values(stored)[entity]
+        if action == 'anlernen':
+            if days not in (0,) + learning.PERIODS:
+                return refuse(400, 'Ungültiger Zeitraum. Es wurde nichts geändert.')
+            status, message = self.learning.start(entity, home, current, days=days or learning.MAX_DAYS,
+                                                  wait=self.learn_wait)
+            return status, {'ok': status in (200, 202), 'message': message}
+        if action == 'aufzeichnen':
+            if days not in learning.RECORD_PERIODS:
+                return refuse(400, 'Ungültige Dauer der Aufzeichnung. Es wurde nichts geändert.')
+            status, message = self.learning.record(entity, days)
+            return status, {'ok': status == 200, 'message': message}
+        # uebernehmen and zuruecksetzen write the room options.
+        if revision(stored) != document['revision']:
+            return refuse(409, 'Die Einstellungen wurden inzwischen geändert. Bitte die Seite neu laden. '
+                               'Es wurde nichts geändert.')
+        if action == 'zuruecksetzen':
+            values, group = default_values(groups[entity]), groups[entity]
+        else:
+            entry = self.learning.proposal(entity)
+            if entry is None:
+                return refuse(409, 'Kein Vorschlag zum Übernehmen. Bitte die Seite neu laden.')
+            if self.learning.clock() - entry['made'] > learning.PROPOSAL_MAX_AGE_S:
+                return refuse(409, 'Der Vorschlag ist älter als 7 Tage. Bitte neu anlernen. Es wurde nichts geändert.')
+            if entry['home'] != home or entry['current'] is None or tuple(entry['current']) != tuple(current):
+                return refuse(409, 'Der Raum wurde seit dem Vorschlag geändert. Bitte neu anlernen. '
+                                   'Es wurde nichts geändert.')
+            if entry['warnings'] and not document['geprueft']:
+                return refuse(400, 'Der Vorschlag hat eine Warnung. Bitte erst bestätigen, dass Sie den Raum '
+                                   'geprüft haben. Es wurde nichts geändert.')
+            values = tuple(entry['proposal'])
+            own, other = (values[1], values[2]) if home == 'hc1' else (values[2], values[1])
+            group = groups[entity] if own >= other else ('heizkreis_2' if home == 'hc1' else 'heizkreis_1')
+        status, answer = self._write(stored, with_room(stored, entity, values, group), api,
+                                     lambda code, text, category='save_refused': refuse(code, text, category))
+        if status == 200:
+            if action == 'zuruecksetzen':
+                self.learning.forget(entity)
+                answer['message'] = 'Zurückgesetzt auf die Standardwerte. ' + answer['message']
+            else:
+                self.learning.accepted(entity, values, entry['made'])
+                answer['message'] = 'Vorschlag übernommen. ' + answer['message']
+        return status, answer

@@ -129,29 +129,39 @@ async function main() {
     const kueche = page.locator('fieldset[data-entity="sensor.kueche"]');
     check(await kueche.isVisible(), "Küche found");
     check(!(await page.locator('fieldset[data-entity="sensor.bad"]').isVisible()), "others hidden");
-    check(!(await kueche.getByLabel("Raumtemperatur").isVisible()), "flags hidden while not monitored");
+    check(!(await kueche.getByLabel("Darf kühler sein um").isVisible()), "fields hidden while not monitored");
     await kueche.getByLabel("Überwachung").selectOption("heizkreis_2");
-    check(await kueche.getByLabel("Raumtemperatur").isVisible(), "circuit flags shown");
-    // The allowance choice (app 1.6.8): five options, normal by default.
-    const allowance = kueche.getByLabel("Raumtemperatur");
-    check(await allowance.inputValue() === "0", "allowance normal by default");
-    check(JSON.stringify(await allowance.locator("option").allTextContents()) === JSON.stringify(
-      ["normal", "darf 2 °C kühler sein", "darf 4 °C kühler sein", "darf 6 °C kühler sein",
-       "nur Frost und Sensor prüfen"]), "five allowance choices");
-    await allowance.selectOption("6");
+    check(await kueche.getByLabel("Darf kühler sein um").isVisible(), "circuit fields shown");
+    // The free settings (app 1.6.9): number fields, 0 K and 100 % on the own circuit by default.
+    const allowance = kueche.getByLabel("Darf kühler sein um");
+    check(await allowance.getAttribute("type") === "number" && await allowance.getAttribute("step") === "0.5",
+      "allowance is a number in 0.5 steps");
+    check(await allowance.inputValue() === "0", "allowance 0 by default");
+    check(await kueche.getByLabel("Einfluss Heizkreis 1").inputValue() === "0", "no influence of the other circuit");
+    check(await kueche.getByLabel("Einfluss Heizkreis 2").inputValue() === "100", "100 % on its own circuit");
+    await allowance.fill("6.5");
+    await kueche.getByLabel("Einfluss Heizkreis 1").fill("30");
     check(!(await kueche.getByLabel("Frostwarnung").isVisible()), "frost hidden for circuits");
     await kueche.getByLabel("Ofen oder viel Sonne").check();
     await page.getByLabel("Sensoren suchen (Name, Bereich oder Entität)").fill("keller");
     const keller = page.locator('fieldset[data-entity="sensor.keller"]');
     await keller.getByLabel("Überwachung").selectOption("weitere");
     check(await keller.getByLabel("Frostwarnung").isVisible(), "frost shown for Weitere Räume");
-    check(!(await keller.getByLabel("Raumtemperatur").isVisible()), "circuit flags hidden for Weitere Räume");
-    // A circuit choice is reset when the room leaves its circuit.
+    check(!(await keller.getByLabel("Darf kühler sein um").isVisible()), "circuit fields hidden for Weitere Räume");
+    // The circuit fields are reset when the room leaves its circuit.
     await keller.getByLabel("Überwachung").selectOption("heizkreis_1");
-    await keller.getByLabel("Raumtemperatur").selectOption("frost");
+    await keller.getByLabel("Darf kühler sein um").fill("4");
+    await keller.getByLabel("Einfluss Heizkreis 1").fill("0");
     await keller.getByLabel("Überwachung").selectOption("weitere");
     await keller.getByLabel("Überwachung").selectOption("heizkreis_1");
-    check(await keller.getByLabel("Raumtemperatur").inputValue() === "0", "allowance reset off the circuit");
+    check(await keller.getByLabel("Darf kühler sein um").inputValue() === "0", "allowance reset off the circuit");
+    check(await keller.getByLabel("Einfluss Heizkreis 1").inputValue() === "100", "influence back to its default");
+    // Moved between the circuits a room keeps its allowance and swaps the influences.
+    await keller.getByLabel("Darf kühler sein um").fill("2.5");
+    await keller.getByLabel("Überwachung").selectOption("heizkreis_2");
+    check(await keller.getByLabel("Darf kühler sein um").inputValue() === "2.5", "allowance kept on a circuit swap");
+    check(await keller.getByLabel("Einfluss Heizkreis 2").inputValue() === "100"
+      && await keller.getByLabel("Einfluss Heizkreis 1").inputValue() === "0", "influences swapped");
     await keller.getByLabel("Überwachung").selectOption("weitere");
     await keller.getByLabel("Frostwarnung").check();
     // The missing sensor stays visible and can be removed.
@@ -175,7 +185,8 @@ async function main() {
       heizkreis_1_sensoren: ["sensor.wohnzimmer"], heizkreis_2_art: "fussboden",
       heizkreis_2_sensoren: ["sensor.kueche"], kuehlere_raeume: ["sensor.wohnzimmer", "sensor.kueche"],
       kuehler_4_raeume: [], kuehler_6_raeume: ["sensor.kueche"], nur_frost_raeume: [],
-      ohne_ueberwaermung: ["sensor.kueche"], raumueberwachung_modus: "melden" });
+      ohne_ueberwaermung: ["sensor.kueche"], raumueberwachung_modus: "melden",
+      raum_einstellungen: [{ sensor: "sensor.kueche", kuehler: 6.5, einfluss_hk1: 30, einfluss_hk2: 100 }] });
     checks += 1;
     await shot(page, "picker-390-light-saved.png");
     // A second save from the same page uses the new revision; an unchanged selection posts nothing.
@@ -186,6 +197,33 @@ async function main() {
     await page.getByLabel("Sensoren suchen (Name, Bereich oder Entität)").focus();
     await page.keyboard.press("Tab");
     check(await page.evaluate(() => document.activeElement.id) === "g1", "Tab reaches the first sensor");
+    // Raum anlernen (app 1.6.9): from the history, a proposal with its evidence; nothing applies before
+    // the owner accepts, and a warning must be confirmed.
+    const living = page.locator('fieldset[data-entity="sensor.wohnzimmer"]');
+    check(await living.locator(".anlernen").isVisible(), "learning shown for a saved circuit room");
+    check(await page.locator('fieldset[data-entity="sensor.keller"] .anlernen').count() === 0,
+      "no learning for Weitere Räume");
+    await living.getByLabel("Zeitraum").selectOption("14");
+    await living.getByRole("button", { name: "Raum anlernen" }).click();
+    await page.waitForFunction(() => document.getElementById("meldung").textContent.startsWith("Vorschlag erstellt"));
+    await page.waitForSelector('fieldset[data-entity="sensor.wohnzimmer"] .anlernen strong');
+    const panel = page.locator('fieldset[data-entity="sensor.wohnzimmer"] .anlernen');
+    check((await panel.textContent()).includes("Tagesmittel"), "evidence shown");
+    check((await panel.locator(".warnung").count()) === 2, "two warnings (more allowance, hardly warmer)");
+    check(fixture.saved.length === 1, "a proposal writes nothing");
+    await shot(page, "picker-390-light-proposal.png");
+    await panel.getByRole("button", { name: "Übernehmen" }).click();
+    await page.waitForFunction(() => document.getElementById("fehler").textContent.includes("geprüft"));
+    check(fixture.saved.length === 1, "unconfirmed warning saves nothing");
+    await panel.getByLabel("Ich habe den Raum geprüft; die Werte sind gewollt.").check();
+    await panel.getByRole("button", { name: "Übernehmen" }).click();
+    await page.waitForFunction(() => document.getElementById("meldung").textContent.startsWith("Vorschlag übernommen."));
+    check(fixture.saved.length === 2, "accepting writes the options once");
+    const learned = fixture.saved[1].raum_einstellungen.find((row) => row.sensor === "sensor.wohnzimmer");
+    check(learned && learned.kuehler >= 2 && learned.einfluss_hk1 <= 20, `learned values ${JSON.stringify(learned)}`);
+    await page.waitForSelector('fieldset[data-entity="sensor.wohnzimmer"] .anlernen >> text=Angelernt am');
+    const overflow = await page.evaluate(() => document.scrollingElement.scrollWidth - window.innerWidth);
+    check(overflow <= 0, `no horizontal scroll with learning (${overflow})`);
     await context.close();
 
     // An ordinary user sees the selection read-only.
@@ -194,6 +232,8 @@ async function main() {
     await viewer.goto(origin + PREFIX + ROUTE);
     check(await viewer.locator("#speichern").count() === 0, "no save button for ordinary users");
     check(await viewer.locator('select[name="gruppe"]').first().isDisabled(), "choices disabled");
+    check(await viewer.locator('input[name="kuehler"]').first().isDisabled(), "fields disabled");
+    check(await viewer.locator("[data-aktion]").count() === 0, "no learning actions for ordinary users");
     check((await viewer.textContent("body")).includes("Nur Administratoren von Home Assistant"), "viewer note");
     check(!(await viewer.textContent("body")).includes("noch nicht aktiv"), "saved selection is the running one");
     await shot(viewer, "picker-1280-light-viewer.png");
@@ -206,7 +246,7 @@ async function main() {
     await foreign.waitForFunction(() => window.results.length === 2);
     const results = await foreign.evaluate(() => window.results);
     check(results[0] === "json:blocked", `cross-site JSON blocked (${results[0]})`);
-    check(fixture.saved.length === 1, "cross-site requests saved nothing");
+    check(fixture.saved.length === 2, "cross-site requests saved nothing");
     await foreign.close();
     check(problems.length === 0, `no page errors or CSP violations: ${problems.join(" | ")}`);
   } finally {

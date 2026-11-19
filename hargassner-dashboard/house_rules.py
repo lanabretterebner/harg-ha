@@ -11,7 +11,7 @@ import json
 import math
 import re
 
-APP_VERSION = '1.6.8'
+APP_VERSION = '1.6.9'
 REPORT_SCHEMA = 'harg-house-report/1'
 CONTEXT_SCHEMA_PREFIX = 'harg-house-context/'
 # Context major 2 has the keys of 1; an adapter sends it only to an app that
@@ -147,6 +147,28 @@ FROST_ONLY_LIST = 'nur_frost_raeume'
 FROST_ONLY = 'frost'
 # The codes whose text names the room's allowance (VM, context major 2).
 ALLOWANCE_CODES = ('room_cold', 'limit_cold')
+# Free room settings (app 1.6.9, owner request 2026-11-19): per room an
+# allowance of 0 to 10 K on the 0.5 K grid and an influence of 0 to 100 % per
+# circuit, in the option `raum_einstellungen` (a list of objects). A room
+# without an entry keeps the 1.6.8 lists (allowance 0/2/4/6, frost only = no
+# influence) and 100 % on its own circuit. Thresholds (percent of influence):
+# - judged: a room is judged against a circuit (no_response, its own cold
+#   checks over the sum of both circuits) only from 30 %;
+# - member: it counts for the circuit-wide checks of a circuit from 50 %, its
+#   cold limits scaled by influence/100 (100 %: the 1.6.8 limits);
+# - strong: with two or more rooms of at least 80 % (and at most 2 K
+#   allowance) on a circuit, only those decide the circuit-wide checks, so a
+#   weakly heated room can neither raise nor hold off a circuit fault.
+# Kept in a dict on purpose: house_state.rules_digest() hashes the int/float
+# constants, and with default settings the rules are exactly those of 1.6.8,
+# so a state saved by 1.6.8 continues. Raise house_state.STATE_SCHEMA if these
+# change.
+ROOM_SETTINGS = {'key': 'raum_einstellungen', 'allowance_max': 10.0, 'judged': 30, 'member': 50,
+                 'strong': 80, 'rise_floor': 0.2}
+ROOM_SETTING_KEYS = frozenset(('sensor', 'kuehler', 'einfluss_hk1', 'einfluss_hk2'))
+# Codes of a room's own heating checks, silenced while the room is being
+# recorded for learning (room_learning.py); frost and sensor checks stay on.
+ROOM_HEATING_CODES = frozenset(('room_cold', 'limit_cold', 'room_warm', 'room_hot', 'no_response'))
 
 # Code table (spec 9.4), in its order: check, level.
 CODES = {
@@ -236,6 +258,8 @@ class HouseOptions:
     cooler4: frozenset = frozenset()
     cooler6: frozenset = frozenset()
     frost_only: frozenset = frozenset()
+    # app 1.6.9: ((entity, allowance, influence hc1, influence hc2), ...).
+    settings: tuple = ()
 
     @property
     def entities(self):
@@ -248,8 +272,15 @@ class HouseOptions:
     def circuit_entities(self, circuit):
         return self.hc1 if circuit == 'hc1' else self.hc2
 
+    def setting(self, entity):
+        """(allowance, influence hc1, influence hc2) of a 1.6.9 entry, or None."""
+        for row in self.settings:
+            if row[0] == entity:
+                return row[1:]
+        return None
+
     def level(self, entity):
-        """The room's choice: 0.0, 2.0, 4.0, 6.0 or FROST_ONLY."""
+        """The room's 1.6.8 choice: 0.0, 2.0, 4.0, 6.0 or FROST_ONLY (lists only)."""
         if entity in self.frost_only:
             return FROST_ONLY
         if entity in self.cooler6:
@@ -259,14 +290,44 @@ class HouseOptions:
         return COOLER_ALLOWANCE if entity in self.cooler else 0.0
 
     def allowance(self, entity):
-        """Kelvin the room may stay below its target (0.0 for frost-only rooms,
-        which no heating rule judges)."""
+        """Kelvin the room may stay below its target (0.0 for a room without
+        influence, which no heating rule judges)."""
+        row = self.setting(entity)
+        if row is not None:
+            return row[0] if self.total(entity) > 0 else 0.0
         level = self.level(entity)
         return 0.0 if level == FROST_ONLY else level
 
+    def influence(self, entity, circuit):
+        """Percent 0..100 the circuit heats the room."""
+        row = self.setting(entity)
+        if row is not None:
+            return row[1 + CIRCUITS.index(circuit)]
+        if entity in self.frost_only:
+            return 0
+        return 100 if entity in self.circuit_entities(circuit) else 0
+
+    def total(self, entity):
+        return min(100, sum(self.influence(entity, circuit) for circuit in CIRCUITS))
+
+    def default_setting(self, entity):
+        """True when the room is judged exactly as by app 1.6.8."""
+        row = self.setting(entity)
+        if row is None:
+            return True
+        home = 'hc1' if entity in self.hc1 else 'hc2'
+        return (row[0] in (0.0, 2.0, 4.0, 6.0) and self.influence(entity, home) == 100
+                and self.influence(entity, 'hc2' if home == 'hc1' else 'hc1') == 0)
+
     def heated(self, circuit):
-        """The circuit's rooms its heating rules judge (not frost-only)."""
-        return tuple(entity for entity in self.circuit_entities(circuit) if entity not in self.frost_only)
+        """The circuit's own rooms its heating rules judge (some influence)."""
+        return tuple(entity for entity in self.circuit_entities(circuit) if self.total(entity) > 0)
+
+    def cross(self, circuit):
+        """Rooms of the other circuit that this one also heats (member influence)."""
+        other = 'hc2' if circuit == 'hc1' else 'hc1'
+        return tuple(entity for entity in self.circuit_entities(other)
+                     if self.influence(entity, circuit) >= ROOM_SETTINGS['member'])
 
 
 def _raw_entries(options, key):
@@ -330,15 +391,59 @@ def parse_house_options(options):
             raise ValueError
         if not set(lists['haus_frost_sensoren']) <= set(haus):
             raise ValueError
+        settings = parse_room_settings(options.get(ROOM_SETTINGS['key'], []), hc1, hc2)
         return HouseOptions(True, mode, tuple(types), hc1, hc2, haus,
                             frozenset(lists['kuehlere_raeume']), frozenset(lists['ohne_ueberwaermung']),
                             frozenset(lists['haus_frost_sensoren']), len(assigned),
                             cooler4=frozenset(lists['kuehler_4_raeume']), cooler6=frozenset(lists['kuehler_6_raeume']),
-                            frost_only=frozenset(lists[FROST_ONLY_LIST]))
+                            frost_only=frozenset(lists[FROST_ONLY_LIST]), settings=settings)
     except (ValueError, TypeError):
         mode = options.get('raumueberwachung_modus') if isinstance(options, dict) else None
         return HouseOptions(False, mode if mode in MODES else 'beobachten', raw_count=_raw_count(options),
                             raw_circuits=_raw_circuits(options))
+
+
+def allowance_value(value):
+    """A valid allowance as float (0..10 K on the 0.5 K grid), else None."""
+    if type(value) not in (int, float) or not math.isfinite(value):
+        return None
+    if not 0 <= value <= ROOM_SETTINGS['allowance_max'] or value * 2 != math.floor(value * 2):
+        return None
+    return float(value)
+
+
+def influence_value(value):
+    """A valid influence as int (0..100 %), else None (an integral float passes)."""
+    if type(value) not in (int, float) or not math.isfinite(value) or value != math.floor(value):
+        return None
+    return int(value) if 0 <= value <= 100 else None
+
+
+def parse_room_settings(value, hc1, hc2):
+    """The 1.6.9 option `raum_einstellungen`; raises ValueError when invalid.
+
+    Each entry names a room on a circuit, at most once, with its allowance and
+    both influences; the room's own circuit has at least the other's influence
+    (the room's own checks follow its own circuit's targets)."""
+    if not isinstance(value, list) or len(value) > MAX_SENSORS:
+        raise ValueError
+    rows, seen = [], set()
+    for entry in value:
+        if not isinstance(entry, dict) or set(entry) != ROOM_SETTING_KEYS:
+            raise ValueError
+        entity = entry['sensor']
+        if not isinstance(entity, str) or entity in seen or entity not in set(hc1) | set(hc2):
+            raise ValueError
+        allowance = allowance_value(entry['kuehler'])
+        first, second = influence_value(entry['einfluss_hk1']), influence_value(entry['einfluss_hk2'])
+        if allowance is None or first is None or second is None:
+            raise ValueError
+        own, other = (first, second) if entity in hc1 else (second, first)
+        if own < other:
+            raise ValueError
+        seen.add(entity)
+        rows.append((entity, allowance, first, second))
+    return tuple(rows)
 
 
 def sanitize_label(name):
@@ -820,6 +925,14 @@ class NoResponse:
         self.last = onset if last is None else last
 
 
+def expected_rise(sensor, weight):
+    """The rise a heating start must bring: proportional to the room's
+    influence (100 %: the 1.6.8 rise), never below the noise floor."""
+    if weight >= 100:
+        return sensor.min_rise()
+    return max(ROOM_SETTINGS['rise_floor'], 1.5 * sensor.step_size(), sensor.min_rise() * weight / 100.0)
+
+
 def distinct_days(times):
     """How many of the (sorted) start times lie at least DAY_GAP_S apart."""
     count, anchor = 0, None
@@ -884,6 +997,9 @@ class HouseEngine:
         self.monitor, self.reason = 'unknown', 'no_context'
         self.paused = True
         self.findings = []
+        # Rooms being recorded for learning (room_learning.py): their own
+        # heating findings are not reported; every rule still runs.
+        self.quiet = frozenset()
 
     # -- helpers
     def refresh_labels(self):
@@ -1141,8 +1257,14 @@ class HouseEngine:
         # circuit_no_response): they neither raise nor hold off a circuit
         # finding. Their frost and sensor checks run elsewhere.
         entities = self.options.heated(circuit.name)
+        # Rooms of the other circuit this one heats too (1.6.9 influence): they
+        # count for this circuit's circuit-wide checks only; their own checks
+        # follow their own circuit.
+        cross = self.options.cross(circuit.name)
+        options = self.options
+        weight = {entity: options.influence(entity, circuit.name) for entity in entities + cross}
         values, usable = {}, []
-        for entity in entities:
+        for entity in entities + cross:
             sensor = self.sensors[entity]
             if sensor.usable(now):
                 values[entity] = sensor.value(now)
@@ -1170,6 +1292,33 @@ class HouseEngine:
             warming[entity] = rise is not None and rise >= sensor.min_rise() - 1e-9
             reached[entity] = (usable_ctx and entity in values and upper is not None
                                and values[entity] >= upper - self.options.allowance(entity) - 1.0 - 1e-9)
+        for entity in cross:
+            rise = self.sensors[entity].trend(now, constants['trend']) if entity in values else None
+            warming[entity] = rise is not None and rise >= self.sensors[entity].min_rise() - 1e-9
+        # The rooms that decide the circuit-wide checks (see ROOM_SETTINGS and
+        # the 1.6.8 reference rooms): rooms of at least `member` influence; when
+        # two or more of them have at least `strong` influence and at most 2 K
+        # allowance, only those. A sensor that drops out pauses, never switches the set.
+        members = [e for e in entities + cross if weight[e] >= ROOM_SETTINGS['member']]
+        reference = [e for e in members if options.allowance(e) <= COOLER_ALLOWANCE
+                     and weight[e] >= ROOM_SETTINGS['strong']]
+        deciding = reference if len(reference) >= 2 else members
+        # A room the other circuit heats too (judged influence there) may stay
+        # warm while this circuit fails: it must never hold off this circuit's
+        # fault or end its failed starts. With two or more rooms only this
+        # circuit heats, only those decide (independent review 2026-11-19).
+        other = 'hc2' if circuit.name == 'hc1' else 'hc1'
+        alone = {e for e in entities + cross if options.influence(e, other) < ROOM_SETTINGS['judged']}
+
+        def only_this(rooms):
+            mine = [e for e in rooms if e in alone]
+            return mine if len(mine) >= 2 else list(rooms)
+        deciding = only_this(deciding)
+        # Heating starts of the circuit (circuit_no_response): by influence
+        # only, as 1.6.8 counted every room (allowances do not matter there).
+        strong = [e for e in entities if weight[e] >= ROOM_SETTINGS['strong']]
+        booking = set(only_this(strong if len(strong) >= 2
+                                else [e for e in entities if weight[e] >= ROOM_SETTINGS['member']]))
         for key in [k for k, start in circuit.starts.items() if now - start['start'] > NO_RESPONSE_SPAN_S]:
             del circuit.starts[key]
         # Heat-up trigger: arm the response windows (never in an airing episode).
@@ -1177,15 +1326,22 @@ class HouseEngine:
             circuit.triggers += 1
             key = (circuit.name, circuit.triggers)
             circuit.starts[key] = {'start': now, 'armed': set(), 'fail': set(), 'pass': set(),
-                                   'usable': len(usable)}
+                                   'usable': len([e for e in usable if e in booking])}
             for entity in usable:
+                if entity not in entities:
+                    continue    # a cross room's windows follow its own circuit
                 self._close(circuit, entity, self.windows.pop(entity, None), None, now)
                 sensor = self.sensors[entity]
                 d0 = deficit(entity)
+                if weight[entity] < ROOM_SETTINGS['judged']:
+                    continue    # not expected to warm on this circuit's start
                 if (d0 is not None and not airing[entity]
                         and d0 >= max(ARM_DEFICIT, sensor.min_rise() + 0.5) - 1e-9):
                     self.windows[entity] = Window(key, now, values[entity])
-                    circuit.starts[key]['armed'].add(entity)
+                    # Only deciding rooms book into the circuit's start: a
+                    # weakly heated room must not clear a circuit failure.
+                    if entity in booking:
+                        circuit.starts[key]['armed'].add(entity)
             if not circuit.starts[key]['armed']:
                 del circuit.starts[key]
         for entity in entities:
@@ -1209,6 +1365,8 @@ class HouseEngine:
                 fire = hold = None
             elif settling and not day_only:
                 fire = hold = False
+            elif options.total(entity) < ROOM_SETTINGS['judged']:
+                fire = hold = False     # weakly heated: frost and sensor checks only
             elif not ok or aired or d is None:
                 fire = hold = None
             else:
@@ -1225,6 +1383,8 @@ class HouseEngine:
             elif source['phase'] is None:
                 fire = hold = None
             elif source['phase'] != 'day':
+                fire = hold = False
+            elif options.total(entity) < ROOM_SETTINGS['judged']:
                 fire = hold = False
             elif not ok or aired or d is None:
                 fire = hold = None
@@ -1292,7 +1452,7 @@ class HouseEngine:
                              lambda e=entity: {'room': half(values[e])})
             # no_response window and finding
             self._response(circuit, entity, sensor, now, elapsed, base, ok, aired, d,
-                           values.get(entity), pump, flow, constants, limit)
+                           values.get(entity), pump, flow, constants, limit, weight[entity])
         # Circuit-wide cold, over the circuit's reference rooms: those with
         # "normal" or 2 K (as up to 1.6.7). A room with 4 or 6 K is one the
         # owner keeps unusually cool (a sunroom, a stove): it neither raises
@@ -1302,8 +1462,16 @@ class HouseEngine:
         # reference sensor that drops out pauses the check (fewer than two
         # usable), it never switches the set. Frost-only rooms never count
         # (see `heated`).
-        reference = [e for e in entities if self.options.allowance(e) <= COOLER_ALLOWANCE]
-        judged = [e for e in usable if e in reference] if len(reference) >= 2 else usable
+        judged = [e for e in usable if e in deciding]
+
+        def scaled(limit_k, entity):
+            # A room the circuit heats only partly falls less when it fails.
+            return limit_k * weight[entity] / 100.0
+
+        def cold(entities_, fire_k, hold_k):
+            deficits = [(deficit(e), e) for e in entities_]
+            return (all(x >= scaled(fire_k, e) for x, e in deficits),
+                    all(x >= scaled(hold_k, e) for x, e in deficits))
         cold_limit = limit
         if base is not True:
             fire = hold = base
@@ -1319,8 +1487,7 @@ class HouseEngine:
                   or any(self.sensors[e].airing(now, recovery) for e in judged)):
                 fire = hold = None
             else:
-                deficits = [deficit(e) for e in judged]   # target is the day target in the day phase
-                fire, hold = all(x >= 3.0 for x in deficits), all(x >= 2.5 for x in deficits)
+                fire, hold = cold(judged, 3.0, 2.5)   # target is the day target in the day phase
                 if fire and any(warming[e] for e in judged):
                     fire = None  # still warming (back from a holiday): wait, a working circuit
         elif settling:
@@ -1330,18 +1497,17 @@ class HouseEngine:
             # wait until an aired room has come back.
             fire = hold = None
         else:
-            deficits = [deficit(e) for e in judged]
-            fire, hold = all(x >= 3.0 for x in deficits), all(x >= 2.5 for x in deficits)
+            fire, hold = cold(judged, 3.0, 2.5)
             if fire and any(warming[e] for e in judged):
                 fire = None      # still warming up (after a holiday, a cold morning): wait
         circuit.circuit_cold.update(
             fire, hold, now, elapsed, constants['cold_circuit'], cold_limit,
             # The room furthest below its own limit (with allowances the lowest
             # value need not be the coldest).
-            lambda: {'room': half(values[max(judged, key=lambda e: (deficit(e), -values[e]))]),
+            lambda: {'room': half(values[max(judged, key=lambda e: (deficit(e) * 100.0 / max(1, weight[e]), -values[e]))]),
                      'target': half(target), 'count': len(judged)})
         # Circuit-wide warm.
-        warm = [e for e in usable if e not in self.options.no_warm]
+        warm = [e for e in usable if e not in self.options.no_warm and weight[e] >= ROOM_SETTINGS['member']]
         if base is not True:
             fire = hold = base
         elif warm_settling:
@@ -1399,7 +1565,7 @@ class HouseEngine:
             self._close(self.circuits.get(role), entity, window, None, now)
 
     def _response(self, circuit, entity, sensor, now, elapsed, base, ok, aired, d, r, pump, flow,
-                  constants, limit):
+                  constants, limit, weight=100):
         window = self.windows.get(entity)
         if window is None:
             return
@@ -1444,7 +1610,7 @@ class HouseEngine:
         del self.windows[entity]
         if first is None or last is None:
             outcome = None
-        elif last - first >= sensor.min_rise() - 1e-9:
+        elif last - first >= expected_rise(sensor, weight) - 1e-9:
             outcome = 'pass'
         elif d is not None and d >= 1.0:
             outcome = 'fail'
@@ -1470,8 +1636,8 @@ class HouseEngine:
                 else:
                     finding.trigger, finding.last = window.trigger, window.start
         start = circuit.starts.get(window.trigger) if circuit is not None else None
-        if start is None:
-            return
+        if start is None or entity not in start['armed']:
+            return      # not booked into the circuit's start (weak influence)
         start['armed'].discard(entity)
         if outcome is not None:
             start[outcome].add(entity)
@@ -1600,6 +1766,8 @@ class HouseEngine:
                 continue
             if code != 'room_frost' and roles[entity] in absent:
                 continue
+            if code in ROOM_HEATING_CODES and entity in self.quiet:
+                continue
             row = self._row(code, latch.held(now), self.labels[entity], roles[entity],
                             latch.onset.get('room'), latch.onset.get('target'))
             allowance = self.options.allowance(entity)
@@ -1608,7 +1776,7 @@ class HouseEngine:
                 row['allowance'] = allowance
             rows.append(row)
         for entity, finding in self.no_response.items():
-            if roles[entity] in absent:
+            if roles[entity] in absent or entity in self.quiet:
                 continue
             rows.append(self._row('no_response', held_seconds(now, finding.onset), self.labels[entity], roles[entity]))
         for circuit in self.circuits.values():

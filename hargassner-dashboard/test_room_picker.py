@@ -123,11 +123,25 @@ class PickerWorld(transport.World):
         return self.picker.save(user, token, self.body(rows, **kwargs))
 
 
-def row(entity, gruppe, kuehler=False, ofen=False, frost=False):
-    # kuehler: the room page's allowance value ('0', '2', '4', '6', 'frost');
-    # False/True stand for the 1.6.7 checkbox ('0'/'2').
-    kuehler = {False: '0', True: '2'}.get(kuehler, kuehler) if type(kuehler) is bool else kuehler
-    return {'entity_id': entity, 'gruppe': gruppe, 'kuehler': kuehler, 'ofen': ofen, 'frost': frost}
+DEFAULT = object()
+
+
+def row(entity, gruppe, kuehler=False, ofen=False, frost=False, hk1=DEFAULT, hk2=DEFAULT):
+    # kuehler: the allowance in K (app 1.6.9 sends a number); False/True stand
+    # for the 1.6.7 checkbox (0/2 K), the 1.6.8 choices '0', '2', '4', '6' for
+    # their number and 'frost' for no influence on either circuit. hk1/hk2:
+    # influence in %, by default 100 % on the room's own circuit.
+    default = (100 if gruppe == 'heizkreis_1' else 0, 100 if gruppe == 'heizkreis_2' else 0)
+    if kuehler == 'frost':
+        kuehler, default = 0, (0, 0)
+    elif type(kuehler) is bool:
+        kuehler = 2 if kuehler else 0
+    elif kuehler in ('0', '2', '4', '6'):
+        kuehler = int(kuehler)
+    hk1 = default[0] if hk1 is DEFAULT else hk1
+    hk2 = default[1] if hk2 is DEFAULT else hk2
+    return {'entity_id': entity, 'gruppe': gruppe, 'kuehler': kuehler, 'einfluss_hk1': hk1, 'einfluss_hk2': hk2,
+            'ofen': ofen, 'frost': frost}
 
 
 class RenderTests(unittest.TestCase):
@@ -179,7 +193,10 @@ class RenderTests(unittest.TestCase):
             part = page[page.index(f'data-entity="{entity}"'):]
             return part[:part.index('</fieldset>')]
         self.assertIn('<input type="checkbox" name="ofen" checked>', block('sensor.wohnzimmer'))
-        self.assertIn('<option value="2" selected>darf 2 °C kühler sein</option>', block('sensor.bad'))
+        # A 1.6.7/1.6.8 kuehlere_raeume entry shows as 2 °C, 100 % on its own circuit.
+        self.assertIn('name="kuehler" min="0" max="10" step="0.5" inputmode="decimal" value="2"', block('sensor.bad'))
+        self.assertIn('name="einfluss_hk2" min="0" max="100" step="5" inputmode="numeric" value="100"', block('sensor.bad'))
+        self.assertIn('name="einfluss_hk1" min="0" max="100" step="5" inputmode="numeric" value="0"', block('sensor.bad'))
         self.assertIn('<label data-gilt="weitere" hidden>', block('sensor.bad'))
         self.assertIn('<input type="checkbox" name="frost" checked>', block('sensor.keller'))
         self.assertIn('<label data-gilt="kreis" hidden>', block('sensor.keller'))
@@ -278,7 +295,7 @@ class MappingTests(unittest.TestCase):
             'heizkreis_1_sensoren': ['sensor.wohnzimmer', 'sensor.kueche'], 'heizkreis_2_sensoren': ['sensor.bad'],
             'haus_sensoren': ['sensor.keller'], 'kuehlere_raeume': ['sensor.kueche', 'sensor.bad'],
             'ohne_ueberwaermung': ['sensor.wohnzimmer', 'sensor.bad'], 'haus_frost_sensoren': ['sensor.keller'],
-            'kuehler_4_raeume': [], 'kuehler_6_raeume': [], 'nur_frost_raeume': []})
+            'kuehler_4_raeume': [], 'kuehler_6_raeume': [], 'nur_frost_raeume': [], 'raum_einstellungen': []})
         self.assertTrue(r.parse_house_options(saved).valid)
 
     def test_merge_keeps_every_other_option(self):

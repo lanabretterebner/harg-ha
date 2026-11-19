@@ -87,6 +87,12 @@ App 1.6.8: each room on a heating circuit gets a **Raumtemperatur** choice on
 the room page (normal, 2, 4 or 6 °C cooler, or frost and sensor only), and a
 "zu kalt" notice names the allowed temperature (with a VM that reads it).
 
+App 1.6.9: the room page takes free values per room: an allowance of 0 to
+10 °C and an influence of 0 to 100 % per heating circuit (a room can be on
+both circuits). **Raum anlernen** proposes these values from Home
+Assistant's history, with its evidence; nothing applies before the owner
+accepts (DOCS.md "Raum anlernen").
+
 App 1.6.6: the room checks continue after an app restart (state saved in the
 app's `/data`), so a lasting room notice is neither ended by an app update,
 an app restart or a host reboot nor reported again days later (DOCS.md "Room checks

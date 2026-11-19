@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.6.9
+
+- Free room settings (owner request 2026-11-19: "why only fixed options?").
+  On the room page each room on a circuit has number fields instead of the
+  fixed choice: **Darf kühler sein um** 0 to 10 °C in 0.5 steps, and
+  **Einfluss Heizkreis 1** and **Einfluss Heizkreis 2** 0 to 100 %, so a room
+  can be on both circuits. New option `raum_einstellungen` (one entry per
+  room that the 1.6.8 lists cannot express). 1.6.8 settings are taken over
+  unchanged: 2, 4 or 6 °C stay that number with 100 % on the own circuit,
+  "nur Frost" becomes 0 % on both circuits.
+- Influence semantics (DOCS.md "Choosing the sensors"): below 30 % a circuit's
+  heating starts do not judge the room (below 30 % in total it is never "too
+  cold"); from 30 % the expected rise after a heating start is proportional
+  to the influence (never below 0.2 degrees); from 50 % the room counts for
+  the circuit checks with cold limits scaled by its influence; with two or
+  more rooms of 80 % or more (at most 2 °C allowance) only those decide
+  "Heizkreis zu kalt" and "Heizkreis wird nicht wärmer", so a real circuit
+  failure is still found through the strongly heated rooms and a weakly
+  heated room that warms by the sun never ends a circuit fault. A room the
+  other circuit heats too (30 % or more there) neither decides nor holds off
+  a circuit's checks while two or more rooms are heated by that circuit
+  alone. With default values every check is exactly that of 1.6.8.
+- **Raum anlernen** (owner request 2026-11-19, history first): for one room,
+  started only by an administrator, the app reads the room sensor's history
+  and the two circuits' climate entities from Home Assistant's recorder (up to
+  30 days, in bounded 12-hour pieces) and proposes allowance and influence
+  with its evidence (days used, day-phase mean against the target, rise per
+  heating start and circuit, number of starts). Nothing applies before
+  **Übernehmen**; **Verwerfen** discards; "Angelernt am ..." with
+  **Zurücksetzen**. With too little history (fewer than 3 day-phase days and
+  fewer than 3 heating starts) it offers to record from now on for 3, 7 or 14
+  days; the room's own heating notices pause meanwhile, frost and sensor
+  checks stay on. Every proposal that loosens the checks noticeably (target
+  never or rarely reached, much more allowance, the room leaving the strong
+  rooms of its circuit, hardly warmer on its circuit, a second circuit found)
+  carries a warning and is accepted only after an explicit "geprüft":
+  learning would otherwise take a failing radiator for normal. Proposals
+  older than 7 days are refused. State in `/data/room_learning.json`.
+- Alert texts name the next step (alert text audit 2026-11-19, released here;
+  it was "Unreleased" on main). The Betriebsüberwachung Störung this app
+  raises when the VM is silent now reads "VM nicht erreichbar oder keine
+  aktuellen Betriebsdaten. Heizungszustand unbekannt. Prüfen, ob die VM läuft
+  und im Netzwerk erreichbar ist."; the notice of a silent notification
+  service (`notify_watch`) adds "Container harg-notify und Netzwerk prüfen."
+  Wording only: nothing fires differently.
+- Reports to the VM are unchanged (a free allowance is sent as before, the VM
+  of room-allowance-20261119 accepts 0.5 to 10 degrees); influence and
+  learning stay in the app. No VM update needed.
+- Saved room state of 1.6.8 continues (same rule constants; a room set as a
+  1.6.8 choice keeps its mark). A downgrade to 1.6.8 drops
+  `raum_einstellungen`: rooms fall back to the mirrored lists (allowance
+  rounded down to 0/2/4/6, 100 % on the own circuit); see DOCS.md
+  "Downgrade from 1.6.9".
+
 ## 1.6.8
 
 - Room allowance per room (owner request 2026-11-19). The owner marked the

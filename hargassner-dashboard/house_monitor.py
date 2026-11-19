@@ -249,6 +249,8 @@ class HouseMonitor:
         self.candidates = None
         self.candidate_lock = threading.Lock()
         self.pending = None
+        # Rooms being recorded for learning (set by run_app from room_learning).
+        self.quiet_source = lambda: frozenset()
         if not options.valid:
             self._log('config_invalid')
 
@@ -513,6 +515,10 @@ class HouseMonitor:
         with self.lock:
             if self.engine is not engine:
                 return   # a new selection arrived meanwhile; its sample comes next
+            try:
+                self.engine.quiet = frozenset(self.quiet_source())
+            except Exception:
+                self.engine.quiet = frozenset()
             self.findings = self.engine.step(now, wall=wall, ha=ha, samples=samples, context=context,
                                              context_state=state,
                                              local_minutes=local_minutes(wall, self.zone, self.zones))
@@ -601,6 +607,31 @@ class HouseMonitor:
 
     def page(self):
         return render_page(self.status(), self._candidates(), self.zone, self.zones)
+
+    # -- for room learning (room_learning.py)
+    def circuit_kinds(self):
+        """circuit -> radiator/floor as the rules use it (option or controller)."""
+        with self.lock:
+            engine = self.engine
+            if engine is None:
+                return {}
+            kinds = {}
+            for name, circuit in engine.circuits.items():
+                kind, _source = engine.effective_type(circuit, engine.ctx)
+                kind = kind if kind in rules.TYPE_CONSTANTS else circuit.last_kind
+                if kind in rules.TYPE_CONSTANTS:
+                    kinds[name] = kind
+            return kinds
+
+    def utc_offset(self):
+        """Seconds the local time of HA is ahead of UTC now (0 if unknown)."""
+        wall = self.clock()
+        minutes = local_minutes(wall, self.zone, self.zones)
+        if minutes is None:
+            return 0
+        offset = (minutes - (wall % 86400) / 60.0) % 1440
+        offset = offset - 1440 if offset > 720 else offset
+        return int(round(offset)) * 60
 
 
 def candidate_rows(states):

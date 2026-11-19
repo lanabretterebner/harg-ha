@@ -29,6 +29,9 @@ configuration:
   nur_frost_raeume:
     name: Räume nur mit Frost- und Sensorprüfung
     description: "Räume an einem Heizkreis, für die nur Frost und der Sensor geprüft werden: nie zu kalt oder zu warm, und sie zählen nicht für die Heizkreis-Prüfungen."
+  raum_einstellungen:
+    name: Raumeinstellungen (ab App 1.6.9)
+    description: "Je Raum an einem Heizkreis: kuehler 0 bis 10 °C (0,5er-Schritte) unter dem Sollwert erlaubt, einfluss_hk1/2 0 bis 100 % (wie stark der Heizkreis ihn heizt). Am einfachsten auf der Raumseite."
   ohne_ueberwaermung:
     name: Räume mit Ofen oder viel Sonne
     description: "Für diese Räume wird nicht gemeldet, wenn sie zu warm sind."

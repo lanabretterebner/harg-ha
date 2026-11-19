@@ -14,13 +14,15 @@ import signal
 import threading
 from ingress_proxy import ProxyServer, ProxyHandler, trusted_identity, one_header, Rejected
 from app_monitor import MonitorSettings, Monitor, supervisor_token
-from house_monitor import HouseMonitor, load_house_options
+from house_monitor import HouseMonitor, load_house_options, default_token
 import house_state
 from operation_watchdog import OperationWatchdog, load_notify_watch
 from room_picker import RoomPicker, SAVE_BODY_CAP, TOKEN_HEADER, same_origin, announce_room_page
+import room_learning
 
 STATUS_PATH = '/api/local-monitor/status'
 ROOMS_PATH = '/api/local-monitor/raumsensoren'
+LEARN_PATH = ROOMS_PATH + '/anlernen'
 # Inline style and script carry a fresh nonce per response; nothing external
 # loads, the only connection is the page's own same-origin save.
 PAGE_POLICY = ("default-src 'none'; style-src 'nonce-{nonce}'; script-src 'nonce-{nonce}'; connect-src 'self'; "
@@ -31,12 +33,16 @@ class MonitorProxyHandler(ProxyHandler):
     def proxy(self):
         target = self.requestline.split()[1]
         route = target.split('?', 1)[0]
-        if route not in (STATUS_PATH, ROOMS_PATH):
+        if route not in (STATUS_PATH, ROOMS_PATH, LEARN_PATH):
             return super().proxy()
         try:
             user, prefix = trusted_identity(self.client_address[0], self.headers)
             if route == ROOMS_PATH and self.command == 'POST':
                 return self.save_rooms(target, route, user, prefix)
+            if route == LEARN_PATH:
+                if self.command != 'POST':
+                    raise Rejected(405, 'Only POST.')
+                return self.save_rooms(target, route, user, prefix, self.server.house_learn)
             if self.command != 'GET':
                 raise Rejected(405, 'Read-only status endpoint.')
             if target != route or self.headers.get_all('Transfer-Encoding') or self.headers.get_all('Expect'):
@@ -64,8 +70,10 @@ class MonitorProxyHandler(ProxyHandler):
         except Rejected as error:
             self.error(error.status, error.message)
 
-    def save_rooms(self, target, route, user, prefix):
-        """The only write: the app's own room options. JSON in, JSON out."""
+    def save_rooms(self, target, route, user, prefix, action=None):
+        """The writes: the app's own room options, or a learning action (both
+        admin only, same-origin, page token). JSON in, JSON out."""
+        action = action if action is not None else self.server.house_save
         def answer(status, document):
             self.reply(status, json.dumps(document, ensure_ascii=False, allow_nan=False).encode('utf-8'), (
                 ('Content-Type', 'application/json; charset=utf-8'), ('Cache-Control', 'no-store'),
@@ -90,10 +98,10 @@ class MonitorProxyHandler(ProxyHandler):
         if not same_origin(self.headers, prefix):
             return refuse(403, 'Die Anfrage kommt nicht von dieser Seite. Es wurde nichts gespeichert.')
         token = one_header(self.headers, TOKEN_HEADER)
-        if self.server.house_save is None:
+        if action is None:
             return refuse(503, 'Die Raumüberwachung ist gerade nicht verfügbar. Es wurde nichts gespeichert.')
         try:
-            status, document = self.server.house_save(user, token, body)
+            status, document = action(user, token, body)
         except Exception:
             self.server.diagnostics.emit('internal')
             return refuse(500, 'Interner Fehler der App. Es wurde nichts gespeichert.')
@@ -103,10 +111,11 @@ class MonitorProxyHandler(ProxyHandler):
 
 
 class MonitorProxyServer(ProxyServer):
-    def __init__(self, address, settings, status, house_page=None, house_save=None, **kwargs):
+    def __init__(self, address, settings, status, house_page=None, house_save=None, house_learn=None, **kwargs):
         self.monitor_status = status
         self.house_page = house_page
         self.house_save = house_save
+        self.house_learn = house_learn
         super().__init__(address, settings, **kwargs)
         self.RequestHandlerClass = MonitorProxyHandler
 
@@ -123,6 +132,18 @@ def start_house_monitor():
         return HouseMonitor(load_house_options(), state_path=house_state.STATE_PATH)
     except Exception:
         print('House monitor: internal.', flush=True)
+        return None
+
+
+def start_learning(house):
+    """Room learning (room_learning.py); None (no learning) on any failure."""
+    try:
+        learner = room_learning.RoomLearning(file=room_learning.LearningFile(), token_source=default_token,
+                                             kinds=house.circuit_kinds, utc_offset=house.utc_offset)
+        house.quiet_source = learner.quiet
+        return learner
+    except Exception:
+        print('Room learning: internal.', flush=True)
         return None
 
 
@@ -143,10 +164,11 @@ def main():
             stage = 'monitor_state'
             monitor = Monitor(settings, token)
         house = start_house_monitor()
-        picker = RoomPicker(house) if house is not None else None
+        picker = RoomPicker(house, learning=start_learning(house)) if house is not None else None
         stage = 'ingress_listener'
         server = MonitorProxyServer(('0.0.0.0', 8099), settings.upstream, monitor.status if monitor else disabled_status,
-                                    picker.page if picker else None, picker.save if picker else None)
+                                    picker.page if picker else None, picker.save if picker else None,
+                                    picker.learn if picker else None)
         stage = 'signal_handlers'
         for name in ('SIGTERM', 'SIGINT'):
             signal.signal(getattr(signal, name), lambda *_args: stop.set())

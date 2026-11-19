@@ -17,19 +17,19 @@ def load(relative):
 
 
 class PackageTests(unittest.TestCase):
-    def test_frontend_1415_versions_and_independent_app_168(self):
+    def test_frontend_1415_versions_and_independent_app_169(self):
         package = json.loads((ROOT / "package.json").read_text())
         lock = json.loads((ROOT / "package-lock.json").read_text())
         release = json.loads((ROOT / "release.json").read_text())
         validation = json.loads((ROOT / "validation.json").read_text())
         self.assertEqual({package["version"], lock["version"], lock["packages"][""]["version"], release["version"], validation["version"]}, {"1.4.15"})
-        self.assertEqual(release["supervisor_app_version"], "1.6.8")
-        self.assertEqual(validation["supervisor_app_version"], "1.6.8")
+        self.assertEqual(release["supervisor_app_version"], "1.6.9")
+        self.assertEqual(validation["supervisor_app_version"], "1.6.9")
         self.assertEqual(release["component_checkpoint"], validation["component_checkpoint"])
-        self.assertEqual(release["component_checkpoint"], "frontend-1.4.15-app-1.6.8")
-        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.6.8")
-        self.assertIn("ARG BUILD_VERSION=1.6.8\n", (ROOT / "hargassner-dashboard/Dockerfile").read_text())
-        self.assertIn("APP_VERSION = '1.6.8'", (ROOT / "hargassner-dashboard/house_rules.py").read_text())
+        self.assertEqual(release["component_checkpoint"], "frontend-1.4.15-app-1.6.9")
+        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.6.9")
+        self.assertIn("ARG BUILD_VERSION=1.6.9\n", (ROOT / "hargassner-dashboard/Dockerfile").read_text())
+        self.assertIn("APP_VERSION = '1.6.9'", (ROOT / "hargassner-dashboard/house_rules.py").read_text())
         self.assertIn('const VERSION = "1.4.15";', (ROOT / "dist/hargassner-thermostat-popup.js").read_text())
 
     def test_repository_and_app_are_discoverable_independently_of_hacs(self):
@@ -67,17 +67,22 @@ class PackageTests(unittest.TestCase):
                                            "monitor_poll_interval": 30,
                                            "raumueberwachung_modus": "beobachten",
                                            "heizkreis_1_art": "automatisch", "heizkreis_2_art": "automatisch",
-                                           **{key: [] for key in HOUSE_LISTS}, "notify_watch": False})
+                                           **{key: [] for key in HOUSE_LISTS}, "raum_einstellungen": [],
+                                           "notify_watch": False})
         self.assertEqual(app["schema"], {"upstream_url": "url", "upstream_connect_host": "str?", "ingress_token": "password",
                                            "monitor_enabled": "bool", "monitor_token": "password?",
                                            "monitor_poll_interval": "int(15,60)",
                                            "raumueberwachung_modus": "list(beobachten|melden)",
                                            "heizkreis_1_art": "list(automatisch|heizkoerper|fussboden)",
                                            "heizkreis_2_art": "list(automatisch|heizkoerper|fussboden)",
-                                           **{key: sensor_list for key in HOUSE_LISTS}, "notify_watch": "bool"})
+                                           **{key: sensor_list for key in HOUSE_LISTS},
+                                           "raum_einstellungen": [{"sensor": sensor_list[0], "kuehler": "float(0,10)",
+                                                                   "einfluss_hk1": "int(0,100)", "einfluss_hk2": "int(0,100)"}],
+                                           "notify_watch": "bool"})
 
     def test_house_option_translations_are_complete_and_plain(self):
-        keys = {"raumueberwachung_modus", "heizkreis_1_art", "heizkreis_2_art", *HOUSE_LISTS, "notify_watch"}
+        keys = {"raumueberwachung_modus", "heizkreis_1_art", "heizkreis_2_art", *HOUSE_LISTS, "raum_einstellungen",
+                "notify_watch"}
         for language in ("de", "en"):
             texts = load(f"hargassner-dashboard/translations/{language}.yaml")["configuration"]
             self.assertEqual(set(texts), keys, language)
@@ -99,7 +104,7 @@ class PackageTests(unittest.TestCase):
         self.assertTrue({"linux/amd64", "linux/arm64"}.issubset(platforms))
         self.assertEqual(re.findall(r"^COPY\s+(.*)$", dockerfile, re.M),
                          ["ingress_proxy.py app_monitor.py health_alerts.py run_app.py house_rules.py "
-                      "house_state.py house_monitor.py ha_websocket.py room_picker.py operation_watchdog.py LICENSE /app/"])
+                      "house_state.py house_monitor.py ha_websocket.py room_picker.py room_learning.py operation_watchdog.py LICENSE /app/"])
         self.assertIn('io.hass.type="app"', dockerfile)
         self.assertIn('io.hass.arch="aarch64|amd64"', dockerfile)
         self.assertNotIn("BUILD_FROM", dockerfile)

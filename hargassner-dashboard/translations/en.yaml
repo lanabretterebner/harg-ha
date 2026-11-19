@@ -29,6 +29,9 @@ configuration:
   nur_frost_raeume:
     name: Rooms checked for frost and sensor only
     description: "Rooms on a circuit checked only for frost and their sensor: never too cold or too warm, and not counted for the circuit checks."
+  raum_einstellungen:
+    name: Room settings (from app 1.6.9)
+    description: "Per room on a circuit: kuehler 0 to 10 °C (0.5 steps) allowed below the target, einfluss_hk1/2 0 to 100 % (how strongly the circuit heats it). Easiest set on the room page."
   ohne_ueberwaermung:
     name: Rooms with a stove or much sun
     description: "No notice is given when these rooms are too warm."

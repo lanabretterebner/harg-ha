@@ -106,16 +106,31 @@ def checksum(body):
 # continues; the choices of 1.6.8 are 4, 6 or "frost". 1.6.7 refuses those
 # values and starts fresh (never half a state), which matters only after a
 # rollback with one of the new choices in use.
+# App 1.6.9: a room set exactly as a 1.6.8 choice (allowance 0/2/4/6 K, 100 %
+# on its own circuit, 0 % on the other) keeps that mark, so a migrated room
+# continues; every other free setting is "a<allowance>/<hc1 %>/<hc2 %>", and a
+# room without influence is "frost". 1.6.8 refuses the new marks and starts
+# that state fresh once after a downgrade. A room of the other circuit that a
+# circuit heats too is listed in that circuit's fingerprint as "x<percent>".
+MARK = re.compile(r'a(?:10|[0-9])(?:\.[05])?/[0-9]{1,3}/[0-9]{1,3}|x[0-9]{1,3}')
+
+
 def cooler_mark(options, entity):
-    level = options.level(entity)
-    if level == rules.FROST_ONLY:
+    if options.total(entity) == 0:
         return rules.FROST_ONLY
-    return {0.0: False, 2.0: True}.get(level, int(level))
+    if options.default_setting(entity):
+        level = options.allowance(entity)
+        return {0.0: False, 2.0: True}.get(level, int(level))
+    allowance = options.allowance(entity)
+    text = str(int(allowance)) if allowance == int(allowance) else str(allowance)
+    return f'a{text}/{options.influence(entity, "hc1")}/{options.influence(entity, "hc2")}'
 
 
 def _cooler(value):
     # bool first: True == 1 must not pass as a number, nor 4.0 as 4.
     if type(value) is bool or (type(value) is int and value in (4, 6)) or value == rules.FROST_ONLY:
+        return value
+    if isinstance(value, str) and MARK.fullmatch(value):
         return value
     raise Invalid('flag')
 
@@ -133,8 +148,11 @@ def room_fingerprint(options, entity):
 
 def circuit_fingerprint(options, name):
     kind = options.option_types[rules.CIRCUITS.index(name)]
-    return [kind, [[entity, cooler_mark(options, entity), entity in options.no_warm]
-                   for entity in options.circuit_entities(name)]]
+    rows = [[entity, cooler_mark(options, entity), entity in options.no_warm]
+            for entity in options.circuit_entities(name)]
+    rows += [[entity, f'x{options.influence(entity, name)}', entity in options.no_warm]
+             for entity in options.cross(name)]
+    return [kind, rows]
 
 
 # ---------------------------------------------------------------------------
@@ -484,7 +502,7 @@ def _circuit(decode, engine, circuit, saved, members_kept):
     saved = _dict(saved, keys)
     _kind, rows = _list(saved['fingerprint'], 2)
     saved_members = set()
-    for row in _list(rows, rules.MAX_SENSORS):
+    for row in _list(rows, 2 * rules.MAX_SENSORS):
         entity, cooler, no_warm = _list(row, 3)
         if not isinstance(entity, str) or not rules.ENTITY_PATTERN.fullmatch(entity):
             raise Invalid('fingerprint')

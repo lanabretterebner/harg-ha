@@ -1,4 +1,5 @@
-"""Per-room allowance (app 1.6.8, owner request 2026-11-19).
+"""Per-room allowance (app 1.6.8, owner request 2026-11-19; the 1.6.8 lists stay
+readable and written as a downgrade mirror by 1.6.9, see test_room_settings).
 
 The owner marked the Wintergarten "darf kühler sein" and still got "zu kalt
 (16,5 °C statt 23,0 °C)": the allowance was a fixed 2 K. Each room on a circuit
@@ -225,23 +226,8 @@ class OptionsTests(unittest.TestCase):
 
 
 class PickerTests(unittest.TestCase):
-    def test_the_five_choices_on_the_room_page(self):
-        world = PickerWorld({'heizkreis_1_sensoren': ['sensor.wohnzimmer', 'sensor.kueche', 'sensor.bad'],
-                             'kuehlere_raeume': ['sensor.kueche', 'sensor.bad'],
-                             'kuehler_6_raeume': ['sensor.bad']})
-        page = world.page()
-
-        def block(entity):
-            part = page[page.index(f'data-entity="{entity}"'):]
-            return part[:part.index('</fieldset>')]
-        texts = ['normal', 'darf 2 °C kühler sein', 'darf 4 °C kühler sein', 'darf 6 °C kühler sein',
-                 'nur Frost und Sensor prüfen']
-        self.assertEqual([text for _value, _key, text in rp.ALLOWANCE_CHOICES], texts)
-        self.assertIn('<option value="0" selected>normal</option>', block('sensor.wohnzimmer'))
-        self.assertIn('<option value="2" selected>darf 2 °C kühler sein</option>', block('sensor.kueche'))
-        self.assertIn('<option value="6" selected>darf 6 °C kühler sein</option>', block('sensor.bad'))
-        self.assertIn('Raumtemperatur <select name="kuehler">', block('sensor.bad'))
-        self.assertNotIn('name="kuehler" checked', page)
+    # The five-choice select of 1.6.8 is replaced by number fields in 1.6.9
+    # (test_room_settings.SaveTests.test_page_shows_number_fields_with_units_and_defaults).
 
     def test_each_choice_is_saved_with_kuehlere_raeume_for_older_versions(self):
         world = PickerWorld()
@@ -271,20 +257,7 @@ class PickerTests(unittest.TestCase):
                          {'kuehlere_raeume': [], 'kuehler_4_raeume': [], 'kuehler_6_raeume': [],
                           'nur_frost_raeume': []})
 
-    def test_refused_choices(self):
-        world = PickerWorld()
-        for bad, text in ((row('sensor.keller', 'weitere', kuehler='6'), 'nur für Räume an einem Heizkreis'),
-                          (row('sensor.keller', 'weitere', kuehler='frost'), 'nur für Räume an einem Heizkreis'),
-                          (row('sensor.kueche', 'heizkreis_1', kuehler='3'), 'Ungültige Anfrage'),
-                          (row('sensor.kueche', 'heizkreis_1', kuehler=6), 'Ungültige Anfrage'),
-                          (row('sensor.kueche', 'heizkreis_1', kuehler=True), None)):
-            with self.subTest(bad=bad):
-                status, document = world.save([bad])
-                if text is None:      # True is the helper's 1.6.7 shorthand for '2'
-                    self.assertEqual(status, 200, document)
-                    continue
-                self.assertEqual(status, 400, document)
-                self.assertIn(text, document['message'])
+    # Refused values of the 1.6.9 fields: test_room_settings.SaveTests.test_refused_values.
 
     def test_a_167_page_body_is_refused_without_saving(self):
         world = PickerWorld()
