@@ -207,6 +207,15 @@ class MonitorTests(unittest.TestCase):
         for _ in range(6): self.advance(30); self.monitor.poll_once()
         self.assertEqual([r['event']['transition'] for r in self.posts()], ['alert'] * 3 + ['recovery'] * 3)
         self.assertEqual(self.state()['queue'], [])
+    def test_report_hovering_at_the_future_tolerance_alerts_once_and_recovers_once(self):
+        self.monitor.poll_once()  # healthy baseline
+        for skew in (5.1, 4.9) * 4:
+            self.advance(30); self.documents = report(self.now + skew); self.monitor.poll_once()
+            self.assertEqual(self.reasons(), {'run_future'}, skew)
+        for _ in range(4):
+            self.advance(30); self.documents = report(self.now + 2.5); self.monitor.poll_once()
+            self.assertEqual(self.reasons(), {'ok'})
+        self.assertEqual([r['event']['transition'] for r in self.posts()], ['alert'] * 3 + ['recovery'] * 3)
     def test_step_shorter_than_the_interval_is_measured_against_monotonic_time(self):
         self.monitor.poll_once(); self.advance(25); self.monitor.poll_once()  # 5 s lost: tolerated
         self.assertEqual(self.reasons(), {'ok'}); self.assertEqual(self.posts(), [])

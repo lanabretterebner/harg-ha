@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.6.7
+
+- The VM status check no longer flaps at its 5 s clock tolerance. Before, a
+  status report stamped 5.1 s and then 4.9 s ahead of Home Assistant's clock
+  raised "Uhrzeiten stimmen nicht überein" and cleared it again on every
+  poll. Now that finding stays until the report is no more than half the
+  tolerance (2.5 s) ahead, or has stayed within the tolerance for 5 minutes,
+  so a clock hovering at the limit gives one notice and one recovery, and a
+  clock settling just inside it is judged normally again after 5 minutes.
+  The tolerance itself, the state file format and the reason codes are
+  unchanged; an older state file loads as before.
+- The same file in the off-host evaluator (`tools/monitoring`, where the
+  tolerance can be lowered) now refuses a tolerance below 1 s. At 0, hosts
+  with synchronised clocks sit at the boundary and the finding flapped on
+  every poll. The app always uses 5 s; this second change does not affect it.
+
 ## 1.6.6
 
 - Room checks continue after an app restart (owner question 2026-11-18: "why

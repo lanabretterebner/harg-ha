@@ -214,7 +214,7 @@ class Monitor:
                 if self.state_path.exists() or self.state_path.is_symlink():
                     raise health.Refusal('state_invalid') from None
                 saved = health.initial_state()
-            rows = health.evaluate(document, now=now, endpoint_failed=failed)
+            rows = health.evaluate(document, now=now, endpoint_failed=failed, saved=saved)
             stepped = health.stepped_back(self.reading, (now, tick))
             rows = health.effective_conditions(rows, saved, now, stepped)
             with self._status_lock:

@@ -260,12 +260,109 @@ class UnitTests(unittest.TestCase):
             with self.subTest(check_after_its_heartbeat=ahead):
                 self.assertEqual(h.evaluate(row, now=NOW)['telnet']['reason'], reason)
 
+    def test_skew_hovering_at_the_tolerance_does_not_flap(self):
+        # A report stamp alternating 4.9/5.1 s ahead raises run_future once and
+        # holds it: one alert, no recovery/alert pair per evaluation.
+        state, now = h.initial_state(), NOW
+        for index, skew in enumerate((4.9, 5.1) * 6):
+            now += 30
+            rows = h.effective_conditions(h.evaluate(heartbeat(now + skew), now=now, saved=state), state, now)
+            state = h.transition(rows, state, now)
+            if index:
+                self.assertEqual(set(reasons(state).values()), {'run_future'}, (index, skew))
+        self.assertEqual([(e['component'], e['reason']) for e in state['queue']],
+                         [(kind, 'run_future') for kind in h.KINDS])
+
+    def test_a_skew_settling_inside_the_tolerance_releases_after_the_hold_time(self):
+        # One stamp 5.1 s ahead, then a steady 4 s: held for FUTURE_HOLD_SECONDS
+        # after the last over-limit evaluation, then judged again, so a real
+        # fault cannot stay masked for ever.
+        self.assertEqual(h.FUTURE_HOLD_SECONDS, 300)
+        state = h.transition(h.evaluate(heartbeat(NOW + 5.1), now=NOW), h.initial_state(), NOW)
+        self.assertEqual(state['conditions']['heartbeat']['observed_at'], NOW)
+        for elapsed, reason in ((30, 'run_future'), (299, 'run_future'), (300, 'telemetry_unhealthy')):
+            with self.subTest(elapsed=elapsed):
+                rows = h.evaluate(heartbeat(NOW + elapsed + 4, telnet='fault'), now=NOW + elapsed, saved=state)
+                self.assertEqual(rows['telnet']['reason'], reason)
+                if reason == 'run_future':
+                    self.assertEqual(rows['telnet']['observed_at'], NOW)  # the hold does not renew itself
+
+    def test_each_stamp_beyond_the_tolerance_renews_the_hold(self):
+        state, now = h.initial_state(), NOW
+        for skew in (5.1, 4.9) * 20:  # 20 minutes hovering: one alert, no release
+            now += 30
+            state = h.transition(h.evaluate(heartbeat(now + skew), now=now, saved=state), state, now)
+            self.assertEqual(set(reasons(state).values()), {'run_future'})
+        self.assertEqual(len(state['queue']), 3)
+        self.assertEqual(state['conditions']['heartbeat']['observed_at'], now - 30)
+
+    def test_a_held_state_without_a_hold_stamp_starts_the_hold_now(self):
+        # State written before the hold existed: run_future with observed_at None.
+        old = {'conditions': {kind: h.result('unknown', 'run_future') for kind in h.KINDS}}
+        rows = h.evaluate(heartbeat(NOW + 4), now=NOW, saved=old)
+        self.assertEqual({(r['reason'], r['observed_at']) for r in rows.values()}, {('run_future', NOW)})
+        state = h.transition(rows, h.initial_state(), NOW)
+        self.assertEqual(h.evaluate(heartbeat(NOW + 304), now=NOW + 300, saved=state)['heartbeat']['reason'], 'ok')
+        # A hold stamp ahead of the evaluator (its clock stepped back) restarts the hold too.
+        ahead = {'conditions': {kind: h.result('unknown', 'run_future', NOW + 3600) for kind in h.KINDS}}
+        self.assertEqual(h.evaluate(heartbeat(NOW + 4), now=NOW, saved=ahead)['heartbeat']['observed_at'], NOW)
+
+    def test_raised_future_releases_only_at_half_the_tolerance(self):
+        held = {'conditions': {kind: h.result('unknown', 'run_future') for kind in h.KINDS}}
+        for skew, reason in ((4.9, 'run_future'), (2.501, 'run_future'), (2.5, 'ok'), (0, 'ok')):
+            with self.subTest(skew=skew):
+                rows = h.evaluate(heartbeat(NOW + skew), now=NOW, saved=held)
+                self.assertEqual({row['reason'] for row in rows.values()}, {reason})
+        # A configured tolerance keeps its own release point.
+        for tolerance, skew, reason in ((2, 1.001, 'run_future'), (2, 1, 'ok'), (1, 0.501, 'run_future'), (1, 0.5, 'ok')):
+            with self.subTest(tolerance=tolerance, skew=skew):
+                rows = h.evaluate(heartbeat(NOW + skew), {'future_tolerance': tolerance}, now=NOW, saved=held)
+                self.assertEqual(rows['heartbeat']['reason'], reason)
+        # Without a raised finding the full tolerance applies as before.
+        for saved in (None, h.initial_state(), {'conditions': {kind: h.result('healthy', 'ok', NOW) for kind in h.KINDS}}):
+            self.assertEqual(h.evaluate(heartbeat(NOW + 4.9), now=NOW, saved=saved)['heartbeat']['reason'], 'ok')
+
+    def test_a_check_ahead_of_its_report_has_its_own_release(self):
+        row = heartbeat(NOW - 30); row['checks']['telnet']['checked_at'] = NOW - 30 + 4
+        self.assertEqual(h.evaluate(row, now=NOW)['telnet']['reason'], 'ok')
+        held = {'conditions': {'heartbeat': h.result('healthy', 'ok', NOW - 30),
+                               'certificate': h.result('healthy', 'ok', NOW - 30),
+                               'telnet': h.result('unknown', 'run_future')}}
+        rows = h.evaluate(row, now=NOW, saved=held)
+        self.assertEqual({kind: rows[kind]['reason'] for kind in h.KINDS},
+                         {'heartbeat': 'ok', 'certificate': 'ok', 'telnet': 'run_future'})
+        row['checks']['telnet']['checked_at'] = NOW - 30 + 2.5
+        self.assertEqual(h.evaluate(row, now=NOW, saved=held)['telnet']['reason'], 'ok')
+
+    def test_unreadable_saved_state_gives_no_release_margin(self):
+        for saved in ('x', [], {'conditions': 'x'}, {'conditions': {'heartbeat': 'run_future'}},
+                      {'conditions': {'heartbeat': {'reason': ['run_future']}}}):
+            with self.subTest(saved=saved):
+                self.assertEqual(h.evaluate(heartbeat(NOW + 4.9), now=NOW, saved=saved)['heartbeat']['reason'], 'ok')
+
+    def test_run_keeps_a_raised_future_report_from_its_saved_state(self):
+        with tempfile.TemporaryDirectory() as folder:
+            os.chmod(folder, 0o700)
+            path = Path(folder) / 'state.json'
+            state = h.transition(h.evaluate(heartbeat(NOW + 5.1), now=NOW), h.initial_state(), NOW)
+            h.atomic_json(path, state)
+            for skew, reason in ((4.9, 'run_future'), (2.5, 'ok')):
+                with self.subTest(skew=skew):
+                    result = h.run(heartbeat(NOW + 30 + skew), path, {}, NOW + 30)
+                    self.assertEqual(result['conditions']['heartbeat']['reason'], reason)
+
     def test_future_tolerance_is_small_against_every_staleness_limit_and_adds_no_age(self):
         config = h.settings({})
         self.assertEqual((config['future_tolerance'], h.FUTURE_TOLERANCE), (5, 5))
         self.assertLessEqual(9 * config['future_tolerance'], min(config[kind + '_max_age'] for kind in h.KINDS))
         self.assertEqual(h.settings({'future_tolerance': 2})['future_tolerance'], 2)
         with self.assertRaises(h.Refusal): h.settings({'future_tolerance': 5.001})
+        # Review low: below 1 s synchronised hosts sit at the boundary and a
+        # raised run_future had no band to release into (it flapped per poll).
+        self.assertEqual(h.FUTURE_TOLERANCE_MIN, 1)
+        self.assertEqual(h.settings({'future_tolerance': 1})['future_tolerance'], 1)
+        for tolerance in (0, 0.999, -1):
+            with self.assertRaises(h.Refusal): h.settings({'future_tolerance': tolerance})
         # Ages are never shortened by the tolerance: the limits stay exact.
         self.assertEqual(h.evaluate(heartbeat(NOW - 120.001), now=NOW)['heartbeat']['reason'], 'heartbeat_stale')
         row = heartbeat(); row['checks']['telnet']['checked_at'] = NOW - 45.001

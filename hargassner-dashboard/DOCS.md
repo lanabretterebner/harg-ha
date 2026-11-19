@@ -317,6 +317,14 @@ codes are unchanged, so the state survives both an update and a downgrade.
 Earlier versions held every component at `clock_invalid` until the old stamp
 had passed and could not report a VM outage during that time.
 
+From app 1.6.7 a raised `run_future` stays until the stamp is no more than
+2.5 s (half the tolerance) ahead, or has stayed within the 5 s tolerance for
+5 minutes. A VM clock hovering at the limit (5.1 s, then 4.9 s ahead) gives one
+notification and one recovery instead of one of each per poll, and a clock
+settling just inside the tolerance is judged normally again after 5 minutes.
+The hold time is kept in the saved condition, so the state format and reason
+codes are unchanged and the state survives both an update and a downgrade.
+
 From app1.5.5 a check kind the evaluator does not know is ignored instead of
 invalidating the whole report. Both known checks, `certificate` and `telnet`,
 are still required, and a report missing either one stays `report_invalid` for

@@ -30,6 +30,23 @@ MAX_QUEUE = 64
 # shortens an age, so it delays a stale verdict by at most itself, 1/9 of the
 # shortest default staleness limit.
 FUTURE_TOLERANCE = 5
+# The lowest configurable tolerance. Below it two synchronised hosts (stamps a
+# few ms either side) hover at the boundary all the time: with no band to
+# release into, a raised `run_future` either flapped at every evaluation or,
+# renewed by each stamp a few ms ahead, masked the checks for as long as it
+# lasted.
+FUTURE_TOLERANCE_MIN = 1
+# Hysteresis of that boundary: a report or check already judged `run_future`
+# (its saved condition) stays so until it is no more than this share of the
+# tolerance ahead, or has stayed within the full tolerance for
+# FUTURE_HOLD_SECONDS, so a stamp hovering at the tolerance (4.9/5.1 s) raises
+# one alert, not an alert and a recovery per evaluation, and a skew that settles
+# just inside the tolerance cannot hold the verdict (and mask the checks) for
+# ever. The row's `observed_at` keeps the last evaluation that found the stamp
+# beyond the full tolerance; a saved row without one (older state) starts the
+# hold at the present evaluation. It never shortens an age.
+FUTURE_RELEASE_FACTOR = 0.5
+FUTURE_HOLD_SECONDS = 300
 KINDS = ('heartbeat', 'certificate', 'telnet')
 # The check kinds this evaluator knows how to judge. Both must be present in a
 # report. A producer that adds a further check key is a newer producer, not a
@@ -253,7 +270,7 @@ def settings(config):
     for key in ('heartbeat_max_age', 'certificate_max_age', 'telnet_max_age'):
         if not number(result[key]) or not 1 <= result[key] <= 604800:
             raise Refusal('configuration_invalid')
-    if not number(result['future_tolerance']) or not 0 <= result['future_tolerance'] <= FUTURE_TOLERANCE:
+    if not number(result['future_tolerance']) or not FUTURE_TOLERANCE_MIN <= result['future_tolerance'] <= FUTURE_TOLERANCE:
         raise Refusal('configuration_invalid')
     if not number(result['timeout']) or not 0.2 <= result['timeout'] <= 30:
         raise Refusal('configuration_invalid')
@@ -296,11 +313,35 @@ def result(status, reason, observed_at=None):
     return {'status': status, 'reason': reason, 'observed_at': observed_at}
 
 
-def evaluate(document, config=None, now=None, endpoint_failed=False):
+def held_future(saved):
+    """{component: last time beyond the full tolerance or None} for saved `run_future`
+    conditions; an unreadable state holds none."""
+    conditions = saved.get('conditions') if isinstance(saved, dict) else None
+    if not isinstance(conditions, dict):
+        return {}
+    return {kind: (row.get('observed_at') if number(row.get('observed_at')) and row['observed_at'] >= 0 else None)
+            for kind, row in ((kind, conditions.get(kind)) for kind in KINDS)
+            if isinstance(row, dict) and row.get('reason') == 'run_future'}
+
+
+def evaluate(document, config=None, now=None, endpoint_failed=False, saved=None):
     config = settings(config or {})
+    held = held_future(saved)
     now = time.time() if now is None else now
     if not number(now) or now < 0:
         return {kind: result('unknown', 'clock_invalid') for kind in KINDS}
+
+    def future(kind, stamp, base):
+        """A `run_future` row if the stamp is too far ahead of base, else None."""
+        tolerance = config['future_tolerance']
+        if stamp > base + tolerance:
+            return result('unknown', 'run_future', now)
+        if kind not in held:
+            return None
+        since = now if held[kind] is None or held[kind] > now else held[kind]
+        if stamp > base + tolerance * FUTURE_RELEASE_FACTOR and now - since < FUTURE_HOLD_SECONDS:
+            return result('unknown', 'run_future', since)
+        return None
     if endpoint_failed:
         return {kind: result('unknown', 'endpoint_unavailable') for kind in KINDS}
     if document is None:
@@ -312,8 +353,9 @@ def evaluate(document, config=None, now=None, endpoint_failed=False):
             or not set(EVALUATED) <= set(document['checks'])):
         return {kind: result('unknown', 'report_invalid') for kind in KINDS}
     sent = document['sent_at']
-    if sent > now + config['future_tolerance']:
-        return {kind: result('unknown', 'run_future') for kind in KINDS}
+    ahead = future('heartbeat', sent, now)
+    if ahead is not None:
+        return {kind: dict(ahead) for kind in KINDS}
     if now - sent > config['heartbeat_max_age']:
         return {kind: result('unknown', 'heartbeat_stale', sent) for kind in KINDS}
     rows = {'heartbeat': result('healthy', 'ok', sent)}
@@ -328,8 +370,8 @@ def evaluate(document, config=None, now=None, endpoint_failed=False):
             rows[kind] = result('unknown', 'report_invalid')
         elif not number(check['checked_at']) or check['checked_at'] < 0:
             rows[kind] = result('unknown', 'report_invalid')
-        elif check['checked_at'] > min(now, sent) + config['future_tolerance']:
-            rows[kind] = result('unknown', 'run_future')
+        elif (ahead := future(kind, check['checked_at'], min(now, sent))) is not None:
+            rows[kind] = ahead
         elif now - check['checked_at'] > config[kind + '_max_age']:
             rows[kind] = result('unknown', 'run_stale', check['checked_at'])
         else:
@@ -600,7 +642,7 @@ def run(report, state_path, config, now, deliver=False, endpoint_failed=False):
     except OSError:
         raise Refusal('state_invalid') from None
     def process(saved):
-        rows = effective_conditions(evaluate(report, config, now, endpoint_failed), saved, now)
+        rows = effective_conditions(evaluate(report, config, now, endpoint_failed, saved), saved, now)
         deferred = False
         try:
             proposed = transition(rows, saved, now)
