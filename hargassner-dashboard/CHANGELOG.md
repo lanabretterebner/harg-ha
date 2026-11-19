@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.6.8
+
+- Room allowance per room (owner request 2026-11-19). The owner marked the
+  Wintergarten "darf kühler sein" and still got "zu kalt (16,5 °C statt
+  23,0 °C)": the allowance was a fixed 2 degrees, and the text did not show
+  it. The checkbox is now a choice **Raumtemperatur** for each room on a
+  circuit: **normal**, **darf 2 °C kühler sein** (the old checkbox; existing
+  rooms keep it), **darf 4 °C kühler sein**, **darf 6 °C kühler sein** or
+  **nur Frost und Sensor prüfen** (frost and sensor checks only, the room
+  stays on its circuit). New options `kuehler_4_raeume`, `kuehler_6_raeume`,
+  `nur_frost_raeume`; every room with an allowance stays in
+  `kuehlere_raeume` too, so a downgrade to 1.6.7 still treats it as
+  2 degrees cooler.
+- "All rooms of a circuit too cold" (fault) is judged over the rooms with
+  normal or 2 degrees, as before. Rooms with 4 or 6 degrees count only on a
+  circuit with fewer than two such rooms, each 3 degrees below its own limit
+  (a reference sensor that drops out pauses the check, as before). The
+  notice names the room furthest below its own limit.
+  Frost-only rooms never count for a circuit check. So a room the owner
+  exempted neither raises the fault nor hides a failed circuit.
+- The room report tells the VM the allowance of a "zu kalt" room (room cold
+  and cold despite the heating limit), so the VM text names the allowed
+  temperature: "(16,5 °C; erlaubt ab 21,0 °C, Ziel 23,0 °C)". The app sends
+  it only when the VM's context says it reads it (context major 2, which the
+  VM sends only to an app that lists it). With an older VM the report is
+  exactly that of 1.6.7 and the text stays "(16,5 °C statt 23,0 °C)".
+- The saved room state of 1.6.6/1.6.7 continues (same rule constants, same
+  fingerprints for normal and 2 degrees). A room whose choice changes starts
+  its checks fresh, as a changed checkbox did.
+
 ## 1.6.7
 
 - The VM status check no longer flaps at its 5 s clock tolerance. Before, a

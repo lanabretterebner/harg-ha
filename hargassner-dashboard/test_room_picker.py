@@ -124,6 +124,9 @@ class PickerWorld(transport.World):
 
 
 def row(entity, gruppe, kuehler=False, ofen=False, frost=False):
+    # kuehler: the room page's allowance value ('0', '2', '4', '6', 'frost');
+    # False/True stand for the 1.6.7 checkbox ('0'/'2').
+    kuehler = {False: '0', True: '2'}.get(kuehler, kuehler) if type(kuehler) is bool else kuehler
     return {'entity_id': entity, 'gruppe': gruppe, 'kuehler': kuehler, 'ofen': ofen, 'frost': frost}
 
 
@@ -176,7 +179,7 @@ class RenderTests(unittest.TestCase):
             part = page[page.index(f'data-entity="{entity}"'):]
             return part[:part.index('</fieldset>')]
         self.assertIn('<input type="checkbox" name="ofen" checked>', block('sensor.wohnzimmer'))
-        self.assertIn('<input type="checkbox" name="kuehler" checked>', block('sensor.bad'))
+        self.assertIn('<option value="2" selected>darf 2 °C kühler sein</option>', block('sensor.bad'))
         self.assertIn('<label data-gilt="weitere" hidden>', block('sensor.bad'))
         self.assertIn('<input type="checkbox" name="frost" checked>', block('sensor.keller'))
         self.assertIn('<label data-gilt="kreis" hidden>', block('sensor.keller'))
@@ -274,7 +277,8 @@ class MappingTests(unittest.TestCase):
             'raumueberwachung_modus': 'melden', 'heizkreis_1_art': 'heizkoerper', 'heizkreis_2_art': 'fussboden',
             'heizkreis_1_sensoren': ['sensor.wohnzimmer', 'sensor.kueche'], 'heizkreis_2_sensoren': ['sensor.bad'],
             'haus_sensoren': ['sensor.keller'], 'kuehlere_raeume': ['sensor.kueche', 'sensor.bad'],
-            'ohne_ueberwaermung': ['sensor.wohnzimmer', 'sensor.bad'], 'haus_frost_sensoren': ['sensor.keller']})
+            'ohne_ueberwaermung': ['sensor.wohnzimmer', 'sensor.bad'], 'haus_frost_sensoren': ['sensor.keller'],
+            'kuehler_4_raeume': [], 'kuehler_6_raeume': [], 'nur_frost_raeume': []})
         self.assertTrue(r.parse_house_options(saved).valid)
 
     def test_merge_keeps_every_other_option(self):

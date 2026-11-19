@@ -129,16 +129,30 @@ async function main() {
     const kueche = page.locator('fieldset[data-entity="sensor.kueche"]');
     check(await kueche.isVisible(), "Küche found");
     check(!(await page.locator('fieldset[data-entity="sensor.bad"]').isVisible()), "others hidden");
-    check(!(await kueche.getByLabel("darf kühler sein").isVisible()), "flags hidden while not monitored");
+    check(!(await kueche.getByLabel("Raumtemperatur").isVisible()), "flags hidden while not monitored");
     await kueche.getByLabel("Überwachung").selectOption("heizkreis_2");
-    check(await kueche.getByLabel("darf kühler sein").isVisible(), "circuit flags shown");
+    check(await kueche.getByLabel("Raumtemperatur").isVisible(), "circuit flags shown");
+    // The allowance choice (app 1.6.8): five options, normal by default.
+    const allowance = kueche.getByLabel("Raumtemperatur");
+    check(await allowance.inputValue() === "0", "allowance normal by default");
+    check(JSON.stringify(await allowance.locator("option").allTextContents()) === JSON.stringify(
+      ["normal", "darf 2 °C kühler sein", "darf 4 °C kühler sein", "darf 6 °C kühler sein",
+       "nur Frost und Sensor prüfen"]), "five allowance choices");
+    await allowance.selectOption("6");
     check(!(await kueche.getByLabel("Frostwarnung").isVisible()), "frost hidden for circuits");
     await kueche.getByLabel("Ofen oder viel Sonne").check();
     await page.getByLabel("Sensoren suchen (Name, Bereich oder Entität)").fill("keller");
     const keller = page.locator('fieldset[data-entity="sensor.keller"]');
     await keller.getByLabel("Überwachung").selectOption("weitere");
     check(await keller.getByLabel("Frostwarnung").isVisible(), "frost shown for Weitere Räume");
-    check(!(await keller.getByLabel("darf kühler sein").isVisible()), "circuit flags hidden for Weitere Räume");
+    check(!(await keller.getByLabel("Raumtemperatur").isVisible()), "circuit flags hidden for Weitere Räume");
+    // A circuit choice is reset when the room leaves its circuit.
+    await keller.getByLabel("Überwachung").selectOption("heizkreis_1");
+    await keller.getByLabel("Raumtemperatur").selectOption("frost");
+    await keller.getByLabel("Überwachung").selectOption("weitere");
+    await keller.getByLabel("Überwachung").selectOption("heizkreis_1");
+    check(await keller.getByLabel("Raumtemperatur").inputValue() === "0", "allowance reset off the circuit");
+    await keller.getByLabel("Überwachung").selectOption("weitere");
     await keller.getByLabel("Frostwarnung").check();
     // The missing sensor stays visible and can be removed.
     await page.getByLabel("Sensoren suchen (Name, Bereich oder Entität)").fill("alter");
@@ -159,7 +173,8 @@ async function main() {
     assert.deepEqual(fixture.saved[0], {
       haus_frost_sensoren: ["sensor.keller"], haus_sensoren: ["sensor.keller"], heizkreis_1_art: "automatisch",
       heizkreis_1_sensoren: ["sensor.wohnzimmer"], heizkreis_2_art: "fussboden",
-      heizkreis_2_sensoren: ["sensor.kueche"], kuehlere_raeume: ["sensor.wohnzimmer"],
+      heizkreis_2_sensoren: ["sensor.kueche"], kuehlere_raeume: ["sensor.wohnzimmer", "sensor.kueche"],
+      kuehler_4_raeume: [], kuehler_6_raeume: ["sensor.kueche"], nur_frost_raeume: [],
       ohne_ueberwaermung: ["sensor.kueche"], raumueberwachung_modus: "melden" });
     checks += 1;
     await shot(page, "picker-390-light-saved.png");

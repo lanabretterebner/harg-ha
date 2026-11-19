@@ -1,4 +1,4 @@
-"""Room page with the sensor picker (app 1.6.1).
+"""Room page with the sensor picker (app 1.6.1; per-room allowance 1.6.8).
 
 The page lists every temperature sensor of Home Assistant and lets a Home
 Assistant administrator choose which ones the room monitoring watches. It
@@ -62,9 +62,18 @@ HOUSE_DEFAULTS = {'raumueberwachung_modus': 'beobachten', 'heizkreis_1_art': 'au
 GROUPS = {'heizkreis_1': 'heizkreis_1_sensoren', 'heizkreis_2': 'heizkreis_2_sensoren', 'weitere': 'haus_sensoren'}
 GROUP_TEXT = (('', 'nicht überwachen'), ('heizkreis_1', 'Heizkreis 1'), ('heizkreis_2', 'Heizkreis 2'),
               ('weitere', 'Weitere Räume'))
-FLAGS = (('kuehler', 'kuehlere_raeume', 'kreis', 'darf kühler sein'),
-         ('ofen', 'ohne_ueberwaermung', 'kreis', 'Ofen oder viel Sonne'),
+FLAGS = (('ofen', 'ohne_ueberwaermung', 'kreis', 'Ofen oder viel Sonne'),
          ('frost', 'haus_frost_sensoren', 'weitere', 'Frostwarnung'))
+# The allowance of a room on a circuit (app 1.6.8; replaces the checkbox
+# "darf kühler sein"): page value, option list, text. Every value but '0' is
+# also stored in kuehlere_raeume (see house_rules.ALLOWANCE_LISTS).
+ALLOWANCE_LABEL = 'Raumtemperatur'
+ALLOWANCE_CHOICES = (('0', None, 'normal'),
+                     ('2', 'kuehlere_raeume', 'darf 2 °C kühler sein'),
+                     ('4', 'kuehler_4_raeume', 'darf 4 °C kühler sein'),
+                     ('6', 'kuehler_6_raeume', 'darf 6 °C kühler sein'),
+                     ('frost', rules.FROST_ONLY_LIST, 'nur Frost und Sensor prüfen'))
+ALLOWANCE_VALUES = frozenset(value for value, _key, _text in ALLOWANCE_CHOICES)
 TYPE_CHOICES = (('automatisch', 'automatisch (aus der Steuerung)'), ('heizkoerper', 'Heizkörper'),
                 ('fussboden', 'Fußboden'))
 BODY_KEYS = frozenset(('revision', 'modus', 'heizkreis_1_art', 'heizkreis_2_art', 'sensoren'))
@@ -317,6 +326,18 @@ def selection_of(options):
     return chosen, flags
 
 
+def allowances_of(options):
+    """entity -> the room page's allowance value ('2', '4', '6' or 'frost';
+    absent: normal). The larger choice wins, as in house_rules (tolerant of an
+    invalid selection); a 1.6.7 kuehlere_raeume entry alone is '2'."""
+    lists = _configured_lists(options)
+    levels = {}
+    for value, key, _text in ALLOWANCE_CHOICES[1:]:
+        for entity in lists[key]:
+            levels[entity] = value
+    return levels
+
+
 def options_of(parsed):
     """Lists of a running HouseOptions, for display when the stored ones are unreadable."""
     if not parsed.valid:
@@ -326,7 +347,8 @@ def options_of(parsed):
             'heizkreis_2_art': names[parsed.option_types[1]], 'heizkreis_1_sensoren': list(parsed.hc1),
             'heizkreis_2_sensoren': list(parsed.hc2), 'haus_sensoren': list(parsed.haus),
             'kuehlere_raeume': sorted(parsed.cooler), 'ohne_ueberwaermung': sorted(parsed.no_warm),
-            'haus_frost_sensoren': sorted(parsed.frost)}
+            'haus_frost_sensoren': sorted(parsed.frost), 'kuehler_4_raeume': sorted(parsed.cooler4),
+            'kuehler_6_raeume': sorted(parsed.cooler6), rules.FROST_ONLY_LIST: sorted(parsed.frost_only)}
 
 
 def parse_request(document):
@@ -356,12 +378,14 @@ def parse_request(document):
             raise SelectionError('Unbekannte Zuordnung eines Sensors.')
         if any(type(row[name]) is not bool for name, _key, _scope, _text in FLAGS):
             raise SelectionError('Ungültige Anfrage.')
+        if not isinstance(row['kuehler'], str) or row['kuehler'] not in ALLOWANCE_VALUES:
+            raise SelectionError('Ungültige Anfrage.')
         if entity in seen:
             raise SelectionError('Ein Sensor kann nur einer Gruppe zugeordnet werden.')
         seen.add(entity)
         circuit = row['gruppe'] != 'weitere'
-        if not circuit and (row['kuehler'] or row['ofen']):
-            raise SelectionError('"darf kühler sein" und "Ofen oder viel Sonne" gelten nur für Räume an einem '
+        if not circuit and (row['kuehler'] != '0' or row['ofen']):
+            raise SelectionError('"Raumtemperatur" und "Ofen oder viel Sonne" gelten nur für Räume an einem '
                                  'Heizkreis.')
         if circuit and row['frost']:
             raise SelectionError('"Frostwarnung" gilt nur für weitere Räume.')
@@ -386,6 +410,12 @@ def build_house(stored, request):
         house[key] = _ordered(previous[key], [row['entity_id'] for row in rows if row['gruppe'] == group])
     for name, key, _scope, _text in FLAGS:
         house[key] = _ordered(previous[key], [row['entity_id'] for row in rows if row[name]])
+    # Every room with an allowance stays in kuehlere_raeume (an older app
+    # version reads it as 2 K); the larger choices add their own list.
+    house['kuehlere_raeume'] = _ordered(previous['kuehlere_raeume'],
+                                        [row['entity_id'] for row in rows if row['kuehler'] != '0'])
+    for value, key, _text in ALLOWANCE_CHOICES[2:]:
+        house[key] = _ordered(previous[key], [row['entity_id'] for row in rows if row['kuehler'] == value])
     return house
 
 
@@ -422,17 +452,23 @@ SCRIPT = r"""
     return text.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
   }
   function scope(group) { return group === 'weitere' ? 'weitere' : (group ? 'kreis' : ''); }
+  function group(row) { return row.querySelector('select[name="gruppe"]'); }
   function sync(row) {
-    var group = row.querySelector('select').value;
+    var chosen = group(row).value;
     Array.prototype.forEach.call(row.querySelectorAll('[data-gilt]'), function (label) {
-      var on = label.getAttribute('data-gilt') === scope(group);
+      var on = label.getAttribute('data-gilt') === scope(chosen);
       label.hidden = !on;
-      if (!on) { label.querySelector('input').checked = false; }
+      if (!on) {
+        var box = label.querySelector('input');
+        var choice = label.querySelector('select');
+        if (box) { box.checked = false; }
+        if (choice) { choice.value = '0'; }
+      }
     });
-    row.classList.toggle('aktiv', group !== '');
+    row.classList.toggle('aktiv', chosen !== '');
   }
   function selected() {
-    return rows.filter(function (row) { return row.querySelector('select').value !== ''; });
+    return rows.filter(function (row) { return group(row).value !== ''; });
   }
   function counted() {
     var n = selected().length;
@@ -455,7 +491,7 @@ SCRIPT = r"""
     bad.textContent = success ? '' : text;
   }
   rows.forEach(function (row) {
-    row.querySelector('select').addEventListener('change', function () { sync(row); counted(); });
+    group(row).addEventListener('change', function () { sync(row); counted(); });
     sync(row);
   });
   document.getElementById('suchfeld').hidden = false;
@@ -479,8 +515,8 @@ SCRIPT = r"""
       sensoren: chosen.map(function (row) {
         return {
           entity_id: row.getAttribute('data-entity'),
-          gruppe: row.querySelector('select').value,
-          kuehler: row.querySelector('input[name="kuehler"]').checked,
+          gruppe: group(row).value,
+          kuehler: row.querySelector('select[name="kuehler"]').value,
           ofen: row.querySelector('input[name="ofen"]').checked,
           frost: row.querySelector('input[name="frost"]').checked
         };
@@ -548,6 +584,7 @@ def render_picker(status, rows, areas, stored, viewer, nonce, *, zone=None, zone
     editable = viewer['kind'] == 'admin' and stored is not None and viewer.get('token')
     shown = stored if stored is not None else (options_of(running) if running is not None else HOUSE_DEFAULTS)
     chosen, flags = selection_of(shown)
+    levels = allowances_of(shown)
     candidates = {row[0]: row for row in rows} if rows is not None else {}
     areas_unavailable = areas is None and bool(rows)
     areas = areas or {}
@@ -575,6 +612,10 @@ def render_picker(status, rows, areas, stored, viewer, nonce, *, zone=None, zone
                  '(Räume ohne Heizkreis, z. B. Keller). Nach dem Speichern gilt die Auswahl sofort; die Wartezeiten '
                  'der Überwachung beginnen dann neu. Die Einstellungen bleiben im Tab Konfiguration der App sichtbar '
                  'und dort änderbar.</p>')
+    lines.append('<p>Raumtemperatur (nur Räume an einem Heizkreis): "normal" vergleicht mit dem Sollwert des '
+                 'Heizkreises. "darf 2 °C, 4 °C oder 6 °C kühler sein" gilt für Räume, die absichtlich kühler '
+                 'bleiben; die Meldung "zu kalt" nennt dann die erlaubte Temperatur. "nur Frost und Sensor prüfen" '
+                 'meldet für den Raum nur Frostgefahr und Sensorfehler; er zählt nicht für "Heizkreis zu kalt".</p>')
     attributes = ''
     if editable:
         attributes = (f' data-token="{escape(viewer["token"])}" data-revision="{escape(revision(stored))}"')
@@ -631,6 +672,15 @@ def render_picker(status, rows, areas, stored, viewer, nonce, *, zone=None, zone
             selected = ' selected' if group == value_ else ''
             out.append(f'<option value="{value_}"{selected}>{escape(text)}</option>')
         out.append('</select>')
+        # Allowance (rooms on a circuit): a choice instead of a checkbox.
+        level = levels.get(entity, '0') if scope == 'kreis' else '0'
+        hidden = '' if scope == 'kreis' else ' hidden'
+        out.append(f'<label data-gilt="kreis"{hidden}>{escape(ALLOWANCE_LABEL)} '
+                   f'<select name="kuehler"{disabled}>')
+        for value_, _key, text in ALLOWANCE_CHOICES:
+            selected = ' selected' if level == value_ else ''
+            out.append(f'<option value="{value_}"{selected}>{escape(text)}</option>')
+        out.append('</select></label>')
         for flag, _key, flag_scope, text in FLAGS:
             checked = ' checked' if entity in flags[flag] and flag_scope == scope else ''
             hidden = '' if flag_scope == scope else ' hidden'

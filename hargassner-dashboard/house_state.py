@@ -20,8 +20,9 @@ What a restore means:
   (up to RESTORE_SKEW_S back counts as 0) to RESTORE_MAX_GAP_S; otherwise
   everything starts fresh.
 - Each room and circuit carries a fingerprint of the options it was judged
-  with. A room whose circuit, circuit type, "darf kühler sein", "ohne
-  Überwärmung" or frost flag changed starts fresh. A circuit whose type changed
+  with. A room whose circuit, circuit type, allowance ("darf 2/4/6 °C kühler
+  sein", "nur Frost und Sensor prüfen"), "ohne Überwärmung" or frost flag
+  changed starts fresh. A circuit whose type changed
   starts fresh; one whose rooms changed keeps its phase, target and settle
   timing but starts its checks over its rooms (heating starts, circuit_cold,
   circuit_warm, circuit_no_response) fresh. Every other room continues.
@@ -100,6 +101,25 @@ def checksum(body):
 # ---------------------------------------------------------------------------
 # Fingerprints of the options a room and a circuit were judged with
 
+# The room's allowance in a fingerprint. Normal and 2 K keep the boolean of
+# 1.6.6/1.6.7 ("darf kühler sein"), so a state saved by those versions
+# continues; the choices of 1.6.8 are 4, 6 or "frost". 1.6.7 refuses those
+# values and starts fresh (never half a state), which matters only after a
+# rollback with one of the new choices in use.
+def cooler_mark(options, entity):
+    level = options.level(entity)
+    if level == rules.FROST_ONLY:
+        return rules.FROST_ONLY
+    return {0.0: False, 2.0: True}.get(level, int(level))
+
+
+def _cooler(value):
+    # bool first: True == 1 must not pass as a number, nor 4.0 as 4.
+    if type(value) is bool or (type(value) is int and value in (4, 6)) or value == rules.FROST_ONLY:
+        return value
+    raise Invalid('flag')
+
+
 def room_fingerprint(options, entity):
     if entity in options.hc1:
         role = 'hc1'
@@ -108,12 +128,12 @@ def room_fingerprint(options, entity):
     else:
         role = 'haus'
     kind = options.option_types[rules.CIRCUITS.index(role)] if role in rules.CIRCUITS else None
-    return [role, kind, entity in options.cooler, entity in options.no_warm, entity in options.frost]
+    return [role, kind, cooler_mark(options, entity), entity in options.no_warm, entity in options.frost]
 
 
 def circuit_fingerprint(options, name):
     kind = options.option_types[rules.CIRCUITS.index(name)]
-    return [kind, [[entity, entity in options.cooler, entity in options.no_warm]
+    return [kind, [[entity, cooler_mark(options, entity), entity in options.no_warm]
                    for entity in options.circuit_entities(name)]]
 
 
@@ -468,7 +488,7 @@ def _circuit(decode, engine, circuit, saved, members_kept):
         entity, cooler, no_warm = _list(row, 3)
         if not isinstance(entity, str) or not rules.ENTITY_PATTERN.fullmatch(entity):
             raise Invalid('fingerprint')
-        _flag(cooler), _flag(no_warm)
+        _cooler(cooler), _flag(no_warm)
         saved_members.add(entity)
     members = saved_members
     circuit.last_phase = _choice(saved['last_phase'], (None, 'day', 'setback'))

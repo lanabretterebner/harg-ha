@@ -89,7 +89,15 @@ def check_report(test, payload):
     test.assertTrue(integer(report['folded'], 0, 1000))
     seen = set()
     for finding in report['findings']:
-        test.assertEqual(set(finding), {'code', 'level', 'label', 'circuit', 'held_s', 'room', 'target', 'count'})
+        keys = {'code', 'level', 'label', 'circuit', 'held_s', 'room', 'target', 'count'}
+        # `allowance` only against a context major 2 (app 1.6.8): every finding
+        # then carries it, a number for room_cold and limit_cold or null.
+        test.assertIn(set(finding), (keys, keys | {'allowance'}))
+        if 'allowance' in finding:
+            test.assertIn(2, report['context_majors'])
+            allowance = finding['allowance']
+            test.assertTrue(allowance is None or (finding['code'] in ('room_cold', 'limit_cold')
+                                                  and allowance in (2.0, 4.0, 6.0)), finding)
         top, label, circ, room, target, count = TABLE[finding['code']]
         test.assertIn(finding['level'], ('Hinweis', 'Störung') if top == 'Störung' else ('Hinweis',))
         for value, rule, valid in ((finding['label'], label, lambda v: isinstance(v, str)
@@ -321,14 +329,14 @@ class WorkerTests(unittest.TestCase):
         world.context()
         world.cycle()
         document = context_document(5)
-        document['schema'] = 'harg-house-context/2'
+        document['schema'] = 'harg-house-context/3'     # 2 is the allowance major of 1.6.8
         for second in range(300):
             if second % 60 == 0:
                 world.inbox.append((TOPIC, json.dumps(document), False))
             world.cycle()
         report = world.reports()[-1]
         self.assertEqual((report['monitor'], report['reason']), ('unknown', 'context_version_unsupported'))
-        self.assertEqual(report['context_majors'], [1])
+        self.assertEqual(report['context_majors'], [1, 2])
         self.assertIn('House monitor: context_version_unsupported.', world.logs)
         self.assertIn('Version der VM passt nicht', world.monitor.page().decode())
 

@@ -97,13 +97,27 @@ def settled_plant():
     return cached('settled', build)
 
 
-def dead_bedroom_until_no_response():
+def dead_bedroom_at(day, hour, minute=0):
+    """The settled plant with the bedroom's radiator dead from day 2 00:00, run to
+    the given time. The plant is deterministic (seeded noise, virtual clocks) and
+    Plant.to only ticks minute by minute, so it continues from the latest cached
+    earlier time: the same ticks as one run from the settled plant."""
+    target = day * DAY + hour * 60 + minute
+
     def build():
-        plant = settled_plant()
-        plant.rooms[2].dead = True
-        plant.to(4, 9)
+        earlier = [key for key in _CACHE if key[0] == 'dead_at' and key[1] < target]
+        if earlier:
+            plant = copy.deepcopy(_CACHE[max(earlier)])
+        else:
+            plant = settled_plant()
+            plant.rooms[2].dead = True
+        plant.to(day, hour, minute)
         return plant
-    plant = cached('dead', build)
+    return cached(('dead_at', target), build)
+
+
+def dead_bedroom_until_no_response():
+    plant = dead_bedroom_at(4, 9)
     label = plant.h.engine.labels[BEDROOM]
     assert row(plant, 'no_response', label) is not None and row(plant, 'room_cold', label) is not None
     return plant, label
@@ -160,9 +174,7 @@ class ContinueTests(unittest.TestCase):
             with self.subTest(day=day, hour=hour, down=down):
                 plants = []
                 for restarted in (True, False):
-                    plant = settled_plant()
-                    plant.rooms[2].dead = True
-                    plant.to(day, hour, minute)
+                    plant = dead_bedroom_at(day, hour, minute)
                     if restarted:
                         self.assertEqual(restart(plant, down), 'state_restored')
                     else:
@@ -199,9 +211,7 @@ class ContinueTests(unittest.TestCase):
             with self.subTest(day=day, hour=hour, minute=minute, ran=ran, down=down):
                 plants = []
                 for crashed in (True, False):
-                    plant = settled_plant()
-                    plant.rooms[2].dead = True
-                    plant.to(day, hour, minute)
+                    plant = dead_bedroom_at(day, hour, minute)
                     if crashed:
                         document = json.loads(json.dumps(
                             hs.export(plant.h.engine, mono=plant.h.now, wall=plant.h.wall, boot=BOOT)))

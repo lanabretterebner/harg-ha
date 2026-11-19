@@ -533,7 +533,8 @@ class HouseMonitor:
             sensors, circuits = self.engine.sensors_report(now), self.engine.circuits_report()
             findings, monitor, reason = self.findings, self.engine.monitor, self.engine.reason
         return dict(instance=self.instance, context_id=context_id, mode=self.options.mode,
-                    monitor=monitor, reason=reason, sensors=sensors, circuits=circuits, findings=findings)
+                    monitor=monitor, reason=reason, sensors=sensors, circuits=circuits, findings=findings,
+                    context_major=context.get('major', 1) if state == 'ok' else None)
 
     def maybe_report(self):
         api = self.api

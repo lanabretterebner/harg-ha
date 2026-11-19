@@ -19,7 +19,16 @@ configuration:
     description: "Sensors in rooms without a heating circuit or with closed valves, e.g. cellar or garage. Only the sensor itself is checked."
   kuehlere_raeume:
     name: Rooms that may be cooler
-    description: "Rooms that are kept cooler on purpose, e.g. bedrooms. They may be 2 degrees cooler than set."
+    description: "Rooms kept cooler on purpose (2 degrees below the set value). Rooms of the three lists below are listed here too, so an older app version still treats them as cooler."
+  kuehler_4_raeume:
+    name: Rooms that may be 4 degrees cooler
+    description: "Rooms on a circuit that may be 4 degrees cooler than set. Easier to set on the room page."
+  kuehler_6_raeume:
+    name: Rooms that may be 6 degrees cooler
+    description: "Rooms on a circuit that may be 6 degrees cooler than set. Easier to set on the room page."
+  nur_frost_raeume:
+    name: Rooms checked for frost and sensor only
+    description: "Rooms on a circuit checked only for frost and their sensor: never too cold or too warm, and not counted for the circuit checks."
   ohne_ueberwaermung:
     name: Rooms with a stove or much sun
     description: "No notice is given when these rooms are too warm."

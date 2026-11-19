@@ -11,10 +11,16 @@ import json
 import math
 import re
 
-APP_VERSION = '1.6.7'
+APP_VERSION = '1.6.8'
 REPORT_SCHEMA = 'harg-house-report/1'
 CONTEXT_SCHEMA_PREFIX = 'harg-house-context/'
-CONTEXT_MAJORS = (1,)
+# Context major 2 has the keys of 1; an adapter sends it only to an app that
+# lists 2 in `context_majors`, and it means the adapter accepts the finding key
+# `allowance` (app 1.6.8). Against a major 1 context the report keeps the exact
+# 1.6.7 finding keys, so an older adapter never refuses it.
+# (No new int constant here: rules_digest() hashes them and would make 1.6.8
+# discard the room state saved by 1.6.7.)
+CONTEXT_MAJORS = (1, 2)
 CIRCUITS = ('hc1', 'hc2')
 
 ENTITY_PATTERN = re.compile(r'sensor\.[a-z0-9_]{1,200}')
@@ -129,6 +135,18 @@ TYPE_CONSTANTS = {
 OPTION_TYPES = {'automatisch': None, 'heizkoerper': 'radiator', 'fussboden': 'floor'}
 MODES = ('beobachten', 'melden')
 COOLER_ALLOWANCE = 2.0
+# Per-room allowance (app 1.6.8, owner decision 2026-11-19), the room page's
+# choice for a room on a circuit: normal, 2, 4 or 6 K cooler, or frost only.
+# Every room with a choice other than normal is also listed in kuehlere_raeume,
+# so an older app version (which drops the new keys) still treats it as 2 K
+# cooler. The larger allowance wins; a room may be in at most one of the three
+# new lists. A frost-only room keeps the frost and sensor checks only, like a
+# Weitere-Räume room, but stays on its circuit.
+ALLOWANCE_LISTS = (('kuehler_4_raeume', 4.0), ('kuehler_6_raeume', 6.0))
+FROST_ONLY_LIST = 'nur_frost_raeume'
+FROST_ONLY = 'frost'
+# The codes whose text names the room's allowance (VM, context major 2).
+ALLOWANCE_CODES = ('room_cold', 'limit_cold')
 
 # Code table (spec 9.4), in its order: check, level.
 CODES = {
@@ -196,7 +214,8 @@ def number(value):
 # Options (spec 2.1)
 
 LIST_KEYS = ('heizkreis_1_sensoren', 'heizkreis_2_sensoren', 'haus_sensoren',
-             'kuehlere_raeume', 'ohne_ueberwaermung', 'haus_frost_sensoren')
+             'kuehlere_raeume', 'ohne_ueberwaermung', 'haus_frost_sensoren',
+             'kuehler_4_raeume', 'kuehler_6_raeume', 'nur_frost_raeume')
 
 
 @dataclass(frozen=True)
@@ -213,6 +232,10 @@ class HouseOptions:
     raw_count: int = 0
     # Distinct entries per circuit list of an invalid configuration (0..24).
     raw_circuits: tuple = (0, 0)
+    # The larger allowances of app 1.6.8 (see ALLOWANCE_LISTS).
+    cooler4: frozenset = frozenset()
+    cooler6: frozenset = frozenset()
+    frost_only: frozenset = frozenset()
 
     @property
     def entities(self):
@@ -224,6 +247,26 @@ class HouseOptions:
 
     def circuit_entities(self, circuit):
         return self.hc1 if circuit == 'hc1' else self.hc2
+
+    def level(self, entity):
+        """The room's choice: 0.0, 2.0, 4.0, 6.0 or FROST_ONLY."""
+        if entity in self.frost_only:
+            return FROST_ONLY
+        if entity in self.cooler6:
+            return 6.0
+        if entity in self.cooler4:
+            return 4.0
+        return COOLER_ALLOWANCE if entity in self.cooler else 0.0
+
+    def allowance(self, entity):
+        """Kelvin the room may stay below its target (0.0 for frost-only rooms,
+        which no heating rule judges)."""
+        level = self.level(entity)
+        return 0.0 if level == FROST_ONLY else level
+
+    def heated(self, circuit):
+        """The circuit's rooms its heating rules judge (not frost-only)."""
+        return tuple(entity for entity in self.circuit_entities(circuit) if entity not in self.frost_only)
 
 
 def _raw_entries(options, key):
@@ -277,13 +320,21 @@ def parse_house_options(options):
         if len(assigned) > MAX_SENSORS or len(set(assigned)) != len(assigned):
             raise ValueError
         circuit = set(hc1) | set(hc2)
-        if not set(lists['kuehlere_raeume']) <= circuit or not set(lists['ohne_ueberwaermung']) <= circuit:
+        wider = [lists[key] for key, _value in ALLOWANCE_LISTS] + [lists[FROST_ONLY_LIST]]
+        for key in ('kuehlere_raeume', 'ohne_ueberwaermung') + tuple(key for key, _v in ALLOWANCE_LISTS) + (FROST_ONLY_LIST,):
+            if not set(lists[key]) <= circuit:
+                raise ValueError
+        # One room, one larger choice (4 K, 6 K or frost only).
+        chosen = [entity for value in wider for entity in value]
+        if len(set(chosen)) != len(chosen):
             raise ValueError
         if not set(lists['haus_frost_sensoren']) <= set(haus):
             raise ValueError
         return HouseOptions(True, mode, tuple(types), hc1, hc2, haus,
                             frozenset(lists['kuehlere_raeume']), frozenset(lists['ohne_ueberwaermung']),
-                            frozenset(lists['haus_frost_sensoren']), len(assigned))
+                            frozenset(lists['haus_frost_sensoren']), len(assigned),
+                            cooler4=frozenset(lists['kuehler_4_raeume']), cooler6=frozenset(lists['kuehler_6_raeume']),
+                            frost_only=frozenset(lists[FROST_ONLY_LIST]))
     except (ValueError, TypeError):
         mode = options.get('raumueberwachung_modus') if isinstance(options, dict) else None
         return HouseOptions(False, mode if mode in MODES else 'beobachten', raw_count=_raw_count(options),
@@ -356,6 +407,7 @@ def validate_context(raw):
     if major not in CONTEXT_MAJORS:
         return 'unsupported', None
     # v1 has exact key sets (spec 9.1): a missing or added key is another major.
+    # v2 has the same keys (it only tells that the adapter reads `allowance`).
     if set(document) != CONTEXT_KEYS:
         return 'invalid', None
     context = document.get('context')
@@ -375,7 +427,7 @@ def validate_context(raw):
     ack = document.get('report_ack')
     if ack is not None and (not isinstance(ack, dict) or set(ack) != {'instance', 'seq', 'result'}):
         return 'invalid', None
-    result = {'context': context, 'online': document['online'], 'maintenance': document['maintenance'],
+    result = {'major': major, 'context': context, 'online': document['online'], 'maintenance': document['maintenance'],
               'outdoor': _bounded(document.get('outdoor'), -60, 60),
               'outdoor_avg': _bounded(document.get('outdoor_avg'), -60, 60),
               'report_ack': None, 'circuits': {}}
@@ -1083,6 +1135,12 @@ class HouseEngine:
             return True
 
         base = gate()
+        # Frost-only rooms (room page) are left out of every heating rule of
+        # the room and of the circuit (room_cold, limit_cold, room_warm,
+        # room_hot, no_response, circuit_cold, circuit_warm,
+        # circuit_no_response): they neither raise nor hold off a circuit
+        # finding. Their frost and sensor checks run elsewhere.
+        entities = self.options.heated(circuit.name)
         values, usable = {}, []
         for entity in entities:
             sensor = self.sensors[entity]
@@ -1093,8 +1151,7 @@ class HouseEngine:
         def deficit(entity):
             if entity not in values or target is None:
                 return None
-            allowance = COOLER_ALLOWANCE if entity in self.options.cooler else 0.0
-            return (target - allowance) - values[entity]
+            return (target - self.options.allowance(entity)) - values[entity]
 
         recovery = constants['airing']
         # Underfloor rules by the last known type (an unknown type falls back
@@ -1111,9 +1168,8 @@ class HouseEngine:
             airing[entity] = sensor.airing_episode(now, recovery, d is not None and d < 1.0)
             rise = sensor.trend(now, constants['trend']) if entity in values else None
             warming[entity] = rise is not None and rise >= sensor.min_rise() - 1e-9
-            allowance = COOLER_ALLOWANCE if entity in self.options.cooler else 0.0
             reached[entity] = (usable_ctx and entity in values and upper is not None
-                               and values[entity] >= upper - allowance - 1.0 - 1e-9)
+                               and values[entity] >= upper - self.options.allowance(entity) - 1.0 - 1e-9)
         for key in [k for k, start in circuit.starts.items() if now - start['start'] > NO_RESPONSE_SPAN_S]:
             del circuit.starts[key]
         # Heat-up trigger: arm the response windows (never in an airing episode).
@@ -1237,7 +1293,17 @@ class HouseEngine:
             # no_response window and finding
             self._response(circuit, entity, sensor, now, elapsed, base, ok, aired, d,
                            values.get(entity), pump, flow, constants, limit)
-        # Circuit-wide cold.
+        # Circuit-wide cold, over the circuit's reference rooms: those with
+        # "normal" or 2 K (as up to 1.6.7). A room with 4 or 6 K is one the
+        # owner keeps unusually cool (a sunroom, a stove): it neither raises
+        # the Störung at its allowed temperature nor holds it off while sun or
+        # a stove keeps it warm. Only a circuit with fewer than two reference
+        # rooms configured judges those rooms, each against its own limit; a
+        # reference sensor that drops out pauses the check (fewer than two
+        # usable), it never switches the set. Frost-only rooms never count
+        # (see `heated`).
+        reference = [e for e in entities if self.options.allowance(e) <= COOLER_ALLOWANCE]
+        judged = [e for e in usable if e in reference] if len(reference) >= 2 else usable
         cold_limit = limit
         if base is not True:
             fire = hold = base
@@ -1249,28 +1315,31 @@ class HouseEngine:
                 fire = hold = None          # setback or unknown phase: never judged, a finding holds
             elif cold_settling:
                 fire, hold = False, None    # heat-up: no new finding, an existing one holds
-            elif (len(usable) < 2 or target is None or source.get('day_target') is None
-                  or any(self.sensors[e].airing(now, recovery) for e in usable)):
+            elif (len(judged) < 2 or target is None or source.get('day_target') is None
+                  or any(self.sensors[e].airing(now, recovery) for e in judged)):
                 fire = hold = None
             else:
-                deficits = [deficit(e) for e in usable]   # target is the day target in the day phase
+                deficits = [deficit(e) for e in judged]   # target is the day target in the day phase
                 fire, hold = all(x >= 3.0 for x in deficits), all(x >= 2.5 for x in deficits)
-                if fire and any(warming[e] for e in usable):
+                if fire and any(warming[e] for e in judged):
                     fire = None  # still warming (back from a holiday): wait, a working circuit
         elif settling:
             fire = hold = False
-        elif len(usable) < 2 or target is None or any(self.sensors[e].airing(now, recovery) for e in usable):
+        elif len(judged) < 2 or target is None or any(self.sensors[e].airing(now, recovery) for e in judged):
             # The short pause after a fast drop only: a failed pump must not
             # wait until an aired room has come back.
             fire = hold = None
         else:
-            deficits = [deficit(e) for e in usable]
+            deficits = [deficit(e) for e in judged]
             fire, hold = all(x >= 3.0 for x in deficits), all(x >= 2.5 for x in deficits)
-            if fire and any(warming[e] for e in usable):
+            if fire and any(warming[e] for e in judged):
                 fire = None      # still warming up (after a holiday, a cold morning): wait
         circuit.circuit_cold.update(
             fire, hold, now, elapsed, constants['cold_circuit'], cold_limit,
-            lambda: {'room': half(min(values[e] for e in usable)), 'target': half(target), 'count': len(usable)})
+            # The room furthest below its own limit (with allowances the lowest
+            # value need not be the coldest).
+            lambda: {'room': half(values[max(judged, key=lambda e: (deficit(e), -values[e]))]),
+                     'target': half(target), 'count': len(judged)})
         # Circuit-wide warm.
         warm = [e for e in usable if e not in self.options.no_warm]
         if base is not True:
@@ -1531,8 +1600,13 @@ class HouseEngine:
                 continue
             if code != 'room_frost' and roles[entity] in absent:
                 continue
-            rows.append(self._row(code, latch.held(now), self.labels[entity], roles[entity],
-                                  latch.onset.get('room'), latch.onset.get('target')))
+            row = self._row(code, latch.held(now), self.labels[entity], roles[entity],
+                            latch.onset.get('room'), latch.onset.get('target'))
+            allowance = self.options.allowance(entity)
+            if code in ALLOWANCE_CODES and allowance > 0 and row['target'] is not None:
+                # Reported only against a context major 2 (build_report).
+                row['allowance'] = allowance
+            rows.append(row)
         for entity, finding in self.no_response.items():
             if roles[entity] in absent:
                 continue
@@ -1609,8 +1683,20 @@ def sort_key(row):
             {'hc1': 0, 'hc2': 1}.get(row['circuit'], 2), row['label'] or '', CODE_ORDER[row['code']])
 
 
-def build_report(*, instance, seq, context_id, mode, monitor, reason, sensors, circuits, findings):
-    ordered = sorted(findings, key=sort_key)
+def wire_finding(row, context_major):
+    """One finding as sent: with `allowance` (null unless set) for an adapter
+    whose context is major 2 or later, else exactly the major 1 keys."""
+    base = {key: value for key, value in row.items() if key != 'allowance'}
+    if context_major is not None and context_major >= 2:
+        allowance = row.get('allowance')
+        base['allowance'] = allowance if row['code'] in ALLOWANCE_CODES and number(allowance) else None
+    return base
+
+
+def build_report(*, instance, seq, context_id, mode, monitor, reason, sensors, circuits, findings,
+                 context_major=None):
+    ordered = [wire_finding(row, context_major if context_id is not None else None)
+               for row in sorted(findings, key=sort_key)]
     kept, folded = ordered[:MAX_FINDINGS], min(MAX_FOLDED, max(0, len(ordered) - MAX_FINDINGS))
     report = {'schema': REPORT_SCHEMA, 'context_majors': list(CONTEXT_MAJORS), 'app_version': APP_VERSION,
               'instance': instance, 'seq': seq, 'context': context_id, 'mode': mode,

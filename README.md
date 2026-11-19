@@ -228,7 +228,7 @@ assertions plus page/console/request errors. It emits a structured result.
 open the HTML fixtures manually. These synthetic checks contact no live HA or
 controller and do not establish installed-native rendering or physical heating
 response. See [browser checks](tests/README.md).
-Frontend 1.4.15 and app 1.6.7 are published as independent components. Installation and
+Frontend 1.4.15 and app 1.6.8 are published as independent components. Installation and
 served-byte acceptance are separate from source checks; consult the installed
 version in HACS and Supervisor. Existing tags and assets remain immutable.
 The app is updated through Supervisor; HACS updates only the browser resource.
@@ -248,4 +248,5 @@ App 1.6.5 makes the room checks report only lasting heating problems: airing, op
 
 App 1.6.6 keeps the room checks across an app restart: their state is saved in the app's `/data`, so an app update, an app restart or a host reboot no longer ends a lasting room notice and reports it days later as new. It also carries the frost and Betriebsüberwachung fixes in [CHANGELOG.md](hargassner-dashboard/CHANGELOG.md). Update the Supervisor app; frontend 1.4.15 is unchanged.
 
+App 1.6.8 replaces the room page's "darf kühler sein" checkbox with a per-room choice (normal, 2, 4 or 6 °C cooler, or frost and sensor only); the "zu kalt" notice names the allowed temperature with a VM that reads it (context major 2), and app and VM may be updated in either order (the VM side is live since 2026-11-19). Update the Supervisor app; HACS frontend 1.4.15 is unchanged.
 App 1.6.7 holds the VM status check's clock-skew finding until the report is clearly inside the 5 s tolerance (half of it, or 5 minutes within it), so a clock hovering at the limit gives one notification and one recovery instead of flapping at every poll. Update the Supervisor app; frontend 1.4.15 is unchanged.

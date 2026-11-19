@@ -19,7 +19,16 @@ configuration:
     description: "Sensoren in Räumen ohne Heizkreis oder mit geschlossenen Ventilen, z. B. Keller oder Garage. Für sie wird nur der Sensor selbst geprüft."
   kuehlere_raeume:
     name: Räume, die kühler sein dürfen
-    description: "Räume, die bewusst kühler gehalten werden, z. B. Schlafzimmer. Sie dürfen 2 Grad kühler sein als eingestellt."
+    description: "Bewusst kühler gehaltene Räume (2 Grad unter dem Sollwert). Räume der drei Listen unten stehen auch hier, damit eine ältere App-Version sie weiter als kühler behandelt."
+  kuehler_4_raeume:
+    name: Räume, die 4 Grad kühler sein dürfen
+    description: "Räume an einem Heizkreis, die 4 Grad kühler sein dürfen. Einfacher auf der Raumseite einzustellen."
+  kuehler_6_raeume:
+    name: Räume, die 6 Grad kühler sein dürfen
+    description: "Räume an einem Heizkreis, die 6 Grad kühler sein dürfen. Einfacher auf der Raumseite einzustellen."
+  nur_frost_raeume:
+    name: Räume nur mit Frost- und Sensorprüfung
+    description: "Räume an einem Heizkreis, für die nur Frost und der Sensor geprüft werden: nie zu kalt oder zu warm, und sie zählen nicht für die Heizkreis-Prüfungen."
   ohne_ueberwaermung:
     name: Räume mit Ofen oder viel Sonne
     description: "Für diese Räume wird nicht gemeldet, wenn sie zu warm sind."

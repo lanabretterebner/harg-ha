@@ -1095,7 +1095,9 @@ class ReportTests(unittest.TestCase):
                        {'report_ack': {'instance': 'a' * 32, 'seq': 1}}):
             with self.subTest(broken=broken):
                 self.assertEqual(r.validate_context(json.dumps({**document, **broken}))[0], 'invalid')
-        self.assertEqual(r.validate_context(json.dumps({**document, 'schema': 'harg-house-context/2'}))[0], 'unsupported')
+        # 2 is the allowance major of 1.6.8 (keys of 1); 3 is unknown.
+        self.assertEqual(r.validate_context(json.dumps({**document, 'schema': 'harg-house-context/2'}))[0], 'ok')
+        self.assertEqual(r.validate_context(json.dumps({**document, 'schema': 'harg-house-context/3'}))[0], 'unsupported')
         self.assertEqual(r.validate_context('{"a":1,"a":2}')[0], 'invalid')
         missing = dict(document)
         del missing['outdoor']

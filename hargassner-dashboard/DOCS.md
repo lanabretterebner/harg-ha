@@ -499,9 +499,29 @@ name, area or entity ID. For each sensor choose:
   sensors away from radiators, windows, doors and direct sun. Weitere Räume
   are rooms without a heating circuit or with closed valves, for example
   cellar or garage; only the sensor itself is checked there.
-- For rooms on a heating circuit: **darf kühler sein** (kept cooler on
-  purpose, such as a bedroom; may be 2 degrees below the set temperature) and
+- For rooms on a heating circuit: **Raumtemperatur** (app 1.6.8) and
   **Ofen oder viel Sonne** (no notice when the room is too warm).
+  **Raumtemperatur** says how far the room may stay below the circuit's set
+  temperature:
+  - **normal**: no allowance (default);
+  - **darf 2 °C kühler sein**: kept cooler on purpose, such as a bedroom
+    (the "darf kühler sein" checkbox of earlier versions; rooms that had it
+    show this choice);
+  - **darf 4 °C kühler sein** and **darf 6 °C kühler sein**: rooms kept
+    clearly cooler, such as a sunroom or a hall;
+  - **nur Frost und Sensor prüfen**: the room is only checked for frost and
+    for its sensor, like a room under Weitere Räume, but stays on its
+    circuit: never "too cold", "too warm", "very warm" or "does not get
+    warmer", and it does not count for the circuit-wide checks.
+
+  The room is "too cold" only 1.5 degrees below the set temperature minus its
+  allowance: with 23 °C set and **darf 6 °C kühler sein**, at 15.5 °C or
+  below. The notice then names the allowed temperature and the set one, for
+  example "Wintergarten ist seit längerem zu kalt (16,5 °C; erlaubt ab
+  21,0 °C, Ziel 23,0 °C)" for a room that may be 2 degrees cooler. Without an
+  allowance the text stays "(16,5 °C statt 23,0 °C)". The VM shows the
+  allowed temperature from its release with this feature on; an older VM
+  keeps the old text, and both versions work together in any order.
 - For Weitere Räume: **Frostwarnung** (warn about frost in that room).
 
 Above the list choose **Raumüberwachung** (`beobachten` or `melden`, see
@@ -548,9 +568,14 @@ Who sees what:
 The same settings remain visible and editable in the app's **Configuration**
 tab as lists of entity IDs (`heizkreis_1_sensoren`, `heizkreis_2_sensoren`,
 `haus_sensoren`, `kuehlere_raeume`, `ohne_ueberwaermung`,
-`haus_frost_sensoren`). A change made there takes effect after the app is
+`haus_frost_sensoren`, and from app 1.6.8 `kuehler_4_raeume`,
+`kuehler_6_raeume`, `nur_frost_raeume`). A change made there takes effect after the app is
 restarted (or when the room page saves); the room page names such a change
-that is not active yet.
+that is not active yet. The room page lists every room with an allowance
+(2, 4 or 6 degrees or frost only) in `kuehlere_raeume` as well, and the larger
+choice also in its own list. That way an older app version, which does not
+know the new lists, still treats these rooms as 2 degrees cooler after a
+downgrade. A room may be in at most one of the three new lists.
 
 At most 24 sensors can be selected in total. A sensor may be in only one
 group. The page refuses selections that break these rules. If the
@@ -621,6 +646,19 @@ house aired at once is not a fault. A failed pump or mixer is reported
 from the second morning; the circuit cold check (3 degrees, 3 h) usually comes
 first.
 
+**Rooms with an allowance and the circuit checks** (app 1.6.8). "All rooms of
+a circuit clearly too cold" (a fault) is judged over the circuit's rooms with
+**normal** or **darf 2 °C kühler sein**, each against its own limit, as in
+earlier versions. A room with 4 or 6 degrees is one the owner keeps unusually
+cool, often warmed by sun or a stove: it neither raises the fault while it sits
+at its allowed temperature nor holds it off when sun or a stove keeps it warm
+while the heating has failed. Only on a circuit with fewer than two such rooms
+do the 4- and 6-degree rooms count, each 3 degrees below its own allowed
+temperature (a sensor of such a room that drops out pauses the check, as
+before, instead of letting the other rooms decide). **nur Frost und Sensor prüfen** rooms never count for any
+circuit check. Rooms with an allowance are watched after a heating start only
+when they start 1.5 degrees below their allowed temperature.
+
 **Room too cold** needs the room to stay away from its day level: after one
 cold spell, 12 hours without getting back within 1 degree of the day target.
 A room someone turned down for an afternoon, or that was cold until a slow
@@ -630,8 +668,8 @@ notice stays through the night setback (or a night the heating limit switches
 the circuit off) until the room is warm again, or 26 hours after the last cold
 spell, for example when the heating stays off for the summer. A room
 that is meant to stay cooler, or whose sensor sits at a cold spot such as a
-window, gets "darf kühler sein" (2 degrees allowance) on the room page, or is
-set to "nicht überwachen". The app does not learn a room's usual level by
+window, gets an allowance on the room page (**darf 2, 4 or 6 °C kühler
+sein**, or **nur Frost und Sensor prüfen**), or is set to "nicht überwachen". The app does not learn a room's usual level by
 itself (owner decision, 2026-11-18): that would also hide a radiator that
 slowly fails.
 
@@ -715,8 +753,11 @@ The saved state is used only when it fits:
   clock when the host did not reboot, so a clock change does not matter;
   after a reboot by the clock, which must not lie more than 5 minutes before
   the save, and at least the time since the reboot);
-- the room settings: a room whose circuit, circuit type, "darf kühler sein",
-  "ohne Überwärmung" or frost setting changed starts fresh. A circuit whose
+- the room settings: a room whose circuit, circuit type, **Raumtemperatur**
+  choice, "ohne Überwärmung" or frost setting changed starts fresh. A state
+  saved by app 1.6.6 or 1.6.7 continues after the update to 1.6.8. After a
+  downgrade to 1.6.7 while a room uses 4 or 6 degrees or frost only, 1.6.7
+  starts the checks fresh once (it does not know these choices). A circuit whose
   type changed starts fresh with its rooms; when only its rooms changed, its
   circuit-wide checks (all rooms too cold or too warm, heating starts without
   effect) start fresh, and every unchanged room continues with its own
