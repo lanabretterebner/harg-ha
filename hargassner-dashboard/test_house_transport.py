@@ -581,7 +581,7 @@ class AppIntegrationTests(unittest.TestCase):
         world = World()
         seen = []
 
-        def page(user, nonce):
+        def page(user, nonce, prefix=None):
             seen.append((user, nonce))
             return world.monitor.page()
         server = self.serve(page)

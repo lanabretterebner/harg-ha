@@ -366,10 +366,10 @@ def load(name, path):
     return module
 
 
-def main_source(path):
-    """A file as on main (the VM and app 1.6.8 as released), or None outside the source tree."""
+def main_source(path, ref='main'):
+    """A file as on main (the VM as released) or on `ref`, or None outside the source tree."""
     try:
-        return subprocess.run(['git', '-C', str(ROOT), 'show', 'main:' + path], capture_output=True,
+        return subprocess.run(['git', '-C', str(ROOT), 'show', ref + ':' + path], capture_output=True,
                               check=True, timeout=30).stdout
     except (OSError, subprocess.SubprocessError):
         return None
@@ -422,7 +422,8 @@ class MixedVersionTests(unittest.TestCase):
                 self.assertNotIn('einfluss', payload)
 
     def test_app_168_reads_options_saved_by_169(self):
-        source = main_source('home-assistant/hacs/harg-ha/hargassner-dashboard/house_rules.py')
+        # App 1.6.8 as published (549fb56c); main has moved on to 1.6.9.
+        source = main_source('home-assistant/hacs/harg-ha/hargassner-dashboard/house_rules.py', '549fb56c')
         if source is None:
             self.skipTest('no git checkout')
         old_path = Path(tempfile.mkdtemp()) / 'house_rules_168.py'

@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.6.10
+
+- **Raum anlernen reads the long-kept data** (owner request 2026-11-19:
+  "didn't we implement long time statistics in our own app?"). 1.6.9 read
+  only Home Assistant's recorder history, which keeps 10 days by default.
+  - Heating circuits (phase Tag/Absenken, target, status) now come from the
+    VM's own history: the new read-only VM endpoint
+    `GET /api/dashboard/v1/circuit-history` (5-minute state codes and flow
+    from the VM's channel history, day and setback targets with room
+    correction from its parameter journal; 30 days; phase from the state
+    code: 1 day, 2/3/4 setback, as the VM's phase mapping). The app reads it as
+    the administrator who pressed the button, through the Ingress
+    credential it already has (an ordinary dashboard session, read-only).
+    Days older than that, or every day when the VM cannot give it (an older
+    VM release, refused, unreachable, no target known), come from Home Assistant's recorder
+    history of the VM's climate entities, as before.
+  - Room temperature: Home Assistant's long-term statistics (hourly mean,
+    min and max, kept indefinitely for sensors with `state_class:
+    measurement`) through `recorder/statistics_during_period` for the
+    allowance; the recorder history (every change) only for the heat-up
+    response. A sensor without long-term statistics falls back to the
+    recorder history, and the evidence says so.
+  - Periods: alles Verfügbare (up to one year, the default), 3, 7, 14, 30
+    or 90 days. The recorder is read newest first and only as far back as it
+    keeps data (stops after two empty 12-hour pieces, at most 90 days).
+  - The evidence names every source and its resolution, for example
+    "Raumtemperatur: Langzeitstatistik von Home Assistant, stündlich, 63
+    Tage vorhanden; feiner Verlauf (jede Änderung) 10 Tage für das Aufheizen." and
+    "Heizkreise: VM-Verlauf, alle 5 Minuten, 30 Tage." A VM that cannot be
+    read is named with the reason ("ältere VM-Version", "Zugriff
+    abgelehnt", "nicht erreichbar").
+  - Unchanged: accept/discard/reset, warnings that need "geprüft", the
+    failing-radiator warning, the recording fallback, the learning file
+    (`/data/room_learning.json`, same schema; 1.6.9 reads it after a
+    downgrade) and no writes to Home Assistant or the VM.
+- Needs VM release with `circuit-history` for the VM source; without it the
+  app works as 1.6.9 and says "ältere VM-Version" in the evidence. Install
+  order is free.
+
 ## 1.6.9
 
 - Free room settings (owner request 2026-11-19: "why only fixed options?").

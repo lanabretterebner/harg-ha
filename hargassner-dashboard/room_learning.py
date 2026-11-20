@@ -1,39 +1,60 @@
-"""Room learning (app 1.6.9): a proposal for one room's settings, started by
-the owner only, never applied without the owner's acceptance.
+"""Room learning (app 1.6.9, sources from 1.6.10): a proposal for one room's
+settings, started by the owner only, never applied without the owner's
+acceptance.
 
-"Raum anlernen" on the room page reads the past of the room from Home
-Assistant's recorder (history API through the Supervisor) together with the
-circuit data the VM publishes to Home Assistant (the climate entity of each
-heating circuit: phase "Sollwertphase", target "temperature", status
-"Heizkreisstatus-Code"). From that it proposes the room's allowance and its
-influence per circuit and shows the evidence. When the recorder holds too
-little, the owner can record from now on instead: the room's own heating
-checks pause for the recording time (frost and sensor checks stay on), and at
-its end the same analysis runs over the recorded period.
+"Raum anlernen" on the room page reads the past of the room and of its heating
+circuits and proposes the room's allowance and its influence per circuit, with
+the evidence. From 1.6.10 the data come from where they are kept longest:
+
+- Heating circuits (phase Tag/Absenken, target, status code): the VM's own
+  history, `GET /api/dashboard/v1/circuit-history` (5-minute channel rows and
+  the parameter journal, kept 30 days), read through the app's Ingress
+  credential as the administrator who pressed the button (an ordinary
+  dashboard session, read-only). Older days, or every day when the VM cannot
+  be read (an older VM release, refused, unreachable), from Home Assistant's
+  recorder history of the VM's climate entities, as in 1.6.9.
+- Room temperature: Home Assistant's long-term statistics (hourly mean, min
+  and max, kept indefinitely for sensors with `state_class: measurement`)
+  through the WebSocket command `recorder/statistics_during_period` for the
+  allowance, and the recorder history (every change, kept `purge_keep_days`,
+  10 days by default) for the heat-up response, where the finer resolution
+  matters. A sensor without long-term statistics falls back to the recorder
+  history for both, and the evidence says so.
+
+When nothing older is kept, the owner can record from now on instead: the
+room's own heating checks pause for the recording time (frost and sensor
+checks stay on), and at its end the same analysis runs over the recorded
+period.
 
 Learning sees what the room did, not what it should do: a room whose radiator
 fails would be learned as a cold room. That is why it is manual, visible and
 reviewable, and why a room that never reaches its target or hardly warms on a
 heating start carries a warning that needs an explicit "geprüft" to accept.
 
-Requests (LearningApi.allowed): GET /core/api/states (to find the circuits'
-climate entities) and GET /core/api/history/period/<start>?filter_entity_id=
-<room>[,<climate>...]&end_time=<end> for at most MAX_DAYS in CHUNK_S pieces
-of at most CHUNK_CAP bytes each. Nothing is written to Home Assistant here;
-the room page writes accepted values to the app's own options.
+Requests: Home Assistant (LearningApi.allowed) GET /core/api/states (to find
+the circuits' climate entities) and GET /core/api/history/period/<start>?
+filter_entity_id=<room>[,<climate>...]&end_time=<end> in CHUNK_S pieces of at
+most CHUNK_CAP bytes, newest first, stopping where the recorder has nothing
+more; one WebSocket connection for the statistics (ha_websocket.py); the VM
+(VmHistory) one GET of at most VM_CAP bytes. Nothing is written to Home
+Assistant or the VM here; the room page writes accepted values to the app's
+own options.
 """
 from bisect import bisect_right
 from datetime import datetime, timezone
+import http.client
 import json
 import math
 import os
 import re
+import ssl
 import stat
 import tempfile
 import threading
 import time
 from urllib.parse import quote
 
+import ha_websocket
 import house_rules as rules
 from house_monitor import ApiError, CoreApi, STATES_PATH
 
@@ -41,9 +62,27 @@ LEARNING_PATH = '/data/room_learning.json'
 LEARNING_SCHEMA = 'harg-room-learning/1'
 LEARNING_MAX_BYTES = 262144
 HISTORY_PATH = '/core/api/history/period/'
-MAX_DAYS = 30
-PERIODS = (3, 7, 14, 30)
+# Periods offered (days); 0 is "alles Verfügbare", up to ALL_DAYS.
+PERIODS = (3, 7, 14, 30, 90)
+ALL_DAYS = 365
+MAX_DAYS = ALL_DAYS
 RECORD_PERIODS = (3, 7, 14)
+# The VM keeps its circuit history 30 days (CHANNEL_HISTORY_RETENTION); one
+# request covers it. The recorder history (room changes, climate fallback) is
+# read for at most HA_HISTORY_DAYS, newest first, and stops after
+# EMPTY_STOP pieces in a row without any row (the recorder purged them).
+VM_DAYS = 30
+VM_PATH = '/api/dashboard/v1/circuit-history'
+VM_CAP = 2 * 1024 * 1024
+VM_TIMEOUT_S = 15
+HA_HISTORY_DAYS = 90
+FINE_DAYS = 30
+EMPTY_STOP = 2
+# Documented HKZustand codes (STATE-CODES): 1 Heizen is day; 2 Absenken
+# Rampe, 3 Absenken and 4 Tag/Nacht Abschaltung are setback, as the VM's
+# commissioned phase mapping selects them for the climate entity (review M1:
+# a morning 4 -> 1 is a heating start); others give no phase.
+PHASE_BY_CODE = {1: 'day', 2: 'setback', 3: 'setback', 4: 'setback'}
 CHUNK_S = 43200
 CHUNK_CAP = 4 * 1024 * 1024
 MAX_ROWS = 20000
@@ -135,6 +174,144 @@ def find_climates(states):
     return {name: entities[0] for name, entities in found.items() if len(entities) == 1}
 
 
+class VmError(Exception):
+    """Fixed category in args[0]: unsupported, refused, unreachable, response, no_identity."""
+
+
+VM_ERROR_TEXT = {
+    'unsupported': 'die VM bietet diese Abfrage noch nicht an (ältere VM-Version)',
+    'refused': 'die VM hat den Zugriff abgelehnt',
+    'unreachable': 'die VM war nicht erreichbar',
+    'response': 'die Antwort der VM war ungültig',
+    'no_identity': 'ohne Anmeldung über die Raumseite nicht abrufbar',
+    'not_configured': 'keine Verbindung zur VM eingerichtet',
+    'empty': 'die VM hat für diesen Zeitraum keine Heizkreisdaten mit Zieltemperatur',
+}
+INGRESS_USER = re.compile(r'[A-Za-z0-9_-]{1,128}')
+INGRESS_PREFIX = re.compile(r'/api/hassio_ingress/[A-Za-z0-9_-]{16,256}')
+
+
+class VmHistory:
+    """One read-only GET of the VM's circuit history, as the HA user who
+    started the learning (the Ingress credential the panel already uses: an
+    ordinary dashboard session). No other path, no body, no write."""
+
+    def __init__(self, settings, *, connection=None, context=None, timeout=VM_TIMEOUT_S):
+        self.settings = settings
+        self.connection = connection
+        self.context = context
+        self.timeout = timeout
+
+    def read(self, identity, start, end):
+        if (not isinstance(identity, tuple) or len(identity) != 2 or not isinstance(identity[0], str)
+                or not isinstance(identity[1], str) or not INGRESS_USER.fullmatch(identity[0])
+                or not INGRESS_PREFIX.fullmatch(identity[1].rstrip('/'))):
+            raise VmError('no_identity')
+        user, prefix = identity
+        start, end = int(math.floor(start)), int(math.ceil(end))
+        path = f'{VM_PATH}?from={start}&to={end}'
+        connection = None
+        try:
+            if self.connection is not None:
+                connection = self.connection(self.settings, self.timeout)
+            else:
+                import ingress_proxy
+                connection = ingress_proxy.upstream_connection(
+                    self.settings, self.context or ssl.create_default_context(), self.timeout)
+            connection.request('GET', path, headers={
+                'Host': self.settings.authority, 'Accept': 'application/json', 'Accept-Encoding': 'identity',
+                'Connection': 'close', 'X-Hargassner-Ingress': self.settings.token,
+                'X-Hargassner-User': user, 'X-Ingress-Path': prefix.rstrip('/')})
+            response = connection.getresponse()
+            if response.status == 404:
+                raise VmError('unsupported')
+            if response.status in (401, 403):
+                raise VmError('refused')
+            if response.status != 200:
+                raise VmError('unreachable')
+            if (response.getheader('Content-Encoding', 'identity') or 'identity').lower() != 'identity':
+                raise VmError('response')
+            raw = response.read(VM_CAP + 1)
+            if len(raw) > VM_CAP:
+                raise VmError('response')
+        except VmError:
+            raise
+        except (OSError, http.client.HTTPException, ValueError):
+            raise VmError('unreachable') from None
+        finally:
+            if connection is not None:
+                try:
+                    connection.close()
+                except OSError:
+                    pass
+        try:
+            return rules.strict_json(raw)
+        except (ValueError, UnicodeError, RecursionError):
+            raise VmError('response') from None
+
+
+def _int_or_none(value):
+    return value if type(value) is int and 0 <= value <= 65535 else None
+
+
+def _target_or_none(value):
+    return float(value) if rules.number(value) and 5 <= value <= 30 else None
+
+
+def parse_vm(document, start, end):
+    """{circuit: [(wall, phase, target, status)]} from the VM's answer.
+
+    The phase follows the documented state code (PHASE_BY_CODE); the target is the circuit's day or setback target (configured
+    target + room correction) at that time. A stored row ends after the VM's
+    gap rule; a gap becomes an unknown row. Raises VmError('response')."""
+    if (not isinstance(document, dict) or document.get('schemaVersion') != 1
+            or not isinstance(document.get('states'), list) or len(document['states']) > 20000
+            or not isinstance(document.get('targets'), dict)):
+        raise VmError('response')
+    gap = document.get('gapSeconds')
+    cadence = document.get('cadenceSeconds')
+    gap = gap if type(gap) is int and 0 < gap <= 3600 else 900
+    cadence = cadence if type(cadence) is int and 0 < cadence <= gap else 300
+    targets = {}
+    for circuit in rules.CIRCUITS:
+        series = document['targets'].get(circuit, [])
+        if not isinstance(series, list) or len(series) > 10000:
+            raise VmError('response')
+        rows = []
+        for row in series:
+            if (not isinstance(row, list) or len(row) != 3 or type(row[0]) is not int
+                    or not all(item is None or rules.number(item) for item in row[1:])):
+                raise VmError('response')
+            rows.append((row[0], _target_or_none(row[1]), _target_or_none(row[2])))
+        rows.sort(key=lambda row: row[0])
+        targets[circuit] = Series(rows)
+    result = {circuit: [] for circuit in rules.CIRCUITS}
+    previous = None
+    for row in document['states']:
+        if (not isinstance(row, list) or len(row) != 5 or type(row[0]) is not int
+                or not all(item is None or rules.number(item) for item in row[1:])):
+            raise VmError('response')
+        when = row[0]
+        if not start - gap <= when <= end:
+            continue
+        if previous is not None and when - previous > gap:
+            for circuit in rules.CIRCUITS:
+                result[circuit].append((previous + cadence, None, None, None))
+        previous = when
+        for index, circuit in ((1, 'hc1'), (3, 'hc2')):
+            code = _int_or_none(row[index])
+            phase = PHASE_BY_CODE.get(code)
+            known = targets[circuit].at(when)
+            target = None
+            if known is not None and phase is not None:
+                target = known[1] if phase == 'day' else known[2]
+            result[circuit].append((when, phase, target, code))
+    if previous is not None:
+        for circuit in rules.CIRCUITS:
+            result[circuit].append((previous + cadence, None, None, None))
+    return {circuit: rows for circuit, rows in result.items() if any(row[3] is not None for row in rows)}
+
+
 def _wall(row):
     for key in ('last_updated', 'last_changed'):
         value = rules.parse_time(row.get(key))
@@ -164,7 +341,7 @@ def parse_history(document, room, climates):
             if when is None:
                 continue
             state = row.get('state')
-            if entity == room:
+            if room is not None and entity == room:
                 try:
                     value = float(state) if isinstance(state, str) and len(state) <= 32 else None
                 except ValueError:
@@ -235,22 +412,44 @@ def kelvin(value, digits=1):
     return (('%.' + str(digits) + 'f') % value).replace('.', ',')
 
 
-def analyse(room_rows, circuit_rows, *, start, end, home, kinds, current, utc_offset=0):
+class HourSeries:
+    """Hourly statistics rows (hour start, mean, max): the value at t is its hour's mean."""
+
+    def __init__(self, rows):
+        self.rows = sorted(rows, key=lambda row: row[0])
+        self.times = [row[0] for row in self.rows]
+
+    def at(self, when):
+        index = bisect_right(self.times, when) - 1
+        if index < 0 or when - self.rows[index][0] >= 3600:
+            return None
+        return self.rows[index]
+
+
+def analyse(room_rows, circuit_rows, *, start, end, home, kinds, current, utc_offset=0, hourly=None):
     """The proposal for one room (pure).
 
-    room_rows: [(wall, value)]; circuit_rows: {circuit: [(wall, phase, target,
-    status)]}; home: the room's circuit; kinds: circuit -> radiator/floor;
-    current: (allowance, hc1, hc2). Returns a dict with 'enough', 'proposal'
-    (allowance, hc1, hc2), 'evidence', 'warnings' and 'facts'."""
+    room_rows: [(wall, value)] (every change, for the heat-up response and,
+    without hourly, the level); hourly: [(hour start, mean, max)] long-term
+    statistics for the day level, or None; circuit_rows: {circuit: [(wall,
+    phase, target, status)]}; home: the room's circuit; kinds: circuit ->
+    radiator/floor; current: (allowance, hc1, hc2). Returns a dict with
+    'enough', 'proposal' (allowance, hc1, hc2), 'evidence', 'warnings' and
+    'facts'."""
     room = Series([row for row in room_rows if start <= row[0] <= end or row[0] < start], ROOM_GAP_S)
+    hours = [row for row in hourly or () if start - 3600 < row[0] <= end]
+    level = HourSeries(hours) if hours else room
     circuits = {name: Series(rows) for name, rows in circuit_rows.items() if rows}
     evidence, warnings = [], []
-    facts = {'days': 0, 'events': {}, 'shared': {}, 'rates': {}, 'reached_days': 0, 'deficit': None}
+    facts = {'days': 0, 'events': {}, 'shared': {}, 'rates': {}, 'reached_days': 0, 'deficit': None,
+             'level': 'hourly' if hours else 'fine'}
     allowance, influence = current[0], {'hc1': current[1], 'hc2': current[2]}
-    first_data = next((when for when, value in sorted(room_rows) if value is not None and when >= start), None)
+    firsts = [when for when, value in room_rows if value is not None and when >= start]
+    firsts += [max(start, row[0]) for row in hours]
+    first_data = min(firsts) if firsts else None
     if first_data is None:
         return {'enough': False, 'proposal': None, 'facts': facts, 'warnings': [],
-                'evidence': ['Home Assistant hat für diesen Zeitraum keinen Verlauf des Raumsensors.']}
+                'evidence': ['Home Assistant hat für diesen Zeitraum keine Werte des Raumsensors.']}
 
     # -- day level against the home circuit's target
     days = {}
@@ -267,19 +466,20 @@ def analyse(room_rows, circuit_rows, *, start, end, home, kinds, current, utc_of
             if phase != 'day':
                 day_since = None
             last_phase = phase
-            value = room.at(when)
+            value = level.at(when)
             if (row is not None and phase == 'day' and row[2] is not None and row[3] in SUPPLYING_CODES
                     and day_since is not None and when - day_since >= SETTLE_S[kind]
                     and value is not None and value[1] is not None):
                 key = math.floor((when + utc_offset) / 86400)
-                days.setdefault(key, []).append((value[1], row[2]))
+                peak = value[2] if len(value) > 2 else value[1]
+                days.setdefault(key, []).append((value[1], row[2], peak))
             when += STEP_S
     used = {key: samples for key, samples in days.items() if len(samples) >= DAY_SAMPLES_MIN}
     facts['days'] = len(used)
     level_known = len(used) >= DAYS_MIN
     if level_known:
-        means = sorted((sum(r for r, _t in samples) / len(samples), sum(t for _r, t in samples) / len(samples),
-                        max(r for r, _t in samples)) for samples in used.values())
+        means = sorted((sum(r for r, _t, _p in samples) / len(samples), sum(t for _r, t, _p in samples) / len(samples),
+                        max(p for _r, _t, p in samples)) for samples in used.values())
         deficits = sorted(target - value for value, target, _peak in means)
         mean_room = sum(value for value, _t, _p in means) / len(means)
         mean_target = sum(target for _v, target, _p in means) / len(means)
@@ -288,7 +488,8 @@ def analyse(room_rows, circuit_rows, *, start, end, home, kinds, current, utc_of
         q80 = deficits[max(0, math.ceil(0.8 * len(deficits)) - 1)]
         allowance = float(min(rules.ROOM_SETTINGS['allowance_max'], max(0.0, ceil_half(q80 - 1.0))))
         evidence.append(f'Tagesmittel {degrees(mean_room)} bei Ziel {degrees(mean_target)} '
-                        f'({len(used)} Tage mit Tagbetrieb ausgewertet).')
+                        f'({len(used)} Tage mit Tagbetrieb ausgewertet'
+                        + (', aus Stundenmitteln' if hours else '') + ').')
         if facts['reached_days'] == 0:
             warnings.append(f'Der Raum erreicht das Ziel nie: an keinem der {len(used)} Tage näher als 1 °C. '
                             'Heizkörper, Ventil oder Stellantrieb prüfen, bevor Sie übernehmen: Anlernen würde '
@@ -388,33 +589,168 @@ def analyse(room_rows, circuit_rows, *, start, end, home, kinds, current, utc_of
             'evidence': evidence, 'warnings': warnings, 'facts': facts}
 
 
-def collect(api, room, climates, start, end, cancelled=lambda: False):
+def collect(api, room, climates, start, end, cancelled=lambda: False, *, newest_first=False, stop_empty=None):
     """Read the history in CHUNK_S pieces. Returns (room rows, circuit rows,
-    first wall with data or None) or raises ApiError('history') when too many
-    pieces fail; 'cancelled' when cancelled."""
-    entities = [room] + [climates[name] for name in rules.CIRCUITS if name in climates]
+    failed pieces) or raises ApiError('history') when too many pieces fail;
+    'cancelled' when cancelled. room None reads only the climates.
+
+    newest_first with stop_empty=N reads backwards from `end` and stops after
+    N readable pieces in a row without any row: the recorder keeps nothing
+    older (purge_keep_days)."""
+    entities = ([room] if room else []) + [climates[name] for name in rules.CIRCUITS if name in climates]
     room_rows, circuit_rows = [], {name: [] for name in climates}
-    pieces = failed = 0
-    when = start
+    pieces = failed = empty = 0
+    if not entities:
+        return room_rows, circuit_rows, 0
+    bounds, when = [], start
     while when < end:
+        bounds.append((when, min(end, when + CHUNK_S)))
+        when += CHUNK_S
+    if newest_first:
+        bounds.reverse()
+    for low, upper in bounds:
         if cancelled():
             raise ApiError('cancelled')
-        upper = min(end, when + CHUNK_S)
         pieces += 1
         try:
-            document = api.history(entities, when, upper)
+            document = api.history(entities, low, upper)
             rows, circuits = parse_history(document, room, climates)
             room_rows.extend(rows)
             for name, items in circuits.items():
                 circuit_rows[name].extend(items)
+            empty = 0 if rows or any(circuits.values()) else empty + 1
         except ApiError as error:
             if error.args and error.args[0] == 'not_allowed':
                 raise
             failed += 1
-        when = upper
+        if stop_empty is not None and empty >= stop_empty:
+            break
     if pieces and failed / pieces > MAX_FAILED_SHARE:
         raise ApiError('history')
     return room_rows, circuit_rows, failed
+
+
+def read_statistics(token, entity, start, end):
+    """Hourly long-term statistics of the room sensor (ha_websocket)."""
+    return ha_websocket.statistics_during_period(token, entity, start, end)
+
+
+def hourly_rows(statistics):
+    """[(wall, mean, max)] of plausible hours (°C, -30 to 60)."""
+    rows = []
+    for moment, mean, _low, high in statistics:
+        if mean is None or not -30.0 <= mean <= 60.0:
+            continue
+        peak = high if high is not None and -30.0 <= high <= 60.0 and high >= mean else mean
+        rows.append((moment, mean, peak))
+    return rows
+
+
+def _span_days(times):
+    """Whole days between the first and the last time (at least 1 when any)."""
+    times = [when for when in times if when is not None]
+    if not times:
+        return 0
+    return max(1, int(round((max(times) - min(times)) / 86400.0)))
+
+
+def _days(count):
+    return '1 Tag' if count == 1 else f'{count} Tage'
+
+
+def gather(api, room, climates, start, end, *, token=None, statistics=None, vm=None, cancelled=lambda: False):
+    """Read every source for one analysis. Returns a dict: room (fine rows),
+    hourly (rows or None), circuits ({circuit: rows}), failed (pieces) and
+    sources (German evidence lines naming each source and its resolution)."""
+    sources, failed = [], 0
+    # -- heating circuits: the VM first
+    circuits, vm_note, vm_low = None, None, end
+    vm_start = max(start, end - VM_DAYS * 86400)
+    if vm is None:
+        vm_note = 'not_configured'
+    else:
+        try:
+            circuits = parse_vm(vm(vm_start, end), vm_start, end)
+        except VmError as error:
+            vm_note = error.args[0] if error.args and error.args[0] in VM_ERROR_TEXT else 'unreachable'
+        if circuits is not None:
+            # The VM counts from its first row with a phase and a target; an
+            # answer without one (journal purged, new database) is not usable
+            # and Home Assistant stays the source (review H1/M2).
+            known = [row[0] for rows in circuits.values() for row in rows if row[2] is not None]
+            if known:
+                vm_low = min(known)
+            else:
+                circuits, vm_note = None, 'empty'
+    if cancelled():
+        raise ApiError('cancelled')
+    # -- room: long-term statistics
+    hourly, stats_note = None, None
+    if statistics is None or token is None:
+        stats_note = 'unavailable'
+    else:
+        try:
+            hourly = hourly_rows(statistics(token, room, start, end)) or None
+            stats_note = None if hourly else 'none'
+        except (ha_websocket.WebSocketError, OSError):
+            stats_note = 'unavailable'
+    if cancelled():
+        raise ApiError('cancelled')
+    # -- recorder history: the room's changes (and the climates without the VM)
+    fine_start = max(start, end - (FINE_DAYS if hourly else HA_HISTORY_DAYS) * 86400)
+    climate_set = climates if circuits is None else {}
+    room_rows, ha_circuits, failed = collect(api, room, climate_set, fine_start, end, cancelled,
+                                             newest_first=True, stop_empty=EMPTY_STOP)
+    # -- older circuit context from the recorder where the VM does not reach
+    older_low = max(start, end - HA_HISTORY_DAYS * 86400)
+    older_high = vm_low if circuits is not None else fine_start
+    if climates and older_low < older_high:
+        _rows, older, more = collect(api, None, climates, older_low, older_high, cancelled,
+                                     newest_first=True, stop_empty=EMPTY_STOP)
+        failed += more
+        for name, rows in older.items():
+            ha_circuits.setdefault(name, []).extend(rows)
+    merged = {}
+    for name in rules.CIRCUITS:
+        rows = list(ha_circuits.get(name, []))
+        if circuits is not None:
+            # VM rows win from their first known row; recorder rows only
+            # before it, ended there so none is held into the VM's part (M3).
+            rows = [row for row in rows if row[0] < vm_low]
+            if rows:
+                rows.append((vm_low, None, None, None))
+            rows += [row for row in circuits.get(name, []) if row[0] >= vm_low]
+        if rows:
+            merged[name] = rows
+    # -- evidence of the sources
+    fine_days = _span_days([when for when, value in room_rows if value is not None])
+    if hourly:
+        line = (f'Raumtemperatur: Langzeitstatistik von Home Assistant, stündlich, '
+                f'{_days(_span_days([row[0] for row in hourly]))} vorhanden')
+        line += (f'; feiner Verlauf (jede Änderung) {_days(fine_days)} für das Aufheizen.' if fine_days
+                 else '; kein feiner Verlauf für das Aufheizen.')
+    else:
+        reason = ('keine Langzeitstatistik in Home Assistant (dem Sensor fehlt wohl state_class: measurement)'
+                  if stats_note == 'none' else 'Langzeitstatistik von Home Assistant nicht lesbar')
+        line = (f'Raumtemperatur: {reason}; ersatzweise Verlauf von Home Assistant (jede Änderung), '
+                f'{_days(fine_days)}.' if fine_days else f'Raumtemperatur: {reason}; auch kein Verlauf.')
+    sources.append(line)
+    vm_days = _span_days([row[0] for rows in (circuits or {}).values() for row in rows if row[2] is not None])
+    ha_days = _span_days([row[0] for name, rows in ha_circuits.items() for row in rows
+                          if row[1] is not None and (circuits is None or row[0] < vm_low)])
+    if circuits is not None:
+        line = (f'Heizkreise: VM-Verlauf, alle 5 Minuten, {_days(vm_days)}' if vm_days
+                else 'Heizkreise: VM-Verlauf ohne Daten im Zeitraum')
+        if ha_days:
+            line += f'; davor Verlauf der Heizkreise in Home Assistant, {_days(ha_days)}'
+        sources.append(line + '.')
+    else:
+        line = f'Heizkreise: VM-Verlauf nicht verwendet ({VM_ERROR_TEXT[vm_note]}); '
+        line += (f'ersatzweise Verlauf der Heizkreise in Home Assistant, {_days(ha_days)}.' if ha_days
+                 else 'auch Home Assistant hat keinen Verlauf der Heizkreise.')
+        sources.append(line)
+    return {'room': room_rows, 'hourly': hourly, 'circuits': merged, 'failed': failed, 'sources': sources,
+            'vm': vm_note, 'statistics': stats_note}
 
 
 # ---------------------------------------------------------------------------
@@ -548,9 +884,14 @@ class RoomLearning:
     checks pause)."""
 
     def __init__(self, *, file=None, token_source=None, api_factory=LearningApi, clock=time.time,
-                 kinds=lambda: {}, utc_offset=lambda: 0, on_quiet=lambda rooms: None):
+                 kinds=lambda: {}, utc_offset=lambda: 0, on_quiet=lambda rooms: None,
+                 statistics=None, vm=None):
+        """statistics(token, entity, start, end) -> [(start, mean, min, max)]
+        (read_statistics in the app); vm: a VmHistory or None (no VM: the
+        circuits come from Home Assistant's recorder, as in 1.6.9)."""
         self.file = file
         self.token_source, self.api_factory = token_source, api_factory
+        self.statistics, self.vm = statistics, vm
         self.clock = clock
         self.kinds, self.utc_offset = kinds, utc_offset
         self.on_quiet = on_quiet
@@ -606,8 +947,10 @@ class RoomLearning:
                     if entry['state'] == 'recording' and now >= entry['end']]
 
     # -- actions
-    def start(self, entity, home, current, days=None, wait=20.0, period=None):
-        """Analyse the history now; returns (status, German message)."""
+    def start(self, entity, home, current, days=None, wait=20.0, period=None, identity=None):
+        """Analyse the history now; returns (status, German message).
+        identity: (HA user id, Ingress path) of the administrator who started
+        it, for the VM read; None reads no VM history."""
         with self.lock:
             if self.running is not None and not self.running[2].is_set():
                 return 409, 'Es wird gerade ein Raum angelernt. Bitte warten oder abbrechen.'
@@ -620,7 +963,7 @@ class RoomLearning:
         if period is None:
             span = (days or MAX_DAYS) * 86400
             period = (now - span, now)
-        thread = threading.Thread(target=self._run, args=(entity, home, current, period, cancel, done),
+        thread = threading.Thread(target=self._run, args=(entity, home, current, period, cancel, done, identity),
                                   name='room-learning', daemon=True)
         thread.start()
         if done.wait(wait):
@@ -632,23 +975,29 @@ class RoomLearning:
             return 200, 'Zu wenig Daten für einen Vorschlag.'
         return 202, 'Die Auswertung läuft noch. Die Seite zeigt das Ergebnis nach dem Neuladen.'
 
-    def _run(self, entity, home, current, period, cancel, done):
+    def _run(self, entity, home, current, period, cancel, done, identity=None):
         start, end = period
         try:
             token = self.token_source() if self.token_source else None
             states = self.api_factory(token, ()).states() if token else None
             climates = find_climates(states) if states is not None else {}
             api = self.api_factory(token, [entity] + list(climates.values()))
-            room_rows, circuit_rows, failed = collect(api, entity, climates, start, end, cancel.is_set)
-            result = analyse(room_rows, circuit_rows, start=start, end=end, home=home, kinds=self.kinds(),
-                             current=current, utc_offset=self.utc_offset())
-            evidence = list(result['evidence'])
-            missing = [name for name in rules.CIRCUITS if name not in climates]
+            vm = None
+            if self.vm is not None:
+                def vm(low, high):
+                    return self.vm.read(identity, low, high)
+            data = gather(api, entity, climates, start, end, token=token, statistics=self.statistics, vm=vm,
+                          cancelled=cancel.is_set)
+            result = analyse(data['room'], data['circuits'], start=start, end=end, home=home, kinds=self.kinds(),
+                             current=current, utc_offset=self.utc_offset(), hourly=data['hourly'])
+            evidence = list(result['evidence']) + data['sources']
+            missing = [name for name in rules.CIRCUITS if name not in data['circuits']]
             if missing:
-                evidence.append('Heizkreisdaten in Home Assistant nicht gefunden: '
+                evidence.append('Keine Heizkreisdaten für '
                                 + ', '.join('Heizkreis ' + name[-1] for name in missing) + '.')
-            if failed:
-                evidence.append(f'{failed} Abschnitte des Verlaufs waren nicht lesbar (Lücken).')
+            if data['failed']:
+                evidence.append(f'{data["failed"]} Abschnitte des Verlaufs von Home Assistant waren nicht '
+                                'lesbar (Lücken).')
             entry = {'state': 'proposal' if result['enough'] else 'insufficient', 'made': self.clock(),
                      'start': start, 'end': end, 'evidence': evidence[:12], 'warnings': result['warnings'][:6],
                      'proposal': list(result['proposal']) if result['proposal'] else None,

@@ -42,7 +42,9 @@ class MonitorProxyHandler(ProxyHandler):
             if route == LEARN_PATH:
                 if self.command != 'POST':
                     raise Rejected(405, 'Only POST.')
-                return self.save_rooms(target, route, user, prefix, self.server.house_learn)
+                learn = self.server.house_learn
+                return self.save_rooms(target, route, user, prefix, None if learn is None else (
+                    lambda user_, token, body: learn(user_, token, body, prefix=prefix)))
             if self.command != 'GET':
                 raise Rejected(405, 'Read-only status endpoint.')
             if target != route or self.headers.get_all('Transfer-Encoding') or self.headers.get_all('Expect'):
@@ -57,7 +59,7 @@ class MonitorProxyHandler(ProxyHandler):
                 return
             nonce = secrets.token_urlsafe(18)
             try:
-                body = self.server.house_page(user, nonce)
+                body = self.server.house_page(user, nonce, prefix=prefix)
             except Exception:
                 # Fixed text only; the house monitor never affects ingress.
                 self.server.diagnostics.emit('internal')
@@ -135,11 +137,14 @@ def start_house_monitor():
         return None
 
 
-def start_learning(house):
-    """Room learning (room_learning.py); None (no learning) on any failure."""
+def start_learning(house, upstream=None):
+    """Room learning (room_learning.py); None (no learning) on any failure.
+    upstream: the VM's ingress settings, for its circuit history (app 1.6.10)."""
     try:
         learner = room_learning.RoomLearning(file=room_learning.LearningFile(), token_source=default_token,
-                                             kinds=house.circuit_kinds, utc_offset=house.utc_offset)
+                                             kinds=house.circuit_kinds, utc_offset=house.utc_offset,
+                                             statistics=room_learning.read_statistics,
+                                             vm=room_learning.VmHistory(upstream) if upstream is not None else None)
         house.quiet_source = learner.quiet
         return learner
     except Exception:
@@ -164,7 +169,7 @@ def main():
             stage = 'monitor_state'
             monitor = Monitor(settings, token)
         house = start_house_monitor()
-        picker = RoomPicker(house, learning=start_learning(house)) if house is not None else None
+        picker = RoomPicker(house, learning=start_learning(house, settings.upstream)) if house is not None else None
         stage = 'ingress_listener'
         server = MonitorProxyServer(('0.0.0.0', 8099), settings.upstream, monitor.status if monitor else disabled_status,
                                     picker.page if picker else None, picker.save if picker else None,

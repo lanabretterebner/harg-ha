@@ -446,15 +446,25 @@ From 1.6.1 the room page adds, only while it is opened or saved:
   writes them back with only the room settings changed.
 
 From 1.6.9 **Raum anlernen** (see below) adds, only when an administrator
-presses it for one room:
+presses it for one room (sources from 1.6.10):
 
 - `GET /core/api/states` once, to find the VM's two heating-circuit climate
   entities (by the attributes the VM publishes, not by their names);
-- `GET /core/api/history/period/...` for that room's sensor and the two climate
-  entities only, in pieces of 12 hours (at most 60 pieces for 30 days, each at
-  most 4 MB and 5 seconds). Nothing is written to Home Assistant; the learning
-  state is kept in the app's own `/data/room_learning.json` (readable only by
-  the app).
+- one WebSocket connection with `recorder/statistics_during_period` for that
+  room's sensor only (hourly mean, min and max, in pieces of 10 days, at most
+  one year, 60 seconds in all);
+- `GET /core/api/history/period/...` for that room's sensor (and, where the
+  VM's history does not reach, the two climate entities) only, in pieces of
+  12 hours read newest first, stopping after two empty pieces, at most 90
+  days (each piece at most 4 MB and 5 seconds);
+- one `GET /api/dashboard/v1/circuit-history?from=...&to=...` to the VM (the
+  last 30 days, at most 2 MB, 15 seconds), sent like the panel's own requests
+  with the Ingress credential and the Home Assistant user id and Ingress path
+  of the administrator who pressed the button. The VM treats it as an
+  ordinary, read-only dashboard session.
+
+Nothing is written to Home Assistant or the VM; the learning state is kept in
+the app's own `/data/room_learning.json` (readable only by the app).
 
 The Supervisor lets every app read and change its own options with the token
 it already has, so 1.6.1 needs no new permission: `hassio_api` stays off and
@@ -736,23 +746,55 @@ to "nicht überwachen". The app never learns a room's usual level by itself
 fails. From 1.6.9 the owner can let it propose values for one room
 (**Raum anlernen**, below); nothing changes until the owner accepts.
 
-### Raum anlernen (app 1.6.9)
+### Raum anlernen (app 1.6.9, sources from 1.6.10)
 
 Every room saved on a heating circuit has a **Raum anlernen** part on the
 room page. Only a Home Assistant administrator can use it, and only for one
 room at a time; it never starts by itself.
 
-1. Choose the **Zeitraum** (the longest history Home Assistant holds up to
-   30 days, the default, or the last 3, 7, 14 or 30 days) and press **Raum
-   anlernen**. The app reads the room sensor's history and the history of the
-   two heating circuits (phase Tag/Absenken, target, status), which the VM
-   publishes to Home Assistant and its recorder keeps. Usually the result is
-   there within seconds; otherwise reload the page later.
+1. Choose the **Zeitraum** (**alles Verfügbare**, up to one year, the
+   default, or the last 3, 7, 14, 30 or 90 days) and press **Raum
+   anlernen**. The app reads (1.6.10):
+   - the two **heating circuits** (phase Tag/Absenken, target, status) from
+     the VM's own history: the state code every 5 minutes and the day and
+     setback targets (configured target plus room correction) from the
+     VM's parameter journal, both kept 30 days. Phase: state 1 (Heizen) is
+     day; 2 (Absenken Rampe), 3 (Absenken) and 4 (Tag/Nacht Abschaltung)
+     are setback, as the VM's own phase mapping selects them; any other
+     state counts as neither. Days older than 30, or every day when the VM
+     cannot give its history (a VM release older than the endpoint, access
+     refused, unreachable, or no target known in the period), come
+     from Home Assistant's recorder history of the VM's climate entities,
+     as far back as the recorder keeps them (at most 90 days);
+   - the **room temperature** from Home Assistant's long-term statistics
+     (hourly mean, minimum and maximum; Home Assistant keeps them
+     indefinitely for every sensor with `state_class: measurement`) for the
+     allowance, and from the recorder history (every change, by default 10
+     days) for the heat-up response, where the finer resolution matters. A
+     sensor without long-term statistics falls back to the recorder history
+     for both.
+
+   Only days with both the room and its circuit known are evaluated, so the
+   allowance reaches as far back as the circuit data (30 days from the VM,
+   more when Home Assistant keeps the climate entities longer); "vorhanden"
+   in the evidence counts the statistics read, the allowance line the days
+   evaluated. Usually the result is there within seconds; otherwise reload
+   the page later. **Abbrechen** takes effect after the statistics and VM
+   reads (at most about 75 seconds).
 2. The room page shows a **Vorschlag** with its evidence, for example:
    "darf 4 °C kühler sein, Einfluss Heizkreis 1 10 %, Heizkreis 2 0 % (bisher
-   0 °C, 100 %, 0 %)", "Tagesmittel 18,2 °C bei Ziel 23,0 °C (12 Tage mit
-   Tagbetrieb ausgewertet)", "Anstieg beim Aufheizen 0,4 K/h, HK2 (9
-   Aufheizvorgänge)".
+   0 °C, 100 %, 0 %)", "Tagesmittel 18,2 °C bei Ziel 23,0 °C (30 Tage mit
+   Tagbetrieb ausgewertet, aus Stundenmitteln)", "Anstieg beim Aufheizen 0,4
+   K/h, HK2 (9 Aufheizvorgänge)", and the sources: "Raumtemperatur:
+   Langzeitstatistik von Home Assistant, stündlich, 63 Tage vorhanden; feiner Verlauf
+   (jede Änderung) 10 Tage für das Aufheizen.", "Heizkreise: VM-Verlauf,
+   alle 5 Minuten, 30 Tage." When a source is missing the evidence says
+   which and why, for example "Raumtemperatur: keine Langzeitstatistik in
+   Home Assistant (dem Sensor fehlt wohl state_class: measurement);
+   ersatzweise Verlauf von Home Assistant (jede Änderung), 10 Tage." or
+   "Heizkreise: VM-Verlauf nicht verwendet (die VM bietet diese Abfrage noch
+   nicht an (ältere VM-Version)); ersatzweise Verlauf der Heizkreise in Home
+   Assistant, 10 Tage."
 3. Press **Übernehmen** to write the values to the settings (the monitoring
    uses them at once), or **Verwerfen**. Nothing changes without
    **Übernehmen**. Afterwards the room shows "Angelernt am ..." with the
@@ -787,8 +829,10 @@ days, or a new sensor) the page says so and offers **Ab jetzt aufzeichnen**
 for 3, 7 or 14 days. During the recording the room reports no heating problem
 of its own ("zu kalt", "wird nicht wärmer", "zu warm"); frost and sensor checks
 stay on and the room still counts for its circuit's checks. At the end of the
-recording the next opening of the room page analyses exactly that period (Home
-Assistant's recorder must keep it: by default it keeps 10 days). A recording
+recording the next opening of the room page analyses exactly that period
+(the VM keeps the circuits 30 days, the long-term statistics keep the room;
+the heat-up response needs Home Assistant's recorder, by default 10 days, so
+open the page within a few days of the end). A recording
 can be cancelled (**Aufzeichnung abbrechen**); a running analysis too
 (**Abbrechen**).
 
@@ -808,8 +852,9 @@ Heizkreis N den Raum" (a second circuit of 30 % or more). With a warning,
 sind gewollt". Check the radiator first. A proposal older than 7 days, or one
 for a room whose settings changed since, is refused: learn again.
 Only an administrator's visit to the room page starts the analysis of an
-ended recording; a 30-day history is read in at most 60 pieces of at most 4
-MB each, and a very busy climate entity can exceed that and leave gaps.
+ended recording (the VM history is then read as that administrator); the
+recorder history is read in pieces of 12 hours of at most 4 MB each, and a
+very busy climate entity can exceed that and leave gaps.
 
 The learning state (a running recording, a proposal, "angelernt am") is kept
 in `/data/room_learning.json` and survives an app restart; a room taken off a

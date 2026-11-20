@@ -3,13 +3,17 @@
 Used only to receive the adapter context: `auth` with the Supervisor token,
 one `mqtt/subscribe` on the context topic, and `ping`; and, from app 1.6.1,
 one short read-only `config/auth/list` connection that tells the room page
-whether its viewer is an administrator. Bounded: connect
+whether its viewer is an administrator; and, from app 1.6.10, one short
+read-only `recorder/statistics_during_period` connection for "Raum anlernen"
+(hourly long-term statistics of one room sensor). Bounded: connect
 timeout, message cap, fragment cap, pong deadline. No exception text is
 logged by callers; it can contain addresses.
 """
 import base64
+from datetime import datetime, timezone
 import hashlib
 import json
+import math
 import os
 import select
 import socket
@@ -406,6 +410,105 @@ def list_users(token, *, host='172.30.32.2', port=80, path='/core/websocket',
         if not isinstance(users, list):
             raise WebSocketError('protocol')
         return users
+    finally:
+        socket_.close()
+
+
+STATISTICS_COMMAND = 'recorder/statistics_during_period'
+# One answer per piece stays well inside MESSAGE_CAP: 10 days are 240 hourly
+# rows of about 120 bytes each.
+STATISTICS_PIECE_S = 10 * 86400
+STATISTICS_MAX_ROWS = 24 * 400
+STATISTICS_DEADLINE_S = 60
+
+
+def _epoch(value):
+    """A statistics row's start: milliseconds (HA 2023.3 and later) or ISO text."""
+    if type(value) in (int, float) and math.isfinite(value) and 0 < value < 1e14:
+        return value / 1000.0
+    if isinstance(value, str) and len(value) <= 40:
+        try:
+            moment = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        except ValueError:
+            return None
+        return moment.timestamp() if moment.tzinfo is not None else None
+    return None
+
+
+def _figure(value):
+    return float(value) if type(value) in (int, float) and math.isfinite(value) else None
+
+
+def statistics_during_period(token, statistic_id, start, end, *, host='172.30.32.2', port=80, path='/core/websocket',
+                             connect=WebSocket.connect, monotonic=time.monotonic, piece_s=STATISTICS_PIECE_S):
+    """Hourly mean/min/max of one statistic over [start, end) (epoch seconds).
+
+    One connection: auth, one `recorder/statistics_during_period` per piece,
+    close. Temperatures are asked in °C. Returns [(start, mean, min, max)] in
+    time order, empty when Home Assistant keeps no long-term statistics for
+    the sensor; raises WebSocketError with a fixed category on any failure.
+    """
+    socket_ = connect(host, port, path)
+    try:
+        deadline = monotonic() + STATISTICS_DEADLINE_S
+
+        def expect():
+            while True:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise WebSocketError('timeout')
+                text = socket_.receive(remaining)
+                if text is None:
+                    continue
+                try:
+                    message = strict_loads(text)
+                except (ValueError, RecursionError):
+                    raise WebSocketError('protocol') from None
+                if not isinstance(message, dict):
+                    raise WebSocketError('protocol')
+                return message
+        if expect().get('type') != 'auth_required':
+            raise WebSocketError('protocol')
+        socket_.send_json({'type': 'auth', 'access_token': token})
+        reply = expect()
+        if reply.get('type') == 'auth_invalid':
+            raise WebSocketError('auth_failed')
+        if reply.get('type') != 'auth_ok':
+            raise WebSocketError('protocol')
+        rows, number, when = {}, 0, start
+        while when < end:
+            upper = min(end, when + piece_s)
+            number += 1
+            socket_.send_json({'id': number, 'type': STATISTICS_COMMAND,
+                               'start_time': datetime.fromtimestamp(when, timezone.utc).isoformat(),
+                               'end_time': datetime.fromtimestamp(upper, timezone.utc).isoformat(),
+                               'statistic_ids': [statistic_id], 'period': 'hour',
+                               'types': ['mean', 'min', 'max'], 'units': {'temperature': '°C'}})
+            while True:
+                reply = expect()
+                if reply.get('id') == number and reply.get('type') == 'result':
+                    break
+                if 'id' in reply:
+                    raise WebSocketError('protocol')
+            if reply.get('success') is not True:
+                raise WebSocketError('refused')
+            result = reply.get('result')
+            if not isinstance(result, dict):
+                raise WebSocketError('protocol')
+            series = result.get(statistic_id, [])
+            if not isinstance(series, list):
+                raise WebSocketError('protocol')
+            for row in series:
+                if not isinstance(row, dict):
+                    continue
+                moment = _epoch(row.get('start'))
+                if moment is None or not when - 3600 <= moment < upper:
+                    continue
+                rows[moment] = (moment, _figure(row.get('mean')), _figure(row.get('min')), _figure(row.get('max')))
+                if len(rows) > STATISTICS_MAX_ROWS:
+                    raise WebSocketError('too_large')
+            when = upper
+        return [rows[moment] for moment in sorted(rows)]
     finally:
         socket_.close()
 

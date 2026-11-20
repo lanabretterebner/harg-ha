@@ -83,8 +83,8 @@ BODY_KEYS = frozenset(('revision', 'modus', 'heizkreis_1_art', 'heizkreis_2_art'
 ROW_KEYS = frozenset(('entity_id', 'gruppe', 'kuehler', 'einfluss_hk1', 'einfluss_hk2', 'ofen', 'frost'))
 LEARN_KEYS = frozenset(('aktion', 'entity_id', 'tage', 'geprueft', 'revision'))
 LEARN_ACTIONS = ('anlernen', 'aufzeichnen', 'abbrechen', 'verwerfen', 'uebernehmen', 'zuruecksetzen')
-LEARN_PERIOD_TEXT = ((0, 'längster verfügbarer Verlauf (bis 30 Tage)'), (3, 'letzte 3 Tage'), (7, 'letzte 7 Tage'),
-                     (14, 'letzte 14 Tage'), (30, 'letzte 30 Tage'))
+LEARN_PERIOD_TEXT = ((0, 'alles Verfügbare (bis 1 Jahr)'), (3, 'letzte 3 Tage'), (7, 'letzte 7 Tage'),
+                     (14, 'letzte 14 Tage'), (30, 'letzte 30 Tage'), (90, 'letzte 90 Tage'))
 REVISION_PATTERN = re.compile(r'[0-9a-f]{64}')
 LOG_CATEGORIES = frozenset(('saved', 'save_refused', 'save_unconfirmed', 'admin_lookup_failed',
                             'options_unreadable', 'areas_unavailable', 'learning'))
@@ -1037,7 +1037,7 @@ class RoomPicker:
             self.area_cache = (now, areas)
             return areas
 
-    def page(self, user, nonce):
+    def page(self, user, nonce, prefix=None):
         kind, name = self.admin.lookup(user)
         api = self._api()
         stored = self._stored(api)
@@ -1048,20 +1048,21 @@ class RoomPicker:
         if self.learning is not None and stored is not None:
             if kind == 'admin':
                 # Writes and history reads only on an administrator's visit.
-                self._learning_upkeep(stored)
+                self._learning_upkeep(stored, (user, prefix) if prefix else None)
             learning_view = self.learning.view
         return render_picker(self.monitor.status(), rows, areas, stored, viewer, nonce,
                              zone=self.monitor.zone, zones=self.monitor.zones, running=self.monitor.options,
                              learning_view=learning_view)
 
-    def _learning_upkeep(self, stored):
+    def _learning_upkeep(self, stored, identity=None):
         """Forget rooms no longer on a circuit; analyse a recording that ended."""
         groups = {e: g for e, g in selection_of(stored)[0].items() if g != 'weitere'}
         self.learning.prune(set(groups))
         values = room_values(stored)
         for entity, entry in self.learning.due():
             home = 'hc1' if groups.get(entity) == 'heizkreis_1' else 'hc2'
-            self.learning.start(entity, home, values[entity], wait=0, period=(entry['start'], entry['end']))
+            self.learning.start(entity, home, values[entity], wait=0, period=(entry['start'], entry['end']),
+                                identity=identity)
             break
 
     def save(self, user, token, raw):
@@ -1142,16 +1143,17 @@ class RoomPicker:
         return 200, {'ok': True, 'message': message, 'revision': revision(confirmed)}
 
     # -- room learning (app 1.6.9)
-    def learn(self, user, token, raw):
-        """One learning action. Return (HTTP status, {'ok', 'message'}). Never raises for bad input."""
+    def learn(self, user, token, raw, prefix=None):
+        """One learning action. Return (HTTP status, {'ok', 'message'}). Never raises for bad input.
+        prefix: the Ingress path of the request (the VM history is read as this user)."""
         if not self.save_lock.acquire(blocking=False):
             return 409, {'ok': False, 'message': 'Es wird gerade gespeichert. Bitte kurz warten.'}
         try:
-            return self._learn(user, token, raw)
+            return self._learn(user, token, raw, prefix)
         finally:
             self.save_lock.release()
 
-    def _learn(self, user, token, raw):
+    def _learn(self, user, token, raw, prefix=None):
         def refuse(status, message, category='learning'):
             self._log(category)
             return status, {'ok': False, 'message': message}
@@ -1194,7 +1196,7 @@ class RoomPicker:
             if days not in (0,) + learning.PERIODS:
                 return refuse(400, 'Ungültiger Zeitraum. Es wurde nichts geändert.')
             status, message = self.learning.start(entity, home, current, days=days or learning.MAX_DAYS,
-                                                  wait=self.learn_wait)
+                                                  wait=self.learn_wait, identity=(user, prefix) if prefix else None)
             return status, {'ok': status in (200, 202), 'message': message}
         if action == 'aufzeichnen':
             if days not in learning.RECORD_PERIODS:

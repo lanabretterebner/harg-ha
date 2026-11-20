@@ -93,6 +93,11 @@ both circuits). **Raum anlernen** proposes these values from Home
 Assistant's history, with its evidence; nothing applies before the owner
 accepts (DOCS.md "Raum anlernen").
 
+App 1.6.10: **Raum anlernen** reads the heating circuits from the VM's own
+30-day history and the room from Home Assistant's long-term statistics
+(hourly, kept indefinitely), with periods up to 90 days or everything
+available; the evidence names each source and its resolution.
+
 App 1.6.6: the room checks continue after an app restart (state saved in the
 app's `/data`), so a lasting room notice is neither ended by an app update,
 an app restart or a host reboot nor reported again days later (DOCS.md "Room checks

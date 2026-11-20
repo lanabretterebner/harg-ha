@@ -1,5 +1,7 @@
 """Room learning (app 1.6.9): owner-started, from Home Assistant's history,
-recording only as a fallback, nothing applied without acceptance.
+recording only as a fallback, nothing applied without acceptance. These
+fixtures run without the VM and the long-term statistics, the 1.6.10
+fallback path (test_room_learning_sources.py covers the sources).
 
 Synthetic history fixtures: a normal room, a cold room heated by sun and a
 neighbour, a room on both circuits and a failing radiator, plus short and
@@ -258,7 +260,7 @@ class AnalysisTests(unittest.TestCase):
         history = History(normal_room, 14, gaps=((DAY0 - 99 * 86400, DAY0 + 99 * 86400),))
         result, _failed = analyse(history)
         self.assertFalse(result['enough'])
-        self.assertIn('keinen Verlauf', result['evidence'][0])
+        self.assertIn('keine Werte des Raumsensors', result['evidence'][0])
 
     def test_gaps_reduce_the_days_used(self):
         history = History(normal_room, 7)
@@ -363,11 +365,16 @@ class LearningFlowTests(unittest.TestCase):
         self.assertIn('data-aktion="uebernehmen"', page)
         self.assertNotRegex(page, '[‐-―]')
 
-    def test_default_period_is_the_longest_up_to_30_days(self):
+    def test_default_period_is_everything_available(self):
+        # 1.6.10: "alles Verfügbare" (up to a year). Without the VM and the
+        # statistics the recorder is read newest first and only as far as it
+        # keeps data: 9 days of room rows, climates a day longer, then two
+        # empty pieces.
         world = LearningWorld(normal_room, days=9)           # the recorder holds 9 days
         status, _document = world.act('anlernen', days=0)
         self.assertEqual(status, 200)
-        self.assertEqual(len(world.history.calls), 60)
+        self.assertEqual(len(world.history.calls), 22)
+        self.assertEqual(world.history.calls[0][2], world.wallclock.wall)
         entry, _learned, _running = world.learning.view(ROOM)
         self.assertEqual(entry['state'], 'proposal')
         self.assertIn('(9 Tage', entry['evidence'][0])

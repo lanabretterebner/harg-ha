@@ -11,7 +11,7 @@ import json
 import math
 import re
 
-APP_VERSION = '1.6.9'
+APP_VERSION = '1.6.10'
 REPORT_SCHEMA = 'harg-house-report/1'
 CONTEXT_SCHEMA_PREFIX = 'harg-house-context/'
 # Context major 2 has the keys of 1; an adapter sends it only to an app that

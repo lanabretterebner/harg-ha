@@ -228,7 +228,7 @@ assertions plus page/console/request errors. It emits a structured result.
 open the HTML fixtures manually. These synthetic checks contact no live HA or
 controller and do not establish installed-native rendering or physical heating
 response. See [browser checks](tests/README.md).
-Frontend 1.4.15 and app 1.6.9 are published as independent components. Installation and
+Frontend 1.4.15 and app 1.6.10 are published as independent components. Installation and
 served-byte acceptance are separate from source checks; consult the installed
 version in HACS and Supervisor. Existing tags and assets remain immutable.
 The app is updated through Supervisor; HACS updates only the browser resource.
@@ -250,4 +250,5 @@ App 1.6.6 keeps the room checks across an app restart: their state is saved in t
 
 App 1.6.8 replaces the room page's "darf kühler sein" checkbox with a per-room choice (normal, 2, 4 or 6 °C cooler, or frost and sensor only); the "zu kalt" notice names the allowed temperature with a VM that reads it (context major 2), and app and VM may be updated in either order (the VM side is live since 2026-11-19). Update the Supervisor app; HACS frontend 1.4.15 is unchanged.
 App 1.6.9 replaces the fixed per-room choice with free values: an allowance of 0 to 10 °C in 0.5 steps and an influence of 0 to 100 % per heating circuit (a room can be on both circuits; a real circuit failure is still found through the strongly heated rooms), and adds **Raum anlernen**, which proposes these values from Home Assistant's history with its evidence and applies nothing before the owner accepts. 1.6.8 settings are taken over unchanged; the VM needs no update. Update the Supervisor app; HACS frontend 1.4.15 is unchanged.
+App 1.6.10 lets **Raum anlernen** read the heating circuits from the VM's own 30-day history (read-only VM endpoint `circuit-history`, live since 2026-11-19; with an older VM it falls back to Home Assistant's history and says so) and the room temperature from Home Assistant's long-term statistics (hourly, kept indefinitely), with periods up to 90 days or everything available. Update the Supervisor app; HACS frontend 1.4.15 is unchanged.
 App 1.6.7 holds the VM status check's clock-skew finding until the report is clearly inside the 5 s tolerance (half of it, or 5 minutes within it), so a clock hovering at the limit gives one notification and one recovery instead of flapping at every poll. Update the Supervisor app; frontend 1.4.15 is unchanged.
