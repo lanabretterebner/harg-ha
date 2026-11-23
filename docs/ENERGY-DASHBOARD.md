@@ -19,7 +19,8 @@ Your HA may show other entity ids if names were already taken: check
 ## Add the heating to the Energy dashboard
 
 1. Open **Settings → Dashboards → Energy** (or the Energy panel and its
-   configuration button).
+   configuration button). From HA 2026.11 the energy settings have the tabs
+   **Electricity**, **Gas** and **Water**; open **Gas**.
 2. Under **Gas consumption**, choose **Add gas source** and select
    **Pelletenergie (Schätzung)**. HA accepts energy sensors in kWh as a gas
    source; the pellet boiler then appears like a gas heating.

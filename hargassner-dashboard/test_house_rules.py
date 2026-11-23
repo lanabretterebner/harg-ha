@@ -382,6 +382,72 @@ class FloorDailyProgrammeTests(unittest.TestCase):
         self.assertFalse(seen[(2, 23 * 60 - 1)] & {'circuit_cold'})
 
 
+
+class DayPhaseDwellTests(unittest.TestCase):
+    """Owner decisions for app 1.6.13: an active Heizkreis zu kalt holds overnight
+    also when setback switches the circuit off; the 3 h dwell towards a new one
+    adds up over the day phases of one local day (each phase keeps its settle)."""
+
+    def run_programme(self, h, name, phases, days):
+        """Minute by minute from 00:00 with the given day phases; {(day, minute): codes}."""
+        seen = {}
+        for day_ in range(days):
+            for minute in range(24 * 60):
+                phase, target = ('day', 21.0) if any(a <= minute < b for a, b in phases) else ('setback', 18.0)
+                if h.context['circuits'][name]['phase'] != phase:
+                    h.set_circuit(name, phase=phase, target=target)
+                h.step()
+                seen[(day_, minute)] = set(h.codes())
+        return seen
+
+    @staticmethod
+    def first(seen):
+        keys = [key for key, codes in seen.items() if 'circuit_cold' in codes]
+        return min(keys) if keys else None
+
+    def harness(self, options, name):
+        h = Harness(options, local_minute=0, values={A: 17.0, B: 17.0})     # 4 K below the day target
+        h.set_circuit(name, phase='setback', target=18.0, day_target=21.0)
+        return h
+
+    def test_radiator_dwell_adds_up_over_two_short_day_phases(self):
+        # 06:00-09:30 (settle to 08:00, 1.5 h judged) and 15:00-19:00 (settle to
+        # 17:00): 1.5 h + 1.5 h = 3 h at about 18:30. Before, neither phase alone
+        # was long enough (5 h) and it was never raised.
+        first = self.first(self.run_programme(self.harness(hc1(A, B), 'hc1'), 'hc1',
+                                              ((6 * 60, 9 * 60 + 30), (15 * 60, 19 * 60)), 1))
+        self.assertIsNotNone(first)
+        self.assertTrue(18 * 60 + 25 <= first[1] <= 18 * 60 + 35, first)
+
+    def test_underfloor_dwell_adds_up_over_two_short_day_phases(self):
+        # 06:00-12:00 (settle 4 h, 2 h judged) and 15:00-21:00 (settle to 19:00): 3 h at 20:00.
+        first = self.first(self.run_programme(self.harness(hc2(A, B), 'hc2'), 'hc2',
+                                              ((6 * 60, 12 * 60), (15 * 60, 21 * 60)), 1))
+        self.assertIsNotNone(first)
+        self.assertTrue(19 * 60 + 55 <= first[1] <= 20 * 60 + 5, first)
+
+    def test_dwell_does_not_carry_into_the_next_day(self):
+        # 1.5 h judged a day: three days never reach 3 h (reset at local midnight).
+        seen = self.run_programme(self.harness(hc1(A, B), 'hc1'), 'hc1', ((6 * 60, 9 * 60 + 30),), 3)
+        self.assertIsNone(self.first(seen))
+
+    def test_radiator_fault_holds_when_setback_switches_the_circuit_off(self):
+        h = Harness(hc1(A, B), values={A: 17.5, B: 17.8})
+        self.assertIsNotNone(h.first('circuit_cold', 600))
+        for status in (4, 0):                   # heating limit, inactive
+            h.set_circuit('hc1', phase='setback', target=18.0, status=status)
+            for minute in range(8 * 60):
+                h.step()
+                self.assertTrue(h.has('circuit_cold'), (status, minute))
+            h.set_circuit('hc1', phase='day', target=21.0, status=1)
+            h.run(SETTLE['radiator'] + 10)
+            self.assertTrue(h.has('circuit_cold'), status)   # still 3 K below: the day phase keeps it
+        # Switched off in a day phase the rule does not apply: it ends.
+        h.set_circuit('hc1', status=4)
+        h.step()
+        self.assertFalse(h.has('circuit_cold'))
+
+
 WINDOW = {'radiator': 60, 'floor': 360}
 
 

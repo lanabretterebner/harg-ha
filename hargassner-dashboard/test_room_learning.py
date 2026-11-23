@@ -185,9 +185,9 @@ class AnalysisTests(unittest.TestCase):
         self.assertEqual(result['proposal'], (0.0, 100, 0))
         self.assertEqual(result['warnings'], [])
         self.assertGreaterEqual(result['facts']['events']['hc1'], 12)
-        self.assertRegex(result['evidence'][0], r'^Tagesmittel 2[01],[0-9] °C bei Ziel 21,0 °C \(14 Tage')
+        self.assertRegex(result['evidence'][0], r'^Das Tagesmittel liegt bei 2[01],[0-9] °C, das Ziel bei 21,0 °C \(14 Tage')
         # The rise between the 15-min medians at the start and the end of the 2 h window.
-        self.assertTrue(any(re.match(r'Anstieg beim Aufheizen 0,[89] K/h, HK1 \(14 Aufheizvorgänge\)', line)
+        self.assertTrue(any(re.match(r'Beim Aufheizen durch Heizkreis 1 steigt die Raumtemperatur um 0,[89] K/h \(14 Aufheizvorgänge\)', line)
                             for line in result['evidence']), result['evidence'])
 
     def test_day_level_settles_again_after_a_target_raise(self):
@@ -224,7 +224,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(55 <= first <= 75, first)
         self.assertTrue(40 <= second <= 55, second)
         self.assertGreater(first, second)
-        self.assertTrue(any(re.match(r'Anstieg beim Aufheizen 0,[34] K/h, HK2', line) for line in result['evidence']))
+        self.assertTrue(any(re.match(r'Beim Aufheizen durch Heizkreis 2 steigt die Raumtemperatur um 0,[34] K/h', line) for line in result['evidence']))
         # Heizkreis 1 drops from 100 % below the strong 80 %: the owner is warned.
         self.assertEqual(len(result['warnings']), 1, result['warnings'])
         self.assertIn('sinkt unter 80 %', result['warnings'][0])
@@ -261,7 +261,7 @@ class AnalysisTests(unittest.TestCase):
         self.assertIn('Der Raum erreicht das Ziel nie', text)
         self.assertIn('Heizkörper', text)
         self.assertIn('kaum wärmer', text)
-        self.assertRegex(result['evidence'][0], r'^Tagesmittel 16,[01] °C bei Ziel 22,0 °C')
+        self.assertRegex(result['evidence'][0], r'^Das Tagesmittel liegt bei 16,[01] °C, das Ziel bei 22,0 °C')
 
     def test_short_history_is_too_little(self):
         result, _failed = analyse(History(normal_room, 2))
@@ -402,7 +402,7 @@ class LearningFlowTests(unittest.TestCase):
         self.assertEqual(world.posted, [])
         status, document = world.act('uebernehmen', checked=True)
         self.assertEqual((status, document['ok']), (200, True), document)
-        self.assertTrue(document['message'].startswith('Vorschlag übernommen.'))
+        self.assertTrue(document['message'].startswith('Der Vorschlag ist übernommen.'))
         options = r.parse_house_options(world.posted[-1])
         self.assertEqual((options.allowance(ROOM), options.influence(ROOM, 'hc1'), options.influence(ROOM, 'hc2')),
                          tuple(proposal))
@@ -484,7 +484,7 @@ class LearningFlowTests(unittest.TestCase):
         world = LearningWorld(normal_room, days=2)
         status, document = world.act('anlernen', days=0)
         self.assertEqual(status, 200)
-        self.assertIn('Zu wenig Daten', document['message'])
+        self.assertIn('zu wenige Daten', document['message'])
         page = world.page()
         self.assertIn('<strong>Zu wenig Daten</strong>', page)
         self.assertIn('Ab jetzt aufzeichnen', page)

@@ -88,7 +88,7 @@ class WireTests(unittest.TestCase):
         first, second = self.http.requests
         self.assertEqual(first[:2], ('POST', '/core/api/services/persistent_notification/create'))
         self.assertEqual(first[2]['Authorization'], 'Bearer ' + SUPERVISOR_TOKEN)
-        payload = json.loads(first[3]); self.assertEqual(payload['notification_id'], 'harg_health_heartbeat'); self.assertIn('keinen Heizungsausfall', payload['message']); self.assertNotIn(event()['event_id'], payload['message']); self.assertIn('Prüfe', payload['message'])
+        payload = json.loads(first[3]); self.assertEqual(payload['notification_id'], 'harg_health_heartbeat'); self.assertIn('Ein Ausfall der Heizung ist damit nicht belegt', payload['message']); self.assertNotIn(event()['event_id'], payload['message']); self.assertIn('Prüfen, ob die VM', payload['message'])
         self.assertEqual(first[3], second[3]); self.assertNotIn(TOKEN, first[3].decode())
     def notification(self, **request):
         original = http.client.HTTPConnection
@@ -166,7 +166,8 @@ class StatusWireTests(unittest.TestCase):
         for secret in [INGRESS, TOKEN, SUPERVISOR_TOKEN, self.settings.host, 'synthetic-nonadmin']: self.assertNotIn(secret, body.decode())
     def test_unauthenticated_wrong_peer_query_and_mutation_refused(self):
         self.assertEqual(self.request(identity=False)[0], 400)
-        with patch.object(ingress_proxy, 'SUPERVISOR_IP', '172.30.32.2'): self.assertEqual(self.request()[0], 403)
+        # Another peer is closed before it takes a slot (app 1.6.13, security audit 2026-11-23).
+        with patch.object(ingress_proxy, 'SUPERVISOR_IP', '172.30.32.2'), self.assertRaises((http.client.RemoteDisconnected, ConnectionError)): self.request()
         self.assertEqual(self.request('POST')[0], 405); self.assertEqual(self.request(path='/api/local-monitor/status?x=1')[0], 400)
 
 

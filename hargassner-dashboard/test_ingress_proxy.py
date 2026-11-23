@@ -79,7 +79,7 @@ class ValidationTests(unittest.TestCase):
 
     def test_panel_access_and_version_metadata(self):
         config = Path(__file__).with_name("config.yaml").read_text()
-        self.assertIn('version: "1.6.12"', config)
+        self.assertIn('version: "1.6.13"', config)
         self.assertIn("panel_admin: false", config)
         self.assertIn('upstream_connect_host: "str?"', config)
         self.assertNotIn("ports:", config)
@@ -237,8 +237,14 @@ class HTTPSProxyTests(unittest.TestCase):
     def test_unauthenticated_or_untrusted_peer_never_reaches_upstream(self):
         self.assertEqual(self.request(identity=False)[0], 400)
         with patch.object(proxy, "SUPERVISOR_IP", "172.30.32.2"):
-            self.assertEqual(self.request(extra=(("X-Forwarded-For", "172.30.32.2"),))[0], 403)
+            # Another peer is closed before it takes a slot or a thread
+            # (security audit 2026-11-23), whatever it claims in its headers.
+            with self.assertRaises((http.client.RemoteDisconnected, ConnectionError)):
+                self.request(extra=(("X-Forwarded-For", "172.30.32.2"),))
+            self.assertFalse(self.server.verify_request(None, ("127.0.0.1", 1)))
+            self.assertTrue(self.server.verify_request(None, ("172.30.32.2", 1)))
         self.assertEqual(self.upstream.requests, [])
+        self.assertEqual(self.request()[0], 200)  # The Supervisor's slots were all left free.
 
     def test_ambiguous_and_oversized_requests_rejected(self):
         for extra, expected in (
@@ -269,7 +275,7 @@ class HTTPSProxyTests(unittest.TestCase):
                 response.begin()
                 body = response.read()
                 client.close()
-                self.assertEqual((response.status, body), (400, "Ungültiger Anfragepfad.\n".encode()))
+                self.assertEqual((response.status, body), (400, "Der Pfad der Anfrage ist ungültig.\n".encode()))
         self.assertEqual(self.upstream.requests, [])
 
     def test_upstream_redirect_is_not_followed_or_sent_to_browser(self):
@@ -312,10 +318,10 @@ class HTTPSProxyTests(unittest.TestCase):
             status, headers, body = self.request()
         self.assertEqual(status, 502)
         self.assertEqual(headers["Content-Type"], "text/plain; charset=utf-8")
-        self.assertEqual(body.decode("utf-8"), "Keine sichere Verbindung zum Dashboard der VM. "
-                                               "Bitte prüfen, ob die VM läuft und erreichbar ist.\n")
+        self.assertEqual(body.decode("utf-8"), "Die App erreicht das Dashboard auf der VM nicht über eine sichere Verbindung. "
+                         "Prüfen, ob die VM läuft und im Netzwerk erreichbar ist.\n")
         status, _headers, body = self.request(identity=False, extra=(("X-Remote-User-Id", "bad.user"), ("X-Ingress-Path", PREFIX)))
-        self.assertEqual((status, body.decode("utf-8")), (403, "Bitte in Home Assistant anmelden.\n"))
+        self.assertEqual((status, body.decode("utf-8")), (403, "Die App braucht einen in Home Assistant angemeldeten Benutzer.\n"))
         source = Path(proxy.__file__).read_text(encoding="utf-8")
         for message in re.findall(r'Rejected\(\d+, "([^"]+)"\)', source):
             self.assertNotRegex(message, r"\b(?:the|is|required|request|response|invalid)\b", message)

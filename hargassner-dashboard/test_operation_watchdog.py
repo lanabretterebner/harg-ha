@@ -78,16 +78,16 @@ class WatchdogTests(unittest.TestCase):
         self.assertEqual(self.v.document()['state'], 'Normal')
         self.advance(LEASE)
         self.assertEqual(self.v.document()['state'], 'Störung')
-        self.assertIn('Heizungszustand unbekannt', self.v.document()['summary'])
+        self.assertIn('Zustand der Heizung unbekannt', self.v.document()['summary'])
 
     def test_vm_outage_text_says_what_to_do(self):
         """Alert text audit 2026-11-19 (unreleased): the outage Störung names the next step."""
         self.assertTrue(self.report())
         self.advance(LEASE)
         document = self.v.document()
-        self.assertEqual(document['summary'], 'VM nicht erreichbar oder keine aktuellen Betriebsdaten. '
-                                              'Heizungszustand unbekannt. Prüfen, ob die VM läuft und im '
-                                              'Netzwerk erreichbar ist.')
+        self.assertEqual(document['summary'], 'Die VM ist nicht erreichbar oder sendet keine aktuellen '
+                                              'Betriebsdaten, deshalb ist der Zustand der Heizung unbekannt. '
+                                              'Prüfen, ob die VM läuft und im Netzwerk erreichbar ist.')
         self.assertEqual(document['problems'][0]['text'], document['summary'])
 
     def test_retained_normal_never_proves_liveness_even_after_restart(self):
@@ -207,7 +207,7 @@ class WatchdogTests(unittest.TestCase):
         self.advance(LEASE + 60)  # the adapter restarts
         document = self.v.document()
         self.assertEqual(document['state'], 'Unbekannt')
-        self.assertIn('Wartung', document['summary'])
+        self.assertIn('gewartet', document['summary'])
         self.v.reconnected()
         self.assertEqual(self.v.document()['state'], 'Unbekannt')
         self.advance(MAINTENANCE_GRACE)  # far too long: now it is a failure

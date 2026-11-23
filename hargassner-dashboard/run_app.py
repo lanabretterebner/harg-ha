@@ -41,14 +41,14 @@ class MonitorProxyHandler(ProxyHandler):
                 return self.save_rooms(target, route, user, prefix)
             if route == LEARN_PATH:
                 if self.command != 'POST':
-                    raise Rejected(405, 'Nur POST ist erlaubt.')
+                    raise Rejected(405, 'Diese Adresse nimmt nur POST an.')
                 learn = self.server.house_learn
                 return self.save_rooms(target, route, user, prefix, None if learn is None else (
                     lambda user_, token, body: learn(user_, token, body, prefix=prefix)))
             if self.command != 'GET':
                 raise Rejected(405, 'Dieser Status kann nur gelesen werden.')
             if target != route or self.headers.get_all('Transfer-Encoding') or self.headers.get_all('Expect'):
-                raise Rejected(400, 'Ungültige Statusanfrage.')
+                raise Rejected(400, 'Die Statusanfrage ist ungültig.')
             if one_header(self.headers, 'Content-Length') not in (None, '0'):
                 raise Rejected(400, 'Eine Statusanfrage hat keinen Inhalt.')
             if route == STATUS_PATH:
@@ -84,16 +84,16 @@ class MonitorProxyHandler(ProxyHandler):
         def refuse(status, message):
             answer(status, {'ok': False, 'message': message})
         if target != route or self.headers.get_all('Transfer-Encoding') or self.headers.get_all('Expect'):
-            return refuse(400, 'Ungültige Anfrage. Es wurde nichts gespeichert.')
+            return refuse(400, 'Die Anfrage ist ungültig. Es wurde nichts gespeichert.')
         length = one_header(self.headers, 'Content-Length')
         if length is None or not re.fullmatch(r'[0-9]{1,9}', length):
-            return refuse(411, 'Ungültige Anfrage. Es wurde nichts gespeichert.')
+            return refuse(411, 'Die Anfrage ist ungültig. Es wurde nichts gespeichert.')
         if int(length) > SAVE_BODY_CAP:
             return refuse(413, 'Die Anfrage ist zu groß. Es wurde nichts gespeichert.')
         # The bounded body is read before any refusal; reading changes nothing.
         body = self.rfile.read(int(length))
         if len(body) != int(length):
-            return refuse(400, 'Unvollständige Anfrage. Es wurde nichts gespeichert.')
+            return refuse(400, 'Die Anfrage ist unvollständig. Es wurde nichts gespeichert.')
         content_type = one_header(self.headers, 'Content-Type')
         if content_type is None or content_type.split(';', 1)[0].strip().lower() != 'application/json':
             return refuse(415, 'Nur JSON wird angenommen. Es wurde nichts gespeichert.')
@@ -106,7 +106,7 @@ class MonitorProxyHandler(ProxyHandler):
             status, document = action(user, token, body)
         except Exception:
             self.server.diagnostics.emit('internal')
-            return refuse(500, 'Interner Fehler der App. Es wurde nichts gespeichert.')
+            return refuse(500, 'In der App ist ein interner Fehler aufgetreten. Es wurde nichts gespeichert.')
         answer(status, document)
 
     do_GET = do_POST = do_PUT = do_PATCH = do_DELETE = do_OPTIONS = do_HEAD = proxy

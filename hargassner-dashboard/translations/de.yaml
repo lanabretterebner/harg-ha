@@ -4,19 +4,19 @@ configuration:
     description: "beobachten: Meldungen der Räume werden nur angezeigt. melden: sie zählen für den Gesamtzustand der Betriebsüberwachung."
   heizkreis_1_art:
     name: Heizkreis 1 ist
-    description: "automatisch übernimmt die Einstellung der Steuerung. Sonst heizkoerper oder fussboden."
+    description: "Mit automatisch gilt die Einstellung der Steuerung. Sonst heizkoerper oder fussboden wählen."
   heizkreis_2_art:
     name: Heizkreis 2 ist
-    description: "automatisch übernimmt die Einstellung der Steuerung. Sonst heizkoerper oder fussboden."
+    description: "Mit automatisch gilt die Einstellung der Steuerung. Sonst heizkoerper oder fussboden wählen."
   heizkreis_1_sensoren:
     name: Räume an Heizkreis 1
-    description: "Einfacher auf der Raumsensoren-Seite der App wählen. Sensoren der Räume, die Heizkreis 1 heizt. Nur zur Überwachung, sie steuern nichts."
+    description: "Temperatursensoren der Räume, die Heizkreis 1 heizt. Nur zur Überwachung, die Sensoren steuern nichts. Einfacher auf der Raumsensoren-Seite der App zu wählen."
   heizkreis_2_sensoren:
     name: Räume an Heizkreis 2
     description: "Temperatursensoren der Räume, die Heizkreis 2 heizt."
   haus_sensoren:
     name: Weitere Räume
-    description: "Sensoren in Räumen ohne Heizkreis oder mit geschlossenen Ventilen, z. B. Keller oder Garage. Für sie wird nur der Sensor selbst geprüft."
+    description: "Sensoren in Räumen ohne Heizkreis oder mit geschlossenen Ventilen, etwa Keller oder Garage. Für sie wird nur der Sensor selbst geprüft."
   kuehlere_raeume:
     name: Räume, die kühler sein dürfen
     description: "Bewusst kühler gehaltene Räume (2 Grad unter dem Sollwert). Räume der drei Listen unten stehen auch hier, damit eine ältere App-Version sie weiter als kühler behandelt."
@@ -28,7 +28,7 @@ configuration:
     description: "Räume an einem Heizkreis, die 6 Grad kühler sein dürfen. Einfacher auf der Raumseite einzustellen."
   nur_frost_raeume:
     name: Räume nur mit Frost- und Sensorprüfung
-    description: "Räume an einem Heizkreis, für die nur Frost und der Sensor geprüft werden: nie zu kalt oder zu warm, und sie zählen nicht für die Heizkreis-Prüfungen."
+    description: "Räume an einem Heizkreis, für die nur Frost und der Sensor geprüft werden. Sie gelten nie als zu kalt oder zu warm und zählen nicht für die Heizkreis-Prüfungen."
   raum_einstellungen:
     name: Raumeinstellungen (ab App 1.6.9)
     description: "Je Raum an einem Heizkreis: kuehler 0 bis 10 °C (0,5er-Schritte) unter dem Sollwert erlaubt, einfluss_hk1/2 0 bis 100 % (wie stark der Heizkreis ihn heizt). Am einfachsten auf der Raumseite."
@@ -40,4 +40,4 @@ configuration:
     description: "Weitere Räume, für die bei Frostgefahr gewarnt wird."
   notify_watch:
     name: Benachrichtigungsdienst überwachen
-    description: "Nur mit installiertem harg-notify einschalten. Meldet in der Betriebsüberwachung einen Hinweis, wenn der Dienst 90 Sekunden schweigt."
+    description: "Nur mit installiertem harg-notify einschalten. Die Betriebsüberwachung zeigt dann einen Hinweis, wenn der Dienst 90 Sekunden lang schweigt."

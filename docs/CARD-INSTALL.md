@@ -1,6 +1,7 @@
 # Add Hargassner thermostat cards without YAML
 
-1. Download/update this repository to 1.4.17 in HACS and verify its existing module
+1. Install/update this repository to 1.4.17 in the Marketplace (HA 2026.11+) or
+   HACS and verify its existing module
    resource. Reload the frontend and open a dashboard so the resource loads.
 2. Choose **Edit dashboard → Add card**. Search for **Hargassner Thermostat**
    in the custom cards list and select it.
@@ -18,7 +19,7 @@ target. Unsupported/missing entities remain explicit.
 
 The optional [complete dashboard configuration](../examples/hargassner-dashboard.json)
 provides two thermostat stacks and grouped readings using generic suggested IDs.
-Adapt IDs to the actual registry before importing it. Adding a HACS repository
+Adapt IDs to the actual registry before importing it. Adding the repository
 or downloading this module does not itself create a dashboard or cards.
 
 The [native tile examples](../examples/thermostat-cards.yaml) remain an optional
@@ -26,7 +27,7 @@ compact alternative that opens the corrected popup. The separate Supervisor
 Ingress app opens the existing web dashboard and does not create these cards.
 
 If the card is absent from Add Card, confirm the exact module URL returns 200,
-the HACS installed version is 1.4.17 and the dashboard has loaded the resource.
+the installed version is 1.4.17 and the dashboard has loaded the resource.
 A full frontend reload is required when upgrading an already registered custom
 card class; clearing HTTP cache alone cannot replace an existing class in memory.
 For direct Settings/device-page loading use the documented global loader.
@@ -52,5 +53,5 @@ their scrollable status slot, and mode errors keep their full text in the error
 label/title. Pending or uncertain commands remain visible. Native and
 correction controls keep their existing authority.
 
-Fully reload the frontend after each HACS update. The optional Supervisor app
-has its own version and update; it is not installed by HACS.
+Fully reload the frontend after each Marketplace/HACS update. The optional Supervisor app
+has its own version and update; it is not installed by the Marketplace or HACS.

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased (documentation only)
+
+- Install instructions for HA 2026.11, where the built-in Marketplace replaces HACS: add the repository under Settings → Marketplace → Add from link (type Dashboard); the card is served as `/local/community/harg-ha/hargassner-thermostat-popup.js` (HACS served the same file there; the Marketplace keeps the old `/hacsfiles/…` path for compatibility only), and the global loader example uses that path. The Energy instructions name the new Gas tab of the energy settings. Frontend and app unchanged; checked against a real HA Core 2026.11.2 (frontend 20261028.6).
+
 ## 1.4.17
 
 - The dashboard card no longer re-renders on every state change in the house: Home Assistant hands every card a new state object whenever any entity changes, and both thermostat cards redid their whole update each time (on a phone, with two cards, several times a second). A card now updates only when its own climate entity, its room-correction number, the connection, the user, the configuration, the language or the entity registry changed. Gestures and commands still check the live state every time; a pending request always renders. Popup, dial and command behaviour unchanged.

@@ -575,28 +575,28 @@ def ha_notification(event):
     label = {'heartbeat': 'Status', 'certificate': 'Zertifikat', 'telnet': 'Messwerte'}[component]
     title = 'Heizung: ' + label + ' prüfen'
     if reason == 'endpoint_unavailable':
-        title = 'Heizung: Status nicht erreichbar'
-        message = 'Home Assistant erreicht den lokalen Heizungsdienst nicht. Prüfe, ob die VM und der Dashboard-Dienst laufen und im Netzwerk erreichbar sind.'
+        title = 'Heizung: Heizungsdienst nicht erreichbar'
+        message = 'Home Assistant erreicht den lokalen Heizungsdienst nicht. Prüfen, ob die VM und der Dashboard-Dienst laufen und im Netzwerk erreichbar sind.'
     elif reason == 'certificate_expiring':
         title = 'Heizung: Zertifikat läuft bald ab'
-        message = 'Das Zertifikat des lokalen Heizungsdienstes läuft bald ab. Prüfe die automatische Zertifikatserneuerung auf der VM, damit das Dashboard erreichbar bleibt.'
+        message = 'Das Zertifikat des lokalen Heizungsdienstes läuft bald ab. Die automatische Zertifikatserneuerung auf der VM prüfen, damit das Dashboard erreichbar bleibt.'
     elif reason == 'clock_invalid' or reason == 'run_future':
-        message = 'Die Uhrzeiten von Home Assistant und dem lokalen Heizungsdienst stimmen nicht überein. Prüfe die automatische Uhrzeitsynchronisierung auf beiden Geräten.'
+        message = 'Die Uhrzeiten von Home Assistant und dem lokalen Heizungsdienst stimmen nicht überein. Die automatische Uhrzeitsynchronisierung auf beiden Geräten prüfen.'
     elif reason == 'heartbeat_stale':
-        message = 'Die Statusmeldung des lokalen Heizungsdienstes ist veraltet. Prüfe den Dashboard-Dienst auf der VM.'
+        message = 'Die Statusmeldung des lokalen Heizungsdienstes ist veraltet. Den Dashboard-Dienst auf der VM prüfen.'
     elif reason in ('report_missing', 'report_invalid'):
-        message = 'Der lokale Heizungsdienst liefert keine auswertbare Statusmeldung. Prüfe den Dashboard-Dienst und seine Protokolle auf der VM.'
+        message = 'Der lokale Heizungsdienst liefert keine auswertbare Statusmeldung. Den Dashboard-Dienst und seine Protokolle auf der VM prüfen.'
     elif reason in ('run_missing', 'run_stale'):
-        message = ('Die Zertifikatsprüfung wurde nicht rechtzeitig ausgeführt. Prüfe den Zertifikat-Monitor auf der VM.' if component == 'certificate' else
-                   'Die zusätzlichen Messwerte der Steuerung werden nicht mehr rechtzeitig geprüft. Prüfe den Messwert-Dienst und seine Verbindung zur Steuerung.')
+        message = ('Die Zertifikatsprüfung wurde nicht rechtzeitig ausgeführt. Den Zertifikat-Monitor auf der VM prüfen.' if component == 'certificate' else
+                   'Die zusätzlichen Messwerte der Steuerung werden nicht mehr rechtzeitig geprüft. Den Messwert-Dienst und seine Verbindung zur Steuerung prüfen.')
     elif component == 'certificate':
-        message = 'Die Zertifikatsprüfung des lokalen Heizungsdienstes ist fehlgeschlagen. Prüfe das Zertifikat und die automatische Erneuerung auf der VM.'
+        message = 'Die Zertifikatsprüfung des lokalen Heizungsdienstes ist fehlgeschlagen. Das Zertifikat und die automatische Erneuerung auf der VM prüfen.'
     elif component == 'telnet':
-        message = 'Die zusätzlichen Messwerte der Steuerung sind nicht aktuell verfügbar. Prüfe den Messwert-Dienst auf der VM und seine Verbindung zur Steuerung.'
+        message = 'Die zusätzlichen Messwerte der Steuerung sind gerade nicht verfügbar. Den Messwert-Dienst auf der VM und seine Verbindung zur Steuerung prüfen.'
     else:
-        message = 'Der lokale Heizungsdienst meldet ein Problem. Prüfe den Dienst und seine Protokolle auf der VM.'
+        message = 'Der lokale Heizungsdienst meldet ein Problem. Den Dienst und seine Protokolle auf der VM prüfen.'
     if status == 'unknown':
-        message += ' Der Zustand der Heizung ist deshalb nicht verlässlich bekannt; das belegt keinen Heizungsausfall.'
+        message += ' Der Zustand der Heizung ist so lange nicht sicher bekannt. Ein Ausfall der Heizung ist damit nicht belegt.'
     return 'create', {**identity, 'title': title, 'message': message}
 
 

@@ -231,10 +231,12 @@ class Verdict:
         maintenance = self.maintenance_at is not None and 0 <= now - self.maintenance_at < MAINTENANCE_GRACE
         failed = not maintenance and (heartbeat_failed or (self.received is not None and not fresh)
                                       or now - self.epoch >= LEASE)
-        text = ('VM nicht erreichbar oder keine aktuellen Betriebsdaten. Heizungszustand unbekannt. '
-                'Prüfen, ob die VM läuft und im Netzwerk erreichbar ist.' if failed
-                else 'Wartung der VM: Betriebsdaten folgen nach dem Neustart. Heizungszustand unbekannt.' if maintenance
-                else 'Warte auf aktuelle Betriebsdaten der VM. Heizungszustand unbekannt.')
+        text = ('Die VM ist nicht erreichbar oder sendet keine aktuellen Betriebsdaten, deshalb ist der '
+                'Zustand der Heizung unbekannt. Prüfen, ob die VM läuft und im Netzwerk erreichbar ist.' if failed
+                else 'Die VM wird gerade gewartet und sendet nach dem Neustart wieder Betriebsdaten. Bis dahin '
+                'ist der Zustand der Heizung unbekannt.' if maintenance
+                else 'Die App wartet auf aktuelle Betriebsdaten der VM, bis dahin ist der Zustand der Heizung '
+                'unbekannt.')
         return {'state': 'Störung' if failed else 'Unbekannt', 'summary': text,
                 'problems': [{'code': 'vm_monitor_unavailable', 'level': 'Störung' if failed else 'Unbekannt', 'text': text}],
                 'checks': {}, 'maintenance': False,

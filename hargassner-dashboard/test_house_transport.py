@@ -387,7 +387,7 @@ class WorkerTests(unittest.TestCase):
         world = World()
         world.run(200)
         page = world.monitor.page().decode()
-        self.assertIn('Die VM nimmt die Raummeldungen nicht an', page)
+        self.assertIn('Die VM hat die Raummeldungen bisher nicht bestätigt.', page)
         ack = {'instance': world.monitor.instance, 'seq': 1, 'result': 'accepted'}
         world.context(report_ack=ack)
         world.cycle()
@@ -395,12 +395,12 @@ class WorkerTests(unittest.TestCase):
         self.assertIn('Die VM nimmt die Raummeldungen an.', world.monitor.page().decode())
         world.context(report_ack={**ack, 'result': 'rejected_version'})
         world.cycle()
-        self.assertIn('die Version passt nicht', world.monitor.page().decode())
+        self.assertIn('weil die Version nicht passt', world.monitor.page().decode())
         self.assertIn('House monitor: report_not_accepted.', world.logs)
         world.context(report_ack={**ack, 'instance': 'f' * 32})
         world.cycle()
         self.assertTrue(world.monitor.status()['ack_other_instance'])
-        self.assertIn('sie bestätigt eine andere App', world.monitor.page().decode())
+        self.assertIn('die Meldungen einer anderen App bestätigt', world.monitor.page().decode())
         world.publish_fails = True
         world.run(130)
         self.assertEqual(world.monitor.status()['publish'], 'failed')
@@ -419,7 +419,7 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual((status['ack'], status['ack_stale'], status['ack_other_instance']), (None, True, False))
         page = world.monitor.page().decode()
         self.assertNotIn('Die VM nimmt die Raummeldungen an.', page)
-        self.assertIn('Keine aktuelle Bestätigung der VM', page)
+        self.assertIn('Die VM hat die Raummeldungen nicht aktuell bestätigt', page)
         world.context(report_ack={'instance': world.monitor.instance, 'seq': 2, 'result': 'accepted'})
         world.cycle()
         self.assertEqual((world.monitor.status()['ack'], world.monitor.status()['ack_stale']), ('accepted', False))
@@ -662,8 +662,8 @@ class AppIntegrationTests(unittest.TestCase):
         for method in ('PUT', 'DELETE', 'PATCH', 'OPTIONS'):
             self.assertEqual(self.request(server, method=method)[0], 405)
         self.assertEqual(self.request(server, path='/api/local-monitor/raumsensoren?x=1')[0], 400)
-        with patch.object(ingress_proxy, 'SUPERVISOR_IP', '172.30.32.2'):
-            self.assertEqual(self.request(server)[0], 403)
+        with patch.object(ingress_proxy, 'SUPERVISOR_IP', '172.30.32.2'), self.assertRaises((http.client.RemoteDisconnected, ConnectionError)):
+            self.request(server)  # closed before a slot (app 1.6.13, security audit 2026-11-23)
         status, body, _headers = self.request(server, path='/api/local-monitor/status')
         self.assertEqual(json.loads(body), run_app.disabled_status())   # the status schema is unchanged
 

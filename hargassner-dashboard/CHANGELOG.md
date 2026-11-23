@@ -1,5 +1,68 @@
 # Changelog
 
+## 1.6.13
+
+Two owner decisions (2026-11-23) for **Heizkreis zu kalt** (radiator and
+underfloor circuits alike). The saved room state continues (rule constants and
+fingerprint unchanged); notifications, the room page and reports to the VM are
+unchanged apart from the version and the German wording (last item).
+
+- **The fault also holds overnight when setback switches the circuit off.**
+  During setback the check is not judged at all, whether the circuit keeps
+  heating, is switched off by its heating limit or is inactive: an existing
+  Störung holds until a later day phase decides, at most 24 hours. Before, a
+  circuit switched off in setback ended it that evening and it came back the
+  next day. In a day phase a circuit switched off still ends it (the check
+  does not apply).
+- **The 3 hours towards a new fault add up over the day phases of one day.**
+  Each day phase keeps its own heat-up (radiator 2 hours, underfloor 4 hours)
+  and only the time after it counts; setback between the phases and the next
+  heat-up pause the count instead of starting it again. A judged time with the
+  rooms not that cold starts it again, and an incomplete count is dropped at
+  local midnight (without a known local time after at most 24 hours). Warming,
+  airing or too few usable rooms inside a day phase pause it for at most 2
+  hours (radiator) as before. Example: radiator day phases 06:00-09:30 and
+  15:00-19:00 count 08:00-09:30 and 17:00-18:30, so a failed pump is reported
+  at about 18:30 the same day; before, neither phase was long enough. With the
+  tested 06:00-09:00 and 15:00-23:00 programme a failed radiator pump is
+  reported about an hour earlier (19 h instead of 20 h after midnight).
+- **Ingress listener accepts only the Supervisor's gateway** (security audit
+  2026-11-23). Another container on the hassio network could hold all 32
+  connection slots with idle connections before the per-request identity
+  check ran, so the panel stopped answering. The listener now closes any peer
+  other than the ingress gateway (172.30.32.2) before it takes a slot or a
+  thread; every request is still checked as before. No option, entity or
+  control change.
+- **German texts read as German** (owner complaint 2026-11-23: inverted word
+  order, repeated words, telegram style). Wording only: no behaviour, entity,
+  unique id, option key, code or notification id changes.
+  - Home Assistant notifications of the VM-health check (`health_alerts.py`,
+    byte-identical with `tools/monitoring`): one form of address, the
+    instruction as an infinitive after the finding ("Den Dashboard-Dienst auf
+    der VM prüfen."); the title "Heizung: Status nicht erreichbar" is now
+    "Heizung: Heizungsdienst nicht erreichbar"; the unknown note reads "Der
+    Zustand der Heizung ist so lange nicht sicher bekannt. Ein Ausfall der
+    Heizung ist damit nicht belegt."
+  - Betriebsüberwachung without VM data: "Die VM ist nicht erreichbar oder
+    sendet keine aktuellen Betriebsdaten, deshalb ist der Zustand der Heizung
+    unbekannt. Prüfen, ob die VM läuft und im Netzwerk erreichbar ist." (was
+    "VM nicht erreichbar oder keine aktuellen Betriebsdaten. Heizungszustand
+    unbekannt. ..."); likewise the maintenance and start-up texts.
+  - Room page, room status and Raum anlernen: complete sentences instead of
+    colon fragments ("Die VM nimmt die Raummeldungen nicht an, weil die Daten
+    ungültig sind."), "Heizkreis 1" instead of "HK1", no "z. B." or "Std.",
+    evidence and warnings as sentences ("Beim Aufheizen durch Heizkreis 2
+    steigt die Raumtemperatur um 0,4 K/h (9 Aufheizvorgänge).").
+  - Error pages of the Ingress proxy and the room page are German (they were
+    English, for example "Cannot reach the local dashboard securely.").
+  - Option descriptions (`translations/de.yaml`) as sentences.
+  - New `test_german_texts.py` renders every notification, verdict, status
+    page and room-page sentence and checks: a finite verb in the first
+    sentence, no inner full stop or abbreviation, the first sentence is not an
+    instruction, no repeated level word or component, no raw id, English or
+    doubled word. Room and sensor findings still leave the app as codes and
+    numbers; the VM writes their text.
+
 ## 1.6.12
 
 Review fixes (static review 2026-11-23) and an owner decision. Control

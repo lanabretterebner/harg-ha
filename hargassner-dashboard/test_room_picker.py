@@ -176,7 +176,7 @@ class RenderTests(unittest.TestCase):
         self.assertNotRegex(page, '[‐-―]')                 # ordinary hyphens only
         for value, text in rp.GROUP_TEXT:
             self.assertRegex(page, f'<option value="{value}"(?: selected)?>{text}</option>')
-        self.assertIn('Noch keine Daten von der VM empfangen', page)
+        self.assertIn('Von der VM sind noch keine Daten angekommen', page)
         self.assertIn('Minuten ohne gültigen Sollwert', page)
         for secret in ('i' * 43, 'm' * 43, 'synthetic-supervisor-token', '192.0.2.10'):
             self.assertNotIn(secret, page)
@@ -343,7 +343,7 @@ class MappingTests(unittest.TestCase):
         status, document = world.save([row('sensor.kueche', 'heizkreis_1')])
         self.assertEqual(status, 200)
         self.assertNotIn('save', world.calls)
-        self.assertIn('Keine Änderung', document['message'])
+        self.assertIn('keine Änderung', document['message'])
         self.assertIn('bereits', document['message'])
 
 
@@ -683,8 +683,11 @@ class HttpTests(unittest.TestCase):
         self.assert_refused(403, user=USER)
         self.assert_refused(403, headers=self.browser(**{rp.TOKEN_HEADER: None}))
         self.assert_refused(403, headers=self.browser(token=self.world.picker.tokens.issue(OWNER)))
-        with patch.object(ingress_proxy, 'SUPERVISOR_IP', '172.30.32.2'):
-            self.assert_refused(403)
+        # Another peer is closed before it takes a slot (app 1.6.13, security audit 2026-11-23).
+        with patch.object(ingress_proxy, 'SUPERVISOR_IP', '172.30.32.2'), self.assertRaises((http.client.RemoteDisconnected, ConnectionError)):
+            self.send(body=self.body(), headers=self.browser())
+        self.assertEqual(self.world.posted, [])
+        self.assertIsNone(self.world.monitor.pending)
 
     def test_status_endpoint_is_unchanged(self):
         status, body, headers = self.send('GET', path='/api/local-monitor/status')
@@ -703,9 +706,8 @@ class HttpTests(unittest.TestCase):
         self.assertEqual(self.send('GET', path='/api/local-monitor/status')[0], 200)
 
     def test_non_supervisor_peer_cannot_save_with_forged_ingress_admin_headers(self):
-        with patch.object(ingress_proxy, 'SUPERVISOR_IP', '127.0.0.2'):
-            status, _body, _headers = self.send(body=self.body(), headers=self.browser())
-        self.assertEqual(status, 403)
+        with patch.object(ingress_proxy, 'SUPERVISOR_IP', '127.0.0.2'), self.assertRaises((http.client.RemoteDisconnected, ConnectionError)):
+            self.send(body=self.body(), headers=self.browser())  # closed before a slot (app 1.6.13)
         self.assertEqual(self.world.posted, [])
 
     def test_nonadmin_cannot_promote_itself_with_admin_headers(self):

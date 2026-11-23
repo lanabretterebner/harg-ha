@@ -187,18 +187,18 @@ def one_header(headers, name, required=False):
         return None
     if (len(values) != 1 or len(values[0]) > 8192
             or re.search(r"[^\x20-\x7e]", values[0])):
-        raise Rejected(400, "Ungültige Anfrage-Kopfzeilen.")
+        raise Rejected(400, "Die Kopfzeilen der Anfrage sind ungültig.")
     return values[0]
 
 
 def trusted_identity(peer, headers):
     # Use the TCP peer, never X-Forwarded-For or a user-controlled source header.
     if peer != SUPERVISOR_IP:
-        raise Rejected(403, "Nur über Home Assistant erreichbar.")
+        raise Rejected(403, "Die App ist nur über Home Assistant (Ingress) erreichbar.")
     user = one_header(headers, "X-Remote-User-Id", required=True)
     path = one_header(headers, "X-Ingress-Path", required=True)
     if not USER_PATTERN.fullmatch(user) or not PATH_PATTERN.fullmatch(path):
-        raise Rejected(403, "Bitte in Home Assistant anmelden.")
+        raise Rejected(403, "Die App braucht einen in Home Assistant angemeldeten Benutzer.")
     return user, path.rstrip("/")
 
 
@@ -211,6 +211,14 @@ class ProxyServer(ThreadingHTTPServer):
         self.diagnostics = Diagnostics()
         self.slots = threading.BoundedSemaphore(32)
         super().__init__(address, ProxyHandler)
+
+    def verify_request(self, request, client_address):
+        # Only the Supervisor's ingress gateway may hold a connection slot
+        # (security audit 2026-11-23): another container on the hassio network
+        # is closed before a thread or a slot is taken, so it cannot exhaust
+        # the 32 slots with idle connections. trusted_identity still checks
+        # every request.
+        return client_address[0] == SUPERVISOR_IP
 
     def process_request(self, request, client_address):
         if not self.slots.acquire(blocking=False):
@@ -276,15 +284,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if (not target.startswith("/") or target.startswith("//")
                     or parsed.scheme or parsed.netloc or parsed.fragment
                     or re.search(r"[^\x21-\x5b\x5d-\x7e]", target)):
-                raise Rejected(400, "Ungültiger Anfragepfad.")
+                raise Rejected(400, "Der Pfad der Anfrage ist ungültig.")
             if self.headers.get_all("Transfer-Encoding") or self.headers.get_all("Expect"):
-                raise Rejected(400, "Die Anfrage braucht eine feste Länge.")
+                raise Rejected(400, "Die Anfrage muss die Länge ihres Inhalts angeben.")
             length = one_header(self.headers, "Content-Length")
             if length is not None and not re.fullmatch(r"[0-9]{1,9}", length):
-                raise Rejected(400, "Ungültige Länge der Anfrage.")
+                raise Rejected(400, "Die Längenangabe der Anfrage ist ungültig.")
             size = int(length or 0)
             if size > MAX_BODY:
-                raise Rejected(413, "Die Anfrage ist zu groß.")
+                raise Rejected(413, "Der Inhalt der Anfrage ist zu groß.")
             headers = {}
             for name in REQUEST_HEADERS:
                 value = one_header(self.headers, name)
@@ -292,7 +300,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     headers[name] = value
             body = self.rfile.read(size)
             if len(body) != size:
-                raise Rejected(400, "Unvollständige Anfrage.")
+                raise Rejected(400, "Der Inhalt der Anfrage ist unvollständig.")
             settings = self.server.settings
             # A fresh allowlist discards Cookie, Authorization, Forwarded and
             # every supplied ingress/authentication header before adding ours.
@@ -352,8 +360,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.error(exc.status, exc.message)
         except (OSError, http.client.HTTPException, ValueError) as exc:
             self.server.diagnostics.emit(failure_category(exc))
-            self.error(502, "Keine sichere Verbindung zum Dashboard der VM. "
-                       "Bitte prüfen, ob die VM läuft und erreichbar ist.")
+            self.error(502, "Die App erreicht das Dashboard auf der VM nicht über eine sichere Verbindung. Prüfen, ob die VM läuft und im Netzwerk erreichbar ist.")
         finally:
             if upstream is not None:
                 upstream.close()

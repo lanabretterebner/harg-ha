@@ -176,7 +176,7 @@ async function main() {
     // Keyboard: Space on the focused save button submits.
     await page.locator("#speichern").focus();
     await page.keyboard.press("Enter");
-    await page.waitForFunction(() => document.getElementById("meldung").textContent.startsWith("Gespeichert."));
+    await page.waitForFunction(() => document.getElementById("meldung").textContent.startsWith("Die Einstellungen sind gespeichert."));
     check(await page.locator("#meldung").getAttribute("role") === "status", "success announced");
     check(fixture.saved.length === 1, "one options POST");
     check((await page.locator("#meldung").textContent()).includes("ab sofort"), "running monitor took it over");
@@ -191,7 +191,7 @@ async function main() {
     await shot(page, "picker-390-light-saved.png");
     // A second save from the same page uses the new revision; an unchanged selection posts nothing.
     await page.locator("#speichern").click();
-    await page.waitForFunction(() => document.getElementById("meldung").textContent.startsWith("Keine Änderung"));
+    await page.waitForFunction(() => document.getElementById("meldung").textContent.startsWith("Es gibt keine Änderung"));
     check(fixture.saved.length === 1, "unchanged selection not posted");
     // Focus order: search, then the first sensor's group choice.
     await page.getByLabel("Sensoren suchen (Name, Bereich oder Entität)").focus();
@@ -205,7 +205,7 @@ async function main() {
       "no learning for Weitere Räume");
     await living.getByLabel("Zeitraum").selectOption("14");
     await living.getByRole("button", { name: "Raum anlernen" }).click();
-    await page.waitForFunction(() => document.getElementById("meldung").textContent.startsWith("Vorschlag erstellt"));
+    await page.waitForFunction(() => document.getElementById("meldung").textContent.startsWith("Der Vorschlag ist fertig"));
     await page.waitForSelector('fieldset[data-entity="sensor.wohnzimmer"] .anlernen strong');
     const panel = page.locator('fieldset[data-entity="sensor.wohnzimmer"] .anlernen');
     check((await panel.textContent()).includes("Tagesmittel"), "evidence shown");
@@ -217,7 +217,7 @@ async function main() {
     check(fixture.saved.length === 1, "unconfirmed warning saves nothing");
     await panel.getByLabel("Ich habe den Raum geprüft; die Werte sind gewollt.").check();
     await panel.getByRole("button", { name: "Übernehmen" }).click();
-    await page.waitForFunction(() => document.getElementById("meldung").textContent.startsWith("Vorschlag übernommen."));
+    await page.waitForFunction(() => document.getElementById("meldung").textContent.startsWith("Der Vorschlag ist übernommen."));
     check(fixture.saved.length === 2, "accepting writes the options once");
     const learned = fixture.saved[1].raum_einstellungen.find((row) => row.sensor === "sensor.wohnzimmer");
     check(learned && learned.kuehler >= 2 && learned.einfluss_hk1 <= 20, `learned values ${JSON.stringify(learned)}`);

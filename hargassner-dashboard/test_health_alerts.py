@@ -759,7 +759,7 @@ class UnitTests(unittest.TestCase):
         event = state['queue'][0]
         action, payload = h.ha_notification(event)
         self.assertEqual(action, 'create')
-        self.assertIn('Messwerte', payload['title']); self.assertIn('Prüfe', payload['message'])
+        self.assertIn('Messwerte', payload['title']); self.assertIn('prüfen.', payload['message'])
         self.assertNotIn(event['event_id'], json.dumps(payload))
         for status in ('healthy', 'maintenance'):
             self.assertEqual(h.ha_notification({**event, 'status': status}), ('dismiss', {'notification_id': 'harg_health_telnet'}))

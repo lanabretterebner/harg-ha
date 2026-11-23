@@ -2,18 +2,19 @@
 
 Home Assistant clients for an existing Hargassner local-control backend:
 thermostat frontend 1.4.17 (a dashboard card, the matching native popup and
-device-page grouping), the optional Supervisor app 1.6.12 (the dashboard
+device-page grouping), the optional Supervisor app 1.6.13 (the dashboard
 through HA Ingress, with optional monitoring) and reference examples.
 
 | Component | Installation | Result |
 | --- | --- | --- |
-| Thermostat card and popup | HACS, Dashboard category | Native target dial, one Modus menu, icons and Heizkreisstatus |
-| Existing device page | Same loaded HACS resource | Logical headings inside its native entity lists; one MQTT device stays intact |
+| Thermostat card and popup | Marketplace (HA 2026.11+) or HACS, Dashboard category | Native target dial, one Modus menu, icons and Heizkreisstatus |
+| Existing device page | Same loaded resource | Logical headings inside its native entity lists; one MQTT device stays intact |
 | Hargassner Dashboard | HA App store repositories | Existing dashboard through authenticated HA Ingress |
 | Tiles and naming reference | Copy examples after checking entity IDs | Status on everyday climate tiles and separate day/setback/correction controls |
 
 Use [this public repository](https://github.com/lanabretterebner/harg-ha) in
-both stores independently. HACS downloads the browser module; Supervisor
+both stores independently. The Marketplace (HACS before HA 2026.11) downloads
+the browser module; Supervisor
 builds the included app. Installing either does not install the other or the
 MQTT/backend services. No live backend identity, configuration or token is included.
 
@@ -42,26 +43,48 @@ MQTT/backend services. No live backend identity, configuration or token is inclu
   only multiples of 5), asks before Zurücksetzen, shows no old VM confirmation
   while the VM sends no data, and its panel texts are German; one damaged
   learning entry no longer discards the others. Update the Supervisor app.
+- **App 1.6.13**: **Heizkreis zu kalt** also holds
+  overnight when setback switches the circuit off (until a later day phase
+  decides, at most 24 hours), and the 3 hours towards a new fault add up over
+  the day phases of one day, so short split programmes report a failed pump the
+  same day (owner decisions). Saved room state continues. The ingress
+  listener also closes peers other than the Supervisor's gateway before they
+  take a connection slot (security audit 2026-11-23), and its notifications,
+  status texts and room page read as complete German sentences. Update the
+  Supervisor app; HACS frontend 1.4.17 is unchanged.
 
-HACS updates only the browser resource; update the app through Supervisor.
+The Marketplace (or HACS) updates only the browser resource; update the app through Supervisor.
 Existing tags and release assets remain immutable. History:
 [frontend changelog](CHANGELOG.md),
 [app changelog](hargassner-dashboard/CHANGELOG.md).
 
-## Thermostat popup through HACS
+## Thermostat popup through the Marketplace or HACS
 
-1. In **HACS → three dots → Custom repositories**, add this public repository
-   with category **Dashboard**. Open it, choose **Download**, select the release
-   and confirm. Adding a custom repository alone does not install its JavaScript;
-   verify that HACS shows an installed version.
+From HA 2026.11 the built-in **Marketplace** replaces HACS (HACS installs and
+custom repositories are migrated on the first start of 2026.11). The steps are
+the same in both; only the menu names differ.
+
+1. HA 2026.11 or newer: **Settings → Marketplace → Add from link**, enter
+   `https://github.com/lanabretterebner/harg-ha` and choose the type
+   **Dashboard** (adding a repository from a link asks to connect GitHub once).
+   Older HA with HACS: **HACS → three dots → Custom repositories**, category
+   **Dashboard**. Open it, install/download the release and confirm. Adding a
+   repository alone does not install its JavaScript; verify that an installed
+   version is shown.
 2. Check **Settings → Dashboards → three dots → Resources** for one module
-   registration. Preserve a HACS-generated `?hacstag=...` suffix. If absent, add
-   this URL as a **JavaScript module**:
+   registration of this card. The Marketplace registers
+   `/local/community/harg-ha/hargassner-thermostat-popup.js?v=…` and moves an
+   existing HACS registration (`/hacsfiles/harg-ha/…?hacstag=…`) there by
+   itself; keep its generated `?v=…` suffix. If absent, add this URL as a
+   **JavaScript module**:
 
    ```text
-   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.4.17
+   /local/community/harg-ha/hargassner-thermostat-popup.js?v=1.4.17
    ```
 
+   `/local/community/…` serves the installed file with HACS and with the
+   Marketplace. The Marketplace still serves the old `/hacsfiles/…` path for
+   compatibility only.
 3. Remove older manual resource URLs, fully reload each browser/Companion App,
    open a dashboard, then open the matching climate dialog.
 
@@ -69,13 +92,17 @@ For dialogs opened directly from Settings before a dashboard, merge
 [frontend-global.yaml](examples/frontend-global.yaml) into the existing
 `frontend.extra_module_url` list. Preserve other entries, check HA configuration,
 restart HA and reload frontends. A dashboard resource alone does not guarantee
-loading before a dashboard is visited.
+loading before a dashboard is visited. The global loader loads the card on every
+page, dashboards included: with it, the Marketplace adds no dashboard resource of
+its own, and an older registration of this card under Resources can be removed.
+Keep the `?v=` of the global entry at the installed version after each update;
+a stale version loads the older card class first.
 [HA global modules](https://www.home-assistant.io/integrations/frontend/#loading-extra-javascript).
 
 For manual installation, copy `dist/hargassner-thermostat-popup.js` to
 `/config/www/hargassner-thermostat-popup.js` and use
 `/local/hargassner-thermostat-popup.js?v=1.4.17` instead. Remove that manual
-registration when switching to HACS.
+registration when switching to the Marketplace or HACS.
 
 The single **Modus** menu offers **Aus · Auto · Heizen · Absenken · 1x Heizen ·
 1x Absenken**. Power, calendar/clock, sun, moon and timed-heating icons render
@@ -193,7 +220,7 @@ The older optional native tiles remain available: copy
 Manual card editor. Both climate tiles show target temperature and
 `Heizkreisstatus`; card and icon taps open the native dialog. Six number tiles
 keep day, setback and correction controls separate. No inline preset selector
-is added. HACS does not import card YAML.
+is added. The Marketplace and HACS do not import card YAML.
 
 Check all eight IDs first. The [90-entry naming reference](examples/entity-name-mapping.json)
 lists suggested IDs; existing registry names and suffixes can differ. It is
@@ -210,12 +237,12 @@ Release-specific fixture checks are in [validation.json](validation.json).
 Unsupported layouts and unknown current presets retain native controls. Future
 HA DOM changes may require an update.
 
-If both native menus remain, verify the installed HACS version and that its
+If both native menus remain, verify the installed version and that its
 exact registered module URL returns HTTP 200. A 404 means the file is not being
 served; clearing cache cannot supply it. A current preset of `none` also retains
 native menus intentionally; correct backend state delivery instead of fabricating a mode.
 
-Uninstall the popup through HACS, remove its registrations, apply any global
+Uninstall the popup through the Marketplace (or HACS), remove its registrations, apply any global
 configuration change and reload. `window.hargassnerThermostatPopup?.stop()`
 restores native controls temporarily in the current tab. Remove the dashboard
 app independently through its App store entry (empty its room selection first,
@@ -228,7 +255,8 @@ automatic retry. [Third-party icon licenses](THIRD-PARTY-NOTICES.md).
 
 ## Validation and publication
 
-The HACS filename override selects `dist/hargassner-thermostat-popup.js`.
+The `hacs.json` filename override selects `dist/hargassner-thermostat-popup.js`;
+the HA 2026.11 Marketplace reads the same `hacs.json` from each release tag.
 Root `repository.yaml` independently exposes the dashboard app to Supervisor.
 [HACS structure](https://www.hacs.xyz/docs/publish/plugin/),
 [HA app repositories](https://developers.home-assistant.io/docs/apps/repository/).

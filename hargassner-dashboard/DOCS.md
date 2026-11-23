@@ -536,9 +536,10 @@ name, area or entity ID. For each sensor choose:
   The room is "too cold" only 1.5 degrees below the set temperature minus its
   allowance: with 23 °C set and 3.5 °C allowed, at 18.0 °C or below. The
   notice then names the allowed temperature and the set one, for example
-  "Wintergarten ist seit längerem zu kalt (16,5 °C; erlaubt ab 21,0 °C, Ziel
-  23,0 °C)" for a room that may be 2 degrees cooler. Without an allowance the
-  text stays "(16,5 °C statt 23,0 °C)". The VM shows the allowed temperature
+  'Am Raumsensor "Wintergarten" ist es seit längerem zu kalt (16,5 °C; erlaubt
+  ab 21,0 °C, Ziel 23,0 °C).' for a room that may be 2 degrees cooler. Without an
+  allowance the text stays "(16,5 °C statt 23,0 °C)". The VM writes these
+  texts; the app sends only codes and values. The VM shows the allowed temperature
   from its release room-allowance-20261119 on (it accepts 0.5 to 10 degrees);
   an older VM keeps the old text, and both versions work together in any
   order. Influence and learning stay inside the app; the VM needs no update
@@ -674,7 +675,7 @@ hours.
 | No warm check after a change of the day target or mode | 2 h | 8 h |
 | One cold spell: room 1.5 degrees below target and not getting warmer, for | 90 min | 4 h (adds up over day phases) |
 | Room too cold: after a cold spell the room has not come back within 1 degree of the day target for | 12 h | 12 h |
-| All rooms of a circuit clearly too cold (3 degrees) and none getting warmer, for (judged in a day phase only against the day target; during setback while the circuit keeps heating, an unknown phase, missing VM data or Home Assistant being away an existing "Heizkreis zu kalt" holds, up to 24 h; a circuit switched off in setback by its heating limit or inactive ends it that evening; radiators from app 1.6.12, owner decision 2026-11-23) | 3 h within one day phase, so a new finding needs a day phase of at least 5 h (2 h heat-up + 3 h) | 3 h within one day phase, so a new finding needs a day phase of at least 7 h (4 h heat-up + 3 h) |
+| All rooms of a circuit clearly too cold (3 degrees) and none getting warmer, for (judged in a day phase only against the day target, after that phase's heat-up; during setback (heating, heating limit or inactive), an unknown phase, missing VM data or Home Assistant being away an existing "Heizkreis zu kalt" holds until a later day phase decides, up to 24 h; switched off in a day phase it ends; radiators from app 1.6.12, both from app 1.6.13: the 3 h add up over the day phases of one local day, reset at local midnight, owner decisions 2026-11-23) | 3 h judged in the day phases of one day, each after its 2 h heat-up | 3 h judged in the day phases of one day, each after its 4 h heat-up |
 | Watching a room after a heating start | 60 min | 6 h |
 | Room does not get warmer: heating starts without effect on different days | 3 | 3 |
 | Circuit does not get warmer (fault): starts without effect on different days | 2 | 2 |
@@ -781,9 +782,10 @@ room at a time; it never starts by itself.
    reads (at most about 75 seconds).
 2. The room page shows a **Vorschlag** with its evidence, for example:
    "darf 4 °C kühler sein, Einfluss Heizkreis 1 10 %, Heizkreis 2 0 % (bisher
-   0 °C, 100 %, 0 %)", "Tagesmittel 18,2 °C bei Ziel 23,0 °C (30 Tage mit
-   Tagbetrieb ausgewertet, aus Stundenmitteln)", "Anstieg beim Aufheizen 0,4
-   K/h, HK2 (9 Aufheizvorgänge)", and the sources: "Raumtemperatur:
+   0 °C, 100 %, 0 %)", "Das Tagesmittel liegt bei 18,2 °C, das Ziel bei
+   23,0 °C (30 Tage mit Tagbetrieb ausgewertet, aus Stundenmitteln).", "Beim
+   Aufheizen durch Heizkreis 2 steigt die Raumtemperatur um 0,4 K/h (9
+   Aufheizvorgänge).", and the sources: "Raumtemperatur:
    Langzeitstatistik von Home Assistant, stündlich, 63 Tage vorhanden; feiner Verlauf
    (jede Änderung) 10 Tage für das Aufheizen.", "Heizkreise: VM-Verlauf,
    alle 5 Minuten, 30 Tage." When a source is missing the evidence says
@@ -865,7 +867,7 @@ synthetic tests:
 | --- | --- | --- |
 | Radiator stays cold: **Raum zu kalt** | about 21.5 h (same evening) | about 36.5 h |
 | Radiator stays cold: **Raum wird nicht wärmer** | 55 h (third morning) | 55 h |
-| Failed pump, radiators: **Heizkreis zu kalt** (fault) | about 11 h | about 20 h |
+| Failed pump, radiators: **Heizkreis zu kalt** (fault) | about 11 h | about 19 h |
 | Failed pump, radiators: **Heizkreis wird nicht wärmer** (fault) | 31 h (next morning) | 31 h |
 | Underfloor room without heat: **Raum zu kalt** | about 26 h | about 55 h |
 | Underfloor room without heat: **Raum wird nicht wärmer** | about 60 h | about 69 h |
@@ -972,7 +974,7 @@ while sensors are selected, the VM keeps the checks **Räume** and
 
 The app maintains the existing MQTT entity identity and device. It subscribes through HA Core to the default `homeassistant` operation discovery topic and the VM operation reports, and redirects only this entity to its own checked state topic. No controller or settings command is possible. The VM report topic remains untouched. The app needs Home Assistant MQTT to be running; no broker credentials are stored in the app.
 
-A live report is required for Normal. Retained reports cannot start or renew that state. Without a live report for 90 seconds the state is Störung, with a message that the VM/monitoring is unreachable and the actual heating state is unknown. When the optional VM-health monitor is enabled, a failed or stale heartbeat also overrides a recent VM report. Its healthy heartbeat alone cannot clear a missing report. Recovery requires a new live report. The app publishes its checked state without retention every 15 seconds; if the app or HA connection fails, HA marks the entity unavailable after 90 seconds. No old Normal can be replayed from this topic. After the app starts, and after a reconnect to Home Assistant (Core restart, integration reload) while the VM was reporting until then, the app waits the same 90 seconds (Unbekannt) before a missing report counts; a VM that was already silent stays Störung. When the last VM report said maintenance (a VM release restarts its services), a silence of up to 15 minutes is shown as Unbekannt ("Wartung der VM"). Freshness is measured on the app's own clock from the arrival of a report; the VM's timestamp only has to lie within 5 minutes of this host's clock and must not repeat a recent report, so clock differences or a VM clock that steps back no longer matter. A heartbeat that is still unknown in the first 90 seconds is no failure.
+A live report is required for Normal. Retained reports cannot start or renew that state. Without a live report for 90 seconds the state is Störung, with a message that the VM/monitoring is unreachable and the actual heating state is unknown. When the optional VM-health monitor is enabled, a failed or stale heartbeat also overrides a recent VM report. Its healthy heartbeat alone cannot clear a missing report. Recovery requires a new live report. The app publishes its checked state without retention every 15 seconds; if the app or HA connection fails, HA marks the entity unavailable after 90 seconds. No old Normal can be replayed from this topic. After the app starts, and after a reconnect to Home Assistant (Core restart, integration reload) while the VM was reporting until then, the app waits the same 90 seconds (Unbekannt) before a missing report counts; a VM that was already silent stays Störung. When the last VM report said maintenance (a VM release restarts its services), a silence of up to 15 minutes is shown as Unbekannt ("Die VM wird gerade gewartet und sendet nach dem Neustart wieder Betriebsdaten."). Freshness is measured on the app's own clock from the arrival of a report; the VM's timestamp only has to lie within 5 minutes of this host's clock and must not repeat a recent report, so clock differences or a VM clock that steps back no longer matter. A heartbeat that is still unknown in the first 90 seconds is no failure.
 
 After VM/app restart, room evaluation waits for fresh context and an accepted current app report. Room selections remain in app options; the room checks continue from their saved state ("Room checks after an app restart"), on a first start or without a usable saved state they start fresh. Missing acknowledgement is not proof that the rooms are healthy.
 

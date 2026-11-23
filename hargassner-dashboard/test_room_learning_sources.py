@@ -240,7 +240,7 @@ class SourceTests(unittest.TestCase):
         _data, result = run(recorder, statistics=statistics_for(failing_room, recorder.start), vm=vm)
         self.assertTrue(result['enough'])
         self.assertEqual(result['proposal'][:2], (5.0, 0))
-        self.assertRegex(result['evidence'][0], r'^Tagesmittel 16,[01] °C bei Ziel 22,0 °C \(30 Tage')
+        self.assertRegex(result['evidence'][0], r'^Das Tagesmittel liegt bei 16,[01] °C, das Ziel bei 22,0 °C \(30 Tage')
         self.assertTrue(any('erreicht das Ziel nie' in line for line in result['warnings']), result['warnings'])
 
     def test_unknown_vm_targets_give_no_day_level(self):

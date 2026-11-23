@@ -395,7 +395,8 @@ class SplitProgrammeFaultTests(FaultTests):
         self.latencies((('radiator', 17.0, 'dead', {'room_cold': 36, 'no_response': 55}),))
 
     def test_pump_failure(self):
-        self.latencies((('radiator', 17.0, 'pump', {'circuit_cold': 20, 'circuit_no_response': 31,
+        # circuit_cold 19 h from app 1.6.13: the 08:00-09:00 dwell carries to the evening phase.
+        self.latencies((('radiator', 17.0, 'pump', {'circuit_cold': 19, 'circuit_no_response': 31,
                                                     'room_cold': 36, 'no_response': 55}),))
 
     def test_floor_latencies(self):

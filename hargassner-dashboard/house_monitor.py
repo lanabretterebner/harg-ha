@@ -671,23 +671,23 @@ REASON_TEXT = {
     'config_invalid': 'Die Raumsensor-Einstellungen sind ungültig. Konfiguration der App prüfen.',
     'ha_starting': 'Home Assistant startet noch.',
     'ha_api_unavailable': 'Home Assistant ist für die App gerade nicht erreichbar.',
-    'no_context': 'Keine aktuellen Daten der VM. Die Räume werden gerade nicht bewertet.',
+    'no_context': 'Die VM sendet keine aktuellen Daten, deshalb werden die Räume gerade nicht bewertet.',
     'context_version_unsupported': 'Die Version der VM passt nicht zu dieser App. App oder VM aktualisieren.',
 }
 ACK_TEXT = {
     'accepted': 'Die VM nimmt die Raummeldungen an.',
-    'context_mismatch': 'Die VM nimmt die Raummeldungen an, aber sie passen nicht zum aktuellen Stand der VM.',
-    'instance_conflict': 'Die VM nimmt die Raummeldungen nicht an: eine andere App meldet bereits.',
-    'rejected_schema': 'Die VM nimmt die Raummeldungen nicht an: ungültige Daten.',
-    'rejected_version': 'Die VM nimmt die Raummeldungen nicht an: die Version passt nicht.',
-    'rejected_limits': 'Die VM nimmt die Raummeldungen nicht an: zu viele oder zu große Daten.',
+    'context_mismatch': 'Die VM nimmt die Raummeldungen an, aber sie passen nicht zu ihrem aktuellen Stand.',
+    'instance_conflict': 'Die VM nimmt die Raummeldungen nicht an, weil bereits eine andere App meldet.',
+    'rejected_schema': 'Die VM nimmt die Raummeldungen nicht an, weil die Daten ungültig sind.',
+    'rejected_version': 'Die VM nimmt die Raummeldungen nicht an, weil die Version nicht passt.',
+    'rejected_limits': 'Die VM nimmt die Raummeldungen nicht an, weil sie zu viele oder zu groß sind.',
 }
 TYPE_TEXT = {'radiator': 'Heizkörper', 'floor': 'Fußboden', 'absent': 'nicht vorhanden', None: 'unbekannt'}
 SOURCE_TEXT = {'controller': 'aus der Steuerung', 'option': 'aus den App-Einstellungen', None: ''}
 JUDGED_TEXT = {'yes': 'wird bewertet', 'inactive': 'Heizkreis aus', 'unknown': 'nicht bewertet'}
 WHY_TEXT = {'context': 'keine gültigen Daten der Steuerung', 'phase': 'Sollwert unbekannt',
             'type': 'Art des Heizkreises unbekannt', 'sensors': 'kein nutzbarer Sensor',
-            'absent': 'Heizkreis nicht vorhanden', 'ha': 'Home Assistant oder Einstellungen'}
+            'absent': 'Heizkreis nicht vorhanden', 'ha': 'Home Assistant oder Einstellungen nicht bereit'}
 
 
 def _time(wall, zone_name, zones):
@@ -723,26 +723,26 @@ def status_html(status, zone=None, zones=None):
                  + '</li>')
     lines.append(f'<li>Überwachte Sensoren: {int(status["configured"]) if status["valid"] else "keine gültige Auswahl"}</li>')
     if status['valid'] and status['configured'] == 0:
-        lines.append('<li>Keine Sensoren ausgewählt: die Raumüberwachung ist aus.</li>')
+        lines.append('<li>Es sind keine Sensoren ausgewählt, deshalb ist die Raumüberwachung aus.</li>')
     lines.append(f'<li>Zustand: {escape(REASON_TEXT.get(status["reason"], "unbekannt"))}</li>')
     lines.append(f'<li>Letzte Meldung an die VM: {escape(_time(status["last_report_wall"], zone, zones))}'
                  + (' (Senden fehlgeschlagen)' if status['publish'] == 'failed' else '') + '</li>')
     if not status['base_pinned']:
-        ack = 'Noch keine Daten von der VM empfangen. Die VM nimmt die Raummeldungen nicht an.'
+        ack = 'Von der VM sind noch keine Daten angekommen, deshalb werden noch keine Raummeldungen angenommen.'
     elif status.get('ack_stale') and status.get('context') == 'unsupported':
-        ack = 'Keine gültige Bestätigung der VM: ihre Version passt nicht zu dieser App.'
+        ack = 'Die VM bestätigt die Raummeldungen nicht gültig, weil ihre Version nicht zu dieser App passt.'
     elif status.get('ack_stale'):
-        ack = 'Keine aktuelle Bestätigung der VM, weil gerade keine aktuellen Daten der VM vorliegen.'
+        ack = 'Die VM hat die Raummeldungen nicht aktuell bestätigt, weil gerade keine aktuellen Daten der VM vorliegen.'
     elif status['ack'] is None and status['ack_other_instance']:
-        ack = 'Die VM nimmt die Raummeldungen nicht an: sie bestätigt eine andere App.'
+        ack = 'Die VM nimmt die Raummeldungen nicht an, weil sie die Meldungen einer anderen App bestätigt.'
     elif status['ack'] is None:
-        ack = 'Die VM nimmt die Raummeldungen nicht an (keine Bestätigung).'
+        ack = 'Die VM hat die Raummeldungen bisher nicht bestätigt.'
     else:
         ack = ACK_TEXT.get(status['ack'], 'Die VM nimmt die Raummeldungen nicht an.')
     lines.append(f'<li>{escape(ack)}</li></ul>')
     basis = status.get('basis_unknown') or {}
     lines.append('<h2>Heizkreise</h2><table><tr><th>Heizkreis</th><th>Art</th><th>Bewertung</th>'
-                 '<th>Minuten ohne gültigen Sollwert (24 Std. / 7 Tage)</th></tr>')
+                 '<th>Minuten ohne gültigen Sollwert (24 Stunden / 7 Tage)</th></tr>')
     for index, name in enumerate(rules.CIRCUITS, 1):
         circuit = status['circuits'][name]
         kind = TYPE_TEXT.get(circuit['type'], 'unbekannt')

@@ -493,23 +493,24 @@ def analyse(room_rows, circuit_rows, *, start, end, home, kinds, current, utc_of
         facts['reached_days'] = sum(1 for _value, target, peak in means if peak >= target - 1.0)
         q80 = deficits[max(0, math.ceil(0.8 * len(deficits)) - 1)]
         allowance = float(min(rules.ROOM_SETTINGS['allowance_max'], max(0.0, ceil_half(q80 - 1.0))))
-        evidence.append(f'Tagesmittel {degrees(mean_room)} bei Ziel {degrees(mean_target)} '
+        evidence.append(f'Das Tagesmittel liegt bei {degrees(mean_room)}, das Ziel bei {degrees(mean_target)} '
                         f'({len(used)} Tage mit Tagbetrieb ausgewertet'
                         + (', aus Stundenmitteln' if hours else '') + ').')
         if facts['reached_days'] == 0:
-            warnings.append(f'Der Raum erreicht das Ziel nie: an keinem der {len(used)} Tage näher als 1 °C. '
-                            'Heizkörper, Ventil oder Stellantrieb prüfen, bevor Sie übernehmen: Anlernen würde '
-                            'einen Fehler als normal übernehmen.')
+            warnings.append(f'Der Raum erreicht das Ziel nie, an keinem der {len(used)} Tage kommt er ihm näher '
+                            'als 1 °C. Vor dem Übernehmen Heizkörper, Ventil oder Stellantrieb prüfen, denn das '
+                            'Anlernen würde einen Fehler als normal übernehmen.')
         elif 2 * facts['reached_days'] < len(used):
-            warnings.append(f'Der Raum erreicht das Ziel selten: nur an {facts["reached_days"]} von {len(used)} '
-                            'Tagen näher als 1 °C. Heizkörper, Ventil oder Stellantrieb prüfen, bevor Sie übernehmen.')
+            warnings.append(f'Der Raum erreicht das Ziel selten, nur an {facts["reached_days"]} von {len(used)} '
+                            'Tagen kommt er ihm näher als 1 °C. Vor dem Übernehmen Heizkörper, Ventil oder '
+                            'Stellantrieb prüfen.')
         if allowance > current[0] and (allowance - current[0] > 1.0 or allowance > 2.0):
             warnings.append(f'Der Vorschlag erlaubt deutlich mehr Abweichung ({kelvin(allowance)} °C statt '
-                            f'{kelvin(current[0])} °C). "Zu kalt" wird dann erst später gemeldet; nur übernehmen, '
-                            'wenn der Raum wirklich so kühl bleiben soll.')
+                            f'{kelvin(current[0])} °C). Die Meldung "zu kalt" kommt dann erst später. Nur '
+                            'übernehmen, wenn der Raum wirklich so kühl bleiben soll.')
     else:
-        evidence.append(f'Zu wenig Tage mit Tagbetrieb für die erlaubte Abweichung ({len(used)} von mindestens '
-                        f'{DAYS_MIN}); sie bleibt unverändert.')
+        evidence.append(f'Für die erlaubte Abweichung gibt es zu wenige Tage mit Tagbetrieb ({len(used)} von '
+                        f'mindestens {DAYS_MIN}), deshalb bleibt sie unverändert.')
 
     # -- heat-up starts per circuit
     starts = {}
@@ -555,30 +556,32 @@ def analyse(room_rows, circuit_rows, *, start, end, home, kinds, current, utc_of
             own.append((last - first) * 3600.0 / window)
         facts['events'][name] = len(own)
         facts['shared'][name] = shared
-        label = 'HK' + name[-1]
+        label = 'Heizkreis ' + name[-1]
         if len(own) >= EVENTS_MIN:
             rate = _median(own)
             facts['rates'][name] = round(rate, 3)
             rates_ok[name] = rate
             influence[name] = _round5(100.0 * max(0.0, rate) / REFERENCE_RATE[kind])
-            evidence.append(f'Anstieg beim Aufheizen {kelvin(rate)} K/h, {label} ({len(own)} Aufheizvorgänge).')
+            evidence.append(f'Beim Aufheizen durch {label} steigt die Raumtemperatur um {kelvin(rate)} K/h '
+                            f'({len(own)} Aufheizvorgänge).')
         elif shared >= EVENTS_MIN and not own:
-            evidence.append(f'{label}: nur gemeinsam mit dem anderen Heizkreis aufgeheizt ({shared}-mal); '
-                            'sein Anteil ist nicht trennbar und bleibt unverändert.')
+            evidence.append(f'{label} hat den Raum nur gemeinsam mit dem anderen Heizkreis aufgeheizt '
+                            f'({shared}-mal), deshalb lässt sich sein Anteil nicht trennen und sein Einfluss '
+                            'bleibt unverändert.')
         else:
-            evidence.append(f'{label}: zu wenig Aufheizvorgänge ({len(own)} von mindestens {EVENTS_MIN}); '
-                            'der Einfluss bleibt unverändert.')
+            evidence.append(f'Für {label} gibt es zu wenige Aufheizvorgänge ({len(own)} von mindestens '
+                            f'{EVENTS_MIN}), deshalb bleibt sein Einfluss unverändert.')
     strong = rules.ROOM_SETTINGS['strong']
     if home in rates_ok and WEAK_INFLUENCE <= influence[home] < strong <= current[1 + rules.CIRCUITS.index(home)]:
-        warnings.append(f'Der Einfluss von Heizkreis {home[-1]} sinkt unter {strong} %: der Raum zählt dann '
-                        'nicht mehr voll für die Prüfung des Heizkreises. Heizkörper prüfen, wenn er früher '
-                        'besser warm wurde.')
+        warnings.append(f'Der Einfluss von Heizkreis {home[-1]} sinkt unter {strong} %, dann zählt der Raum '
+                        'nicht mehr voll für die Prüfung des Heizkreises. Den Heizkörper prüfen, wenn der Raum '
+                        'früher besser warm wurde.')
     for name in rates_ok:
         index = 1 + rules.CIRCUITS.index(name)
         if (name != home and influence[name] >= rules.ROOM_SETTINGS['judged']
                 and current[index] < rules.ROOM_SETTINGS['judged']):
             warnings.append(f'Laut Verlauf heizt auch Heizkreis {name[-1]} den Raum ({influence[name]} %). '
-                            'Prüfen, ob das stimmt: ein Raum an beiden Heizkreisen hält eine Störung des einen '
+                            'Prüfen, ob das stimmt, denn ein Raum an beiden Heizkreisen hält eine Störung des einen '
                             'nicht mehr auf, zählt aber auch weniger für ihn.')
     if home in rates_ok and influence[home] < WEAK_INFLUENCE:
         warnings.append(f'Der Raum wird beim Aufheizen von Heizkreis {home[-1]} kaum wärmer '
@@ -589,7 +592,7 @@ def analyse(room_rows, circuit_rows, *, start, end, home, kinds, current, utc_of
         return {'enough': False, 'proposal': None, 'facts': facts, 'warnings': [], 'evidence': evidence}
     other = 'hc2' if home == 'hc1' else 'hc1'
     if influence[other] > influence[home]:
-        evidence.append(f'Heizkreis {other[-1]} heizt den Raum stärker: beim Übernehmen wird der Raum '
+        evidence.append(f'Heizkreis {other[-1]} heizt den Raum stärker, deshalb wird der Raum beim Übernehmen '
                         f'Heizkreis {other[-1]} zugeordnet.')
     return {'enough': True, 'proposal': (allowance, influence['hc1'], influence['hc2']),
             'evidence': evidence, 'warnings': warnings, 'facts': facts}
@@ -965,7 +968,7 @@ class RoomLearning:
                 return 409, 'Es wird gerade ein Raum angelernt. Bitte warten oder abbrechen.'
             entry = self.state['rooms'].get(entity)
             if entry is not None and entry['state'] == 'recording' and period is None:
-                return 409, 'Für diesen Raum läuft eine Aufzeichnung. Erst abbrechen.'
+                return 409, 'Für diesen Raum läuft eine Aufzeichnung. Bitte die Aufzeichnung zuerst abbrechen.'
             cancel, done = threading.Event(), threading.Event()
             self.running = (entity, cancel, done)
         now = self.clock()
@@ -978,10 +981,10 @@ class RoomLearning:
         if done.wait(wait):
             entry, _learned, _analysing = self.view(entity)
             if entry is None:
-                return 200, 'Abgebrochen.'
+                return 200, 'Die Auswertung ist abgebrochen.'
             if entry['state'] == 'proposal':
-                return 200, 'Vorschlag erstellt. Bitte prüfen und übernehmen oder verwerfen.'
-            return 200, 'Zu wenig Daten für einen Vorschlag.'
+                return 200, 'Der Vorschlag ist fertig. Bitte prüfen und übernehmen oder verwerfen.'
+            return 200, 'Für einen Vorschlag gibt es zu wenige Daten.'
         return 202, 'Die Auswertung läuft noch. Die Seite zeigt das Ergebnis nach dem Neuladen.'
 
     def _run(self, entity, home, current, period, cancel, done, identity=None):
@@ -1002,8 +1005,8 @@ class RoomLearning:
             evidence = list(result['evidence']) + data['sources']
             missing = [name for name in rules.CIRCUITS if name not in data['circuits']]
             if missing:
-                evidence.append('Keine Heizkreisdaten für '
-                                + ', '.join('Heizkreis ' + name[-1] for name in missing) + '.')
+                evidence.append('Für ' + ' und '.join('Heizkreis ' + name[-1] for name in missing)
+                                + ' gibt es keine Daten.')
             if data['failed']:
                 evidence.append(f'{data["failed"]} Abschnitte des Verlaufs von Home Assistant waren nicht '
                                 'lesbar (Lücken).')
@@ -1020,7 +1023,7 @@ class RoomLearning:
                          'warnings': [], 'proposal': None, 'current': list(current), 'home': home}
         except Exception:
             entry = {'state': 'insufficient', 'made': self.clock(), 'start': start, 'end': end,
-                     'evidence': ['Interner Fehler bei der Auswertung.'], 'warnings': [], 'proposal': None,
+                     'evidence': ['Bei der Auswertung ist ein interner Fehler aufgetreten.'], 'warnings': [], 'proposal': None,
                      'current': list(current), 'home': home}
         with self.lock:
             if cancel.is_set() or entry is None:
@@ -1038,8 +1041,8 @@ class RoomLearning:
             self.state['rooms'][entity] = {'state': 'recording', 'start': now, 'end': now + days * 86400,
                                            'days': days}
             self._save()
-        return 200, (f'Aufzeichnung für {days} Tage gestartet. Bis dahin meldet dieser Raum keine '
-                     'Heizungsprobleme; Frost und Sensor werden weiter geprüft.')
+        return 200, (f'Die Aufzeichnung für {days} Tage hat begonnen. Bis dahin meldet dieser Raum keine '
+                     'Heizungsprobleme, Frost und Sensor werden aber weiter geprüft.')
 
     def cancel(self, entity):
         with self.lock:
@@ -1047,16 +1050,16 @@ class RoomLearning:
                 self.running[1].set()
             removed = self.state['rooms'].pop(entity, None) is not None
             self._save()
-        return 200, 'Abgebrochen.' if removed else 'Nichts zum Abbrechen.'
+        return 200, 'Der Vorgang ist abgebrochen.' if removed else 'Es läuft nichts, das abgebrochen werden kann.'
 
     def discard(self, entity):
         with self.lock:
             entry = self.state['rooms'].get(entity)
             if entry is None or entry['state'] == 'recording':
-                return 409, 'Kein Vorschlag zum Verwerfen.'
+                return 409, 'Es gibt keinen Vorschlag, der verworfen werden kann.'
             del self.state['rooms'][entity]
             self._save()
-        return 200, 'Vorschlag verworfen. Es wurde nichts geändert.'
+        return 200, 'Der Vorschlag ist verworfen. Es wurde nichts geändert.'
 
     def proposal(self, entity):
         with self.lock:

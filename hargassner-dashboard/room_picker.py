@@ -433,30 +433,30 @@ def options_of(parsed):
 def parse_request(document):
     """Strict shape of a save request; raises SelectionError with German text."""
     if not isinstance(document, dict) or set(document) != BODY_KEYS:
-        raise SelectionError('Ungültige Anfrage.')
+        raise SelectionError('Die Anfrage ist ungültig.')
     if not isinstance(document['revision'], str) or not REVISION_PATTERN.fullmatch(document['revision']):
-        raise SelectionError('Ungültige Anfrage.')
+        raise SelectionError('Die Anfrage ist ungültig.')
     if document['modus'] not in rules.MODES:
-        raise SelectionError('Unbekannter Modus der Raumüberwachung.')
+        raise SelectionError('Der Modus der Raumüberwachung ist unbekannt.')
     for key in ('heizkreis_1_art', 'heizkreis_2_art'):
         if not isinstance(document[key], str) or document[key] not in rules.OPTION_TYPES:
-            raise SelectionError('Unbekannte Art des Heizkreises.')
+            raise SelectionError('Die Art des Heizkreises ist unbekannt.')
     rows = document['sensoren']
     if not isinstance(rows, list):
-        raise SelectionError('Ungültige Anfrage.')
+        raise SelectionError('Die Anfrage ist ungültig.')
     if len(rows) > rules.MAX_SENSORS:
         raise SelectionError(f'Höchstens {rules.MAX_SENSORS} Sensoren können überwacht werden.')
     seen = set()
     for row in rows:
         if not isinstance(row, dict) or set(row) != ROW_KEYS:
-            raise SelectionError('Ungültige Anfrage.')
+            raise SelectionError('Die Anfrage ist ungültig.')
         entity = row['entity_id']
         if not isinstance(entity, str) or not rules.ENTITY_PATTERN.fullmatch(entity):
-            raise SelectionError('Ungültiger Sensor.')
+            raise SelectionError('Ein Sensor ist ungültig.')
         if not isinstance(row['gruppe'], str) or row['gruppe'] not in GROUPS:
-            raise SelectionError('Unbekannte Zuordnung eines Sensors.')
+            raise SelectionError('Die Zuordnung eines Sensors ist unbekannt.')
         if any(type(row[name]) is not bool for name, _key, _scope, _text in FLAGS):
-            raise SelectionError('Ungültige Anfrage.')
+            raise SelectionError('Die Anfrage ist ungültig.')
         if rules.allowance_value(row['kuehler']) is None:
             raise SelectionError('"Darf kühler sein um" muss zwischen 0 und 10 °C in Schritten von 0,5 °C liegen.')
         if any(rules.influence_value(row[name]) is None for name in INFLUENCE_FIELDS):
@@ -682,10 +682,10 @@ SCRIPT = r"""
           form.setAttribute('data-revision', data.revision);
         }
       } else {
-        show(false, 'Speichern nicht möglich (Fehler ' + result.status + '). Es wurde nichts gespeichert.');
+        show(false, 'Das Speichern ist nicht möglich (Fehler ' + result.status + '). Es wurde nichts gespeichert.');
       }
     }).catch(function () {
-      show(false, 'Keine Verbindung zur App. Ob gespeichert wurde, ist unklar. Bitte die Seite neu laden.');
+      show(false, 'Die Seite erreicht die App nicht. Ob gespeichert wurde, ist unklar. Bitte die Seite neu laden.');
     }).then(function () { button.disabled = false; });
   });
   // Room learning (app 1.6.9): one action per button; the page reloads after it.
@@ -733,10 +733,10 @@ SCRIPT = r"""
         show(data.ok === true, data.message);
         if (data.ok === true) { window.setTimeout(function () { window.location.reload(); }, 1500); }
       } else {
-        show(false, 'Nicht möglich (Fehler ' + result.status + '). Es wurde nichts geändert.');
+        show(false, 'Die Aktion ist nicht möglich (Fehler ' + result.status + '). Es wurde nichts geändert.');
       }
     }).catch(function () {
-      show(false, 'Keine Verbindung zur App. Bitte die Seite neu laden.');
+      show(false, 'Die Seite erreicht die App nicht. Bitte die Seite neu laden.');
     }).then(function () { target.disabled = false; });
   });
 }());
@@ -775,7 +775,7 @@ SETTINGS_HELP = (
     'Sollwert des Heizkreises bleiben darf; die Meldung "zu kalt" nennt dann die erlaubte Temperatur. '
     '"Einfluss Heizkreis 1/2" (0 bis 100 %) sagt, wie stark der Heizkreis den Raum heizt; ein Raum kann an '
     'beiden Heizkreisen hängen. Unter 30 % wird der Raum für diesen Heizkreis nicht bewertet, ab 50 % zählt er '
-    'für "Heizkreis zu kalt". 0 % bei beiden Heizkreisen: nur Frost und Sensor werden geprüft.')
+    'für "Heizkreis zu kalt". Bei 0 % an beiden Heizkreisen werden nur Frost und Sensor geprüft.')
 LEARN_HELP = (
     '"Raum anlernen" wertet den Verlauf des Raums aus Home Assistant aus und schlägt Werte vor. Übernommen wird '
     'nur, was Sie bestätigen. Achtung: Ein Raum mit defektem Heizkörper oder Ventil würde als "kühler Raum" '
@@ -810,8 +810,8 @@ def learning_html(entity, index, view, editable, zone, zones):
         elif learned is None:
             out.append('<p>Noch nicht angelernt.</p>')
     elif entry['state'] == 'recording':
-        out.append(f'<p>Aufzeichnung läuft bis {escape(_time(entry["end"], zone, zones))}. Bis dahin meldet dieser '
-                   'Raum keine Heizungsprobleme; Frost und Sensor werden weiter geprüft.</p>')
+        out.append(f'<p>Die Aufzeichnung läuft bis {escape(_time(entry["end"], zone, zones))}. Bis dahin meldet '
+                   'dieser Raum keine Heizungsprobleme, Frost und Sensor werden aber weiter geprüft.</p>')
         if editable:
             out.append('<button type="button" class="zweit" data-aktion="abbrechen">Aufzeichnung abbrechen</button>')
     else:
@@ -886,7 +886,7 @@ def render_picker(status, rows, areas, stored, viewer, nonce, *, zone=None, zone
         lines.append(f'<p class="hinweis">{escape(note)}</p>')
     learn_hint = learning_view is not None
     lines.append('<p>Jeder Sensor gehört höchstens zu einer Gruppe: Heizkreis 1, Heizkreis 2 oder Weitere Räume '
-                 '(Räume ohne Heizkreis, z. B. Keller). Nach dem Speichern gilt die Auswahl sofort; die Wartezeiten '
+                 '(Räume ohne Heizkreis, etwa der Keller). Nach dem Speichern gilt die Auswahl sofort; die Wartezeiten '
                  'der Überwachung beginnen dann neu. Die Einstellungen bleiben im Tab Konfiguration der App sichtbar '
                  'und dort änderbar.</p>')
     lines.append(f'<p>{escape(SETTINGS_HELP)}</p>')
@@ -1102,7 +1102,7 @@ class RoomPicker:
         try:
             request = parse_request(rules.strict_json(raw))
         except (ValueError, UnicodeError, RecursionError):
-            return refuse(400, 'Ungültige Anfrage. Es wurde nichts gespeichert.')
+            return refuse(400, 'Die Anfrage ist ungültig. Es wurde nichts gespeichert.')
         except SelectionError as error:
             return refuse(400, error.args[0] + ' Es wurde nichts gespeichert.')
         api = self._api()
@@ -1138,17 +1138,17 @@ class RoomPicker:
                 return refuse(502, f'Home Assistant hat die Einstellungen nicht gespeichert (Fehler {error.status}). '
                                    'Es wurde nichts geändert.')
             except ApiError:
-                return refuse(504, 'Keine Antwort von Home Assistant. Ob gespeichert wurde, ist unklar. '
+                return refuse(504, 'Home Assistant antwortet nicht. Ob gespeichert wurde, ist unklar. '
                                    'Bitte die Seite neu laden und prüfen.', 'save_unconfirmed')
             confirmed = self._stored(api)
             if confirmed is None or house_part(confirmed) != house:
                 return refuse(502, 'Home Assistant hat das Speichern gemeldet, die Prüfung ist aber '
                                    'fehlgeschlagen. Bitte die Seite neu laden und prüfen.', 'save_unconfirmed')
             parsed = rules.parse_house_options(confirmed)
-            message = 'Gespeichert. '
+            message = 'Die Einstellungen sind gespeichert. '
         else:
             confirmed = stored
-            message = 'Keine Änderung zu speichern. '
+            message = 'Es gibt keine Änderung zu speichern. '
         if parsed == self.monitor.options and self.monitor.pending is None:
             applied, message = True, message + 'Die Überwachung verwendet diese Auswahl bereits.'
         else:
@@ -1189,7 +1189,7 @@ class RoomPicker:
                 or type(document['geprueft']) is not bool
                 or not (document['tage'] is None or type(document['tage']) is int)
                 or not isinstance(document['revision'], str) or not REVISION_PATTERN.fullmatch(document['revision'])):
-            return refuse(400, 'Ungültige Anfrage. Es wurde nichts geändert.')
+            return refuse(400, 'Die Anfrage ist ungültig. Es wurde nichts geändert.')
         action, entity, days = document['aktion'], document['entity_id'], document['tage']
         if action == 'abbrechen':
             status, message = self.learning.cancel(entity)
@@ -1205,18 +1205,18 @@ class RoomPicker:
         groups = {e: g for e, g in selection_of(stored)[0].items() if g != 'weitere'}
         if entity not in groups:
             return refuse(400, 'Nur ein gespeicherter Raum an einem Heizkreis kann angelernt werden. '
-                               'Erst speichern.')
+                               'Bitte zuerst speichern.')
         home = 'hc1' if groups[entity] == 'heizkreis_1' else 'hc2'
         current = room_values(stored)[entity]
         if action == 'anlernen':
             if days not in (0,) + learning.PERIODS:
-                return refuse(400, 'Ungültiger Zeitraum. Es wurde nichts geändert.')
+                return refuse(400, 'Der Zeitraum ist ungültig. Es wurde nichts geändert.')
             status, message = self.learning.start(entity, home, current, days=days or learning.MAX_DAYS,
                                                   wait=self.learn_wait, identity=(user, prefix) if prefix else None)
             return status, {'ok': status in (200, 202), 'message': message}
         if action == 'aufzeichnen':
             if days not in learning.RECORD_PERIODS:
-                return refuse(400, 'Ungültige Dauer der Aufzeichnung. Es wurde nichts geändert.')
+                return refuse(400, 'Die Dauer der Aufzeichnung ist ungültig. Es wurde nichts geändert.')
             status, message = self.learning.record(entity, days)
             return status, {'ok': status == 200, 'message': message}
         # uebernehmen and zuruecksetzen write the room options.
@@ -1228,7 +1228,7 @@ class RoomPicker:
         else:
             entry = self.learning.proposal(entity)
             if entry is None:
-                return refuse(409, 'Kein Vorschlag zum Übernehmen. Bitte die Seite neu laden.')
+                return refuse(409, 'Es gibt keinen Vorschlag zum Übernehmen. Bitte die Seite neu laden.')
             if self.learning.clock() - entry['made'] > learning.PROPOSAL_MAX_AGE_S:
                 return refuse(409, 'Der Vorschlag ist älter als 7 Tage. Bitte neu anlernen. Es wurde nichts geändert.')
             if entry['home'] != home or entry['current'] is None or tuple(entry['current']) != tuple(current):
@@ -1245,8 +1245,8 @@ class RoomPicker:
         if status == 200:
             if action == 'zuruecksetzen':
                 self.learning.forget(entity)
-                answer['message'] = 'Zurückgesetzt auf die Standardwerte. ' + answer['message']
+                answer['message'] = 'Der Raum ist auf die Standardwerte zurückgesetzt. ' + answer['message']
             else:
                 self.learning.accepted(entity, values, entry['made'])
-                answer['message'] = 'Vorschlag übernommen. ' + answer['message']
+                answer['message'] = 'Der Vorschlag ist übernommen. ' + answer['message']
         return status, answer
