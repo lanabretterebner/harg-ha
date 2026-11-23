@@ -147,6 +147,15 @@ class UnitTests(unittest.TestCase):
             row = telnet(); row.update(last_observed_at=observed, age_seconds=age)
             self.assertEqual(h.normalize('telnet', row)['status'], 'healthy')
 
+    def test_telnet_fresh_holds_late_samples_within_display_window(self):
+        # Incident 2026-11-22: snapshots arrived every 3-15 s. The monitor
+        # reports fresh up to the 50 s display window (telnet_source.DISPLAY_AFTER).
+        for age in (15.6, 30, 50):
+            row = telnet(); row.update(last_observed_at=NOW-age, age_seconds=age)
+            self.assertEqual(h.normalize('telnet', row)['status'], 'healthy')
+        row = telnet(); row.update(last_observed_at=NOW-50.5, age_seconds=50.5)
+        with self.assertRaises(h.Refusal): h.normalize('telnet', row)
+
     def test_telnet_maintenance_without_profile_or_prior_sample_is_suppression(self):
         row = telnet('maintenance')
         row.update(profile_id=None, expected_metric_count=0, available_metric_count=0,

@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.6.11
+
+- **Telnet health no longer flaps on a slow VM disk** (incident 2026-11-22:
+  snapshots arrived every 3-15 s instead of about every second). The VM's
+  Telnet monitor now reports `fresh` while its newest frame is up to 50 s old
+  (the dashboard's and HA's display window for Telnet readings), instead of
+  5 s. The health check (`health_alerts.py`, the same file as
+  `tools/monitoring`) accepts such a report as healthy; a `fresh` report older
+  than 50 s is still refused. Install this app before the VM release that
+  changes the monitor: an older app would refuse the VM's held `fresh` reports
+  and raise an alert.
+- Control behaviour is unchanged: commands and control decisions keep their
+  strict 5 s Telnet lifetime.
+
 ## 1.6.10
 
 - **Raum anlernen reads the long-kept data** (owner request 2026-11-19:

@@ -229,10 +229,12 @@ def normalize(kind, document):
               or not math.isclose(age, max(0, checked - observed), rel_tol=0, abs_tol=0.000001)):
             raise Refusal('result_invalid')
         if state == 'fresh':
-            # This validates the monitor's own5s sample contract at its original
-            # check time. It does not refresh a sensor or control-path authority.
+            # This validates the monitor's own sample contract at its original
+            # check time: a frame within the 50 s display window
+            # (telnet_source.DISPLAY_AFTER). It does not refresh a sensor or
+            # control-path authority.
             if (profile is None or expected == 0 or observed is None or reasons
-                    or observed - checked > 2 or age > 5):
+                    or observed - checked > 2 or age > 50):
                 raise Refusal('result_invalid')
         elif state == 'maintenance':
             if reasons != ['maintenance_active'] or available != 0:
