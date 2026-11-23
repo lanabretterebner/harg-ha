@@ -11,7 +11,7 @@ import json
 import math
 import re
 
-APP_VERSION = '1.6.11'
+APP_VERSION = '1.6.12'
 REPORT_SCHEMA = 'harg-house-report/1'
 CONTEXT_SCHEMA_PREFIX = 'harg-house-context/'
 # Context major 2 has the keys of 1; an adapter sends it only to an app that
@@ -108,6 +108,8 @@ TYPE_CONSTANTS = {
               'startup': 1800, 'cold_day_only': True, 'cold_settle': 14400, 'cold_pause': 86400,
               'trend': 10800},
 }
+# Radiator circuit_cold follows the same day-phase judging from app 1.6.12 (owner
+# decision 2026-11-23), with its own 2 h settle and the same 24 h night hold.
 # Underfloor circuit_cold (owner decision 2026-11-18; designed for split daily
 # programmes such as 06:00-09:00 and 15:00-23:00 with setback between). With the general 8 h settle
 # and 8 h dwell the check needed one 16 h phase and could never fire. Now it is
@@ -1080,12 +1082,17 @@ class HouseEngine:
         for (code, entity), latch in self.latches.items():
             circuit = self.sensors[entity].role
             limit = self._pause_limit(circuit, code)
+            if code == 'limit_cold' and latch.active:
+                limit = TYPE_CONSTANTS['floor']['cold_pause']   # held through a night (see _circuit)
             latch.update(None, None, now, elapsed, math.inf, limit)
         for entity, latch in self.cold_dwell.items():
             latch.update(None, None, now, elapsed, math.inf, self._pause_limit(self.sensors[entity].role, 'room_cold'))
         for circuit in self.circuits.values():
             limit = self._pause_limit(circuit.name, 'circuit')
-            circuit.circuit_cold.update(None, None, now, elapsed, math.inf, limit)
+            # circuit_cold holds through a night (see _circuit): HA or the app
+            # being away for a moment must not end it after hours of setback.
+            hold_limit = TYPE_CONSTANTS['floor']['cold_pause'] if circuit.circuit_cold.active else limit
+            circuit.circuit_cold.update(None, None, now, elapsed, math.inf, hold_limit)
             circuit.circuit_warm.update(None, None, now, elapsed, math.inf, limit)
         for entity in list(self.windows):
             self._window_pause(entity, elapsed, now)
@@ -1375,15 +1382,20 @@ class HouseEngine:
             dwell.update(fire, hold, now, elapsed, constants['cold_room'],
                          floor_rules['cold_pause'] if day_only else limit)
             self._room_cold(entity, dwell, base, reached[entity], now, values.get(entity), target)
-            # limit_cold
+            # limit_cold: judged in the day phase only. During setback no new
+            # notice starts and an existing one holds through the night (up to
+            # 24 h), so it no longer ends every evening and needs another 6 h
+            # (12 h underfloor) the next day (review 2026-11-23).
+            limit_latch = self.latch('limit_cold', entity)
+            limit_pause = TYPE_CONSTANTS['floor']['cold_pause'] if limit_latch.active else limit
             if absent or not known or cls in (UNKNOWN, TRANSITION):
                 fire = hold = None
+            elif source['phase'] is not None and source['phase'] != 'day':
+                fire, hold = False, None
             elif cls != LIMIT_OFF:
                 fire = hold = False
             elif source['phase'] is None:
                 fire = hold = None
-            elif source['phase'] != 'day':
-                fire = hold = False
             elif options.total(entity) < ROOM_SETTINGS['judged']:
                 fire = hold = False
             elif not ok or aired or d is None:
@@ -1394,8 +1406,8 @@ class HouseEngine:
                 else:
                     fire = outdoor_avg < 10.0 and d >= 2.5
                 hold = d >= 2.0
-            self.latch('limit_cold', entity).update(
-                fire, hold, now, elapsed, constants['limit_cold'], limit,
+            limit_latch.update(
+                fire, hold, now, elapsed, constants['limit_cold'], limit_pause,
                 lambda e=entity: {'room': half(values[e]), 'target': half(target)})
             warm_allowed = entity not in self.options.no_warm
             # room_warm (night only)
@@ -1475,31 +1487,40 @@ class HouseEngine:
         cold_limit = limit
         if base is not True:
             fire = hold = base
-        elif constants.get('cold_day_only'):
-            # Underfloor (see TYPE_CONSTANTS): day phase only, after cold_settle.
-            cold_limit = constants['cold_pause']
+            if base is None and circuit.circuit_cold.active:
+                # Unknown (VM offline or in maintenance, status 2, unknown phase or
+                # type): never judged; an existing finding holds as through a night,
+                # so a short gap after hours of setback does not end it.
+                cold_limit = TYPE_CONSTANTS['floor']['cold_pause']
+        else:
+            # Both circuit types: judged in a day phase only, against the day
+            # target, after the heat-up (owner decisions 2026-11-18 underfloor,
+            # 2026-11-23 radiators). Setback or an unknown phase is never judged:
+            # no new finding, and an existing one holds (the pause covers a night,
+            # the same 24 h bound for both types, so the rule constants and the
+            # saved state stay as they are) until the next day phase is judged
+            # warm enough. A failed pump's Störung therefore stays raised overnight
+            # instead of ending at the setback target and returning next day.
+            # The night hold is for an existing finding; a radiator's dwell
+            # towards a new one keeps its own pause (a warming spell resets it as
+            # before). A heat-up resets a dwell that is not yet active, so a new
+            # finding needs one day phase of settle + 3 h (radiator 5 h, floor 7 h).
+            floor_branch = bool(constants.get('cold_day_only'))
+            cold_limit = (TYPE_CONSTANTS['floor']['cold_pause'] if floor_branch or circuit.circuit_cold.active
+                          else limit)
             day_phase = bool(source) and source['phase'] == 'day'
+            heat_up = cold_settling if floor_branch else settling
             if not day_phase:
                 fire = hold = None          # setback or unknown phase: never judged, a finding holds
-            elif cold_settling:
-                fire, hold = False, None    # heat-up: no new finding, an existing one holds
+            elif heat_up:
+                fire, hold = False, None    # heat-up, dial tap or mode change: no new finding, an existing one holds
             elif (len(judged) < 2 or target is None or source.get('day_target') is None
                   or any(self.sensors[e].airing(now, recovery) for e in judged)):
                 fire = hold = None
             else:
                 fire, hold = cold(judged, 3.0, 2.5)   # target is the day target in the day phase
                 if fire and any(warming[e] for e in judged):
-                    fire = None  # still warming (back from a holiday): wait, a working circuit
-        elif settling:
-            fire = hold = False
-        elif len(judged) < 2 or target is None or any(self.sensors[e].airing(now, recovery) for e in judged):
-            # The short pause after a fast drop only: a failed pump must not
-            # wait until an aired room has come back.
-            fire = hold = None
-        else:
-            fire, hold = cold(judged, 3.0, 2.5)
-            if fire and any(warming[e] for e in judged):
-                fire = None      # still warming up (after a holiday, a cold morning): wait
+                    fire = None  # still warming (after a holiday, a cold morning): wait, a working circuit
         circuit.circuit_cold.update(
             fire, hold, now, elapsed, constants['cold_circuit'], cold_limit,
             # The room furthest below its own limit (with allowances the lowest

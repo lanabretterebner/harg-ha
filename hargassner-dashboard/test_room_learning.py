@@ -190,6 +190,19 @@ class AnalysisTests(unittest.TestCase):
         self.assertTrue(any(re.match(r'Anstieg beim Aufheizen 0,[89] K/h, HK1 \(14 Aufheizvorgänge\)', line)
                             for line in result['evidence']), result['evidence'])
 
+    def test_day_level_settles_again_after_a_target_raise(self):
+        # Review 2026-11-23: the rules settle after a target change, the learner
+        # only after a phase change, so an evening raise counted the 2 h the room
+        # needs to follow it as a deficit.
+        start, end = DAY0, DAY0 + 4 * 86400
+        target = lambda wall: 23.0 if hours(wall) >= 18 else 21.0
+        room = lambda wall: min(23.0, 21.0 + (hours(wall) - 18)) if hours(wall) >= 18 else 21.0
+        walls = range(int(start), int(end), 600)
+        result = rl.analyse([(wall, room(wall)) for wall in walls], {'hc1': [(wall, 'day', target(wall), 1) for wall in walls]},
+                            start=start, end=end, home='hc1', kinds=KINDS, current=(0.0, 100, 0))
+        self.assertGreaterEqual(result['facts']['days'], 3)
+        self.assertEqual(result['facts']['deficit'], 0.0)
+
     def test_cold_room_heated_by_sun_and_neighbour(self):
         result, _failed = analyse(History(sun_room, 14))
         allowance, first, second = result['proposal']
@@ -533,6 +546,21 @@ class LearningFlowTests(unittest.TestCase):
         folder = tempfile.mkdtemp()
         Path(folder, 'room_learning.json').write_text('{"schema": "harg-room-learning/1", "rooms": 1}')
         self.assertEqual(rl.LearningFile(str(Path(folder, 'room_learning.json'))).load(), {'rooms': {}, 'learned': {}})
+
+    def test_one_damaged_entry_keeps_the_other_rooms(self):
+        # Review 2026-11-23: one bad entry used to discard every recording,
+        # proposal and learned date (and the next save made that final).
+        folder = tempfile.mkdtemp()
+        good = {'state': 'recording', 'start': 1_000_000.0, 'end': 1_000_000.0 + 7 * 86400, 'days': 7}
+        document = {'schema': rl.LEARNING_SCHEMA,
+                    'rooms': {'sensor.wohnzimmer': good, 'sensor.kueche': {'state': 'recording', 'days': 'x'},
+                              'Bad Entity': good},
+                    'learned': {'sensor.bad': {'wall': 1_000_000.0, 'values': [2.0, 100, 0]},
+                                'sensor.keller': {'wall': 'x', 'values': []}}}
+        Path(folder, 'room_learning.json').write_text(json.dumps(document))
+        self.assertEqual(rl.LearningFile(str(Path(folder, 'room_learning.json'))).load(),
+                         {'rooms': {'sensor.wohnzimmer': good},
+                          'learned': {'sensor.bad': {'wall': 1_000_000.0, 'values': [2.0, 100, 0]}}})
 
     def test_only_admins_and_only_rooms_on_a_circuit(self):
         world = LearningWorld(normal_room)

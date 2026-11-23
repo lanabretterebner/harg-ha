@@ -41,16 +41,16 @@ class MonitorProxyHandler(ProxyHandler):
                 return self.save_rooms(target, route, user, prefix)
             if route == LEARN_PATH:
                 if self.command != 'POST':
-                    raise Rejected(405, 'Only POST.')
+                    raise Rejected(405, 'Nur POST ist erlaubt.')
                 learn = self.server.house_learn
                 return self.save_rooms(target, route, user, prefix, None if learn is None else (
                     lambda user_, token, body: learn(user_, token, body, prefix=prefix)))
             if self.command != 'GET':
-                raise Rejected(405, 'Read-only status endpoint.')
+                raise Rejected(405, 'Dieser Status kann nur gelesen werden.')
             if target != route or self.headers.get_all('Transfer-Encoding') or self.headers.get_all('Expect'):
-                raise Rejected(400, 'Invalid status request.')
+                raise Rejected(400, 'Ungültige Statusanfrage.')
             if one_header(self.headers, 'Content-Length') not in (None, '0'):
-                raise Rejected(400, 'A status body is not allowed.')
+                raise Rejected(400, 'Eine Statusanfrage hat keinen Inhalt.')
             if route == STATUS_PATH:
                 document = self.server.monitor_status()
                 self.reply(200, json.dumps(document, allow_nan=False).encode(), (
@@ -63,7 +63,7 @@ class MonitorProxyHandler(ProxyHandler):
             except Exception:
                 # Fixed text only; the house monitor never affects ingress.
                 self.server.diagnostics.emit('internal')
-                raise Rejected(503, 'Room monitor status is not available.') from None
+                raise Rejected(503, 'Die Raumüberwachung ist gerade nicht verfügbar.') from None
             self.reply(200, body, (
                 ('Content-Type', 'text/html; charset=utf-8'), ('Cache-Control', 'no-store'),
                 ('Content-Security-Policy', PAGE_POLICY.format(nonce=nonce)),

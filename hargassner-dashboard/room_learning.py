@@ -456,16 +456,22 @@ def analyse(room_rows, circuit_rows, *, start, end, home, kinds, current, utc_of
     home_series = circuits.get(home)
     if home_series is not None:
         kind = kinds.get(home) or 'radiator'
-        day_since, last_phase = None, None
+        day_since, last_phase, last_target = None, None, None
         when = max(start, first_data)
         while when <= end:
             row = home_series.at(when)
             phase = row[1] if row else None
+            target_now = row[2] if row else None
             if phase == 'day' and last_phase != 'day':
+                day_since = when
+            elif (phase == 'day' and target_now is not None and last_target is not None
+                  and abs(target_now - last_target) >= 0.05):
+                # A target change settles again, as the room rules do (review
+                # 2026-11-23): an evening raise no longer inflates the deficit.
                 day_since = when
             if phase != 'day':
                 day_since = None
-            last_phase = phase
+            last_phase, last_target = phase, target_now
             value = level.at(when)
             if (row is not None and phase == 'day' and row[2] is not None and row[3] in SUPPLYING_CODES
                     and day_since is not None and when - day_since >= SETTLE_S[kind]
@@ -557,7 +563,7 @@ def analyse(room_rows, circuit_rows, *, start, end, home, kinds, current, utc_of
             influence[name] = _round5(100.0 * max(0.0, rate) / REFERENCE_RATE[kind])
             evidence.append(f'Anstieg beim Aufheizen {kelvin(rate)} K/h, {label} ({len(own)} Aufheizvorgänge).')
         elif shared >= EVENTS_MIN and not own:
-            evidence.append(f'{label}: nur gemeinsam mit dem anderen Heizkreis aufgeheizt ({shared}mal); '
+            evidence.append(f'{label}: nur gemeinsam mit dem anderen Heizkreis aufgeheizt ({shared}-mal); '
                             'sein Anteil ist nicht trennbar und bleibt unverändert.')
         else:
             evidence.append(f'{label}: zu wenig Aufheizvorgänge ({len(own)} von mindestens {EVENTS_MIN}); '
@@ -833,15 +839,18 @@ class LearningFile:
             if not isinstance(rooms, dict) or not isinstance(learned, dict) \
                     or len(rooms) > rules.MAX_SENSORS or len(learned) > rules.MAX_SENSORS:
                 raise ValueError
+            # One damaged room entry drops only that entry (review 2026-11-23):
+            # the other rooms' recordings, proposals and dates are kept. A file
+            # that is damaged as a whole (or of another schema) starts empty.
             result = {'rooms': {}, 'learned': {}}
-            for entity, entry in rooms.items():
-                if not rules.ENTITY_PATTERN.fullmatch(entity):
-                    raise ValueError
-                result['rooms'][entity] = _clean_entry(entry, now)
-            for entity, entry in learned.items():
-                if not rules.ENTITY_PATTERN.fullmatch(entity):
-                    raise ValueError
-                result['learned'][entity] = _clean_learned(entry)
+            for part, clean in (('rooms', lambda entry: _clean_entry(entry, now)), ('learned', _clean_learned)):
+                for entity, entry in document[part].items():
+                    try:
+                        if not rules.ENTITY_PATTERN.fullmatch(entity):
+                            raise ValueError
+                        result[part][entity] = clean(entry)
+                    except (ValueError, TypeError, KeyError, RecursionError):
+                        continue
             return result
         except (ValueError, TypeError, UnicodeError, RecursionError):
             return empty

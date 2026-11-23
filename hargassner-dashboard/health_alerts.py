@@ -600,6 +600,22 @@ def ha_notification(event):
     return 'create', {**identity, 'title': title, 'message': message}
 
 
+def webhook_text(event):
+    """German chat text for the CLI webhook formats, from the same copy as the
+    Home Assistant notification; the event id stays for tracing."""
+    action, payload = ha_notification(event)
+    label = {'heartbeat': 'Status', 'certificate': 'Zertifikat', 'telnet': 'Messwerte'}[event['component']]
+    if action == 'create':
+        text = payload['title'] + '. ' + payload['message']
+    elif event['transition'] == 'recovery':
+        text = 'Heizung: ' + label + ' wieder in Ordnung.'
+    elif event['transition'] == 'suppression':
+        text = 'Heizung: ' + label + ' in Wartung, keine Meldung bis zum Ende der Wartung.'
+    else:
+        text = 'Heizung: ' + label + ' nicht prüfbar, solange die Statusmeldung fehlt.'
+    return text + ' (Ereignis ' + event['event_id'] + ')'
+
+
 def delivery(event, config):
     if 'home_assistant' in config:
         ha = config['home_assistant']
@@ -616,7 +632,7 @@ def delivery(event, config):
     hook = config.get('webhook')
     if hook is None:
         raise Refusal('destination_unconfigured')
-    text = f"Hargassner health: {event['component']} {event['transition']} ({event['reason']}); event {event['event_id']}"
+    text = webhook_text(event)
     format_ = hook.get('format', 'generic')
     body = event if format_ == 'generic' else {'text' if format_ == 'slack' else 'content' if format_ == 'discord' else 'message': text}
     if format_ == 'ntfy':

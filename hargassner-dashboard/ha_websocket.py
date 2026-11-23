@@ -315,8 +315,8 @@ class ContextSubscription:
         if self.socket is None:
             raise WebSocketError('closed')
         now = self.monotonic()
-        if self.pong_wait is not None and now > self.pong_wait[1]:
-            raise WebSocketError('pong_timeout')
+        # The pong deadline is checked after reading: a pong already waiting in
+        # the socket after a slow cycle (sampling, saving) is not a timeout.
         if self.pong_wait is None and now >= self.ping_at:
             identity = self.next_id
             self.next_id += 1
@@ -351,6 +351,8 @@ class ContextSubscription:
                 raise WebSocketError('protocol')
             if self.monotonic() >= deadline or len(messages) >= 64:
                 break
+        if self.pong_wait is not None and self.monotonic() > self.pong_wait[1]:
+            raise WebSocketError('pong_timeout')
         return messages
 
     def close(self):

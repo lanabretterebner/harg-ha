@@ -1,11 +1,11 @@
-/* Hargassner thermostat popup and dashboard card, v1.4.16.
+/* Hargassner thermostat popup and dashboard card, v1.4.17.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. Qualified target gestures use guarded climate.set_temperature.
  * Unknown-target correction controls use the separately commissioned number.set_value.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.16";
+const VERSION = "1.4.17";
 // Coalesce rapid native +/- gestures while reducing the avoidable send delay.
 const TEMPERATURE_BUTTON_DEBOUNCE_MS = 250;
 const SCHEMA = "configured_room_setpoint_v1";
@@ -774,7 +774,7 @@ export function createHargassnerCorrectionControl(environment, current) {
   const note = document.createElement("div"); note.setAttribute("role", "status"); note.setAttribute("aria-live", "polite");
   note.style.cssText = "min-height:0;font-size:11px;line-height:16px;margin-top:2px;color:var(--secondary-text-color)";
   node.append(controlStyle, label, dial, buttons, note);
-  let closed = false, model = null, session = null, scope = null, epoch = 0, timer = null, draft = null, dragging = null, visible = false;
+  let closed = false, model = null, session = null, scope = null, epoch = 0, timer = null, draft = null, dragging = null, visible = false, lastLink = null;
   const notify = () => { for (const listener of [...(model?.listeners || [])]) listener(); };
   const cancelDraft = () => { if (timer !== null) environment.clearTimeout(timer); timer = null; draft = null; dragging = null; epoch++; };
   const read = () => {
@@ -795,13 +795,17 @@ export function createHargassnerCorrectionControl(environment, current) {
   };
   function render() {
     if (closed) return;
-    const context = read(); bind(context); visible = context.shown;
+    const context = read(); bind(context); visible = context.shown; lastLink = context.link?.entity ?? null;
     if (node.hidden !== !visible) node.hidden = !visible;
     if (!visible) return;
     const { link } = context;
+    // Confirmation compares Home Assistant's own timestamps only: a readback of
+    // the requested value that is a newer state than the one seen at the
+    // request. The phone's clock never decides (a phone a few seconds ahead of
+    // or behind Home Assistant left every request "unklar"; review 2026-11-23).
     const receipt = Date.parse(link.state.last_updated);
-    if (model?.intent && link.available && Number.isFinite(receipt) && receipt > model.intent.beforeStamp &&
-        receipt >= model.intent.startedAt && receipt <= Date.now() + 5000 && link.value === model.intent.value) {
+    if (model?.intent && link.available && Number.isFinite(receipt) && link.state !== model.intent.beforeState &&
+        (model.intent.beforeStamp === null || receipt > model.intent.beforeStamp) && link.value === model.intent.value) {
       if (model.intent.timer !== null) environment.clearTimeout(model.intent.timer);
       model.intent = null; model.failure = false;
     }
@@ -840,8 +844,8 @@ export function createHargassnerCorrectionControl(environment, current) {
     draft = null; dragging = null;
     if (desired === context.link.value && !model.intent) { render(); return; }
     const beforeStamp = Date.parse(context.link.state.last_updated);
-    const owner = model, intent = { value: desired, beforeStamp: Number.isFinite(beforeStamp) ? beforeStamp : Date.now(),
-      startedAt: Date.now(), status: "pending", timer: null };
+    const owner = model, intent = { value: desired, beforeStamp: Number.isFinite(beforeStamp) ? beforeStamp : null,
+      beforeState: context.link.state, status: "pending", timer: null };
     owner.intent = intent; owner.failure = false; notify();
     intent.timer = environment.setTimeout(() => { if (owner.intent === intent) { intent.status = "sent_unconfirmed"; notify(); } }, 8000);
     const uncertain = error => {
@@ -912,7 +916,7 @@ export function createHargassnerCorrectionControl(environment, current) {
     if (desired === null || !change(desired)) { cancelDraft(); render(); } // An unsent release keeps no draft.
   });
   dial.addEventListener("pointercancel", () => { cancelDraft(); render(); });
-  return { node, render, retire() { cancelDraft(); render(); }, dispose() { closed = true; cancelDraft(); model?.listeners.delete(render); node.remove(); } };
+  return { node, render, link: () => lastLink, retire() { cancelDraft(); render(); }, dispose() { closed = true; cancelDraft(); model?.listeners.delete(render); node.remove(); } };
 }
 
 
@@ -1257,7 +1261,35 @@ export function installHargassnerThermostatCard(environment = window) {
         if (config.name !== undefined && typeof config.name !== "string") throw new Error("Name muss Text sein.");
         this._dispose(); this._config = { entity: config.entity, name: config.name }; this._render();
       }
-      set hass(value) { this._hass = value; this._render(); }
+      set hass(value) { this._hass = value; if (!this._quietUpdate(value)) this._render(); }
+      // Home Assistant assigns a new hass object on every state change in the
+      // house. Re-render only when something this card shows or gates changed:
+      // its climate entity, its correction number, connection, user, config,
+      // locale or entity registry, compared with what the last render saw (so
+      // an earlier object changed in place cannot hide a change). A rendering
+      // skip never grants anything: every gesture and command re-checks the
+      // live hass. The same states object, a pending request or a load always
+      // renders.
+      _renderSnapshot(hass) {
+        const link = this._correctionControl?.link() ?? null;
+        return { hass, states: hass.states, state: hass.states?.[this._config?.entity], connection: hass.connection,
+          connected: hass.connected, user: hass.user, config: hass.config, locale: hass.locale, localize: hass.localize,
+          entities: hass.entities, link, linkState: link === null ? undefined : hass.states?.[link] };
+      }
+      _quietUpdate(next) {
+        const seen = this._rendered, entity = this._config?.entity, state = next?.states?.[entity];
+        if (!this._ui || !seen || !next || seen.hass === next || seen.states === next.states || !entity ||
+            this._presentation?.intent || this._busy || this._pending || this._failed ||
+            seen.state !== state || seen.connection !== next.connection || seen.connected !== next.connected ||
+            seen.user !== next.user || seen.config !== next.config || seen.locale !== next.locale ||
+            seen.localize !== next.localize || seen.entities !== next.entities) return false;
+        if (state?.attributes?.hargassner_correction_id === undefined) return true;
+        // The link is resolved again (one scan, far cheaper than a render), so a
+        // second number claiming the same identity hides the dial at once.
+        const link = this._correctionControl?.link();
+        return typeof link === "string" && seen.link === link && seen.linkState === next.states?.[link] &&
+          resolveHargassnerCorrection(next, state)?.entity === link;
+      }
       get hass() { return this._hass; }
       getCardSize() { return 7; }
       getGridOptions() { return { columns: 12, rows: 7, min_columns: 6, min_rows: 6 }; }
@@ -1278,7 +1310,7 @@ export function installHargassnerThermostatCard(environment = window) {
         this._haConnection?.dispose?.(); this._haConnection = null;
         this._cancelNative(true); this._presentationUnsubscribe?.(); this._presentationUnsubscribe = null; this._presentation = new HargassnerTargetPresentation();
         if (this._binding) this._binding.menu.removeEventListener("wa-select", this._binding.handler);
-        this._binding = null; this._ui = null; this._failed = false; this._busy = false;
+        this._binding = null; this._ui = null; this._failed = false; this._busy = false; this._rendered = null;
         this.shadowRoot.replaceChildren();
       }
       _connectedHA() { return haConnected(this._hass) && this._haConnection?.connected !== false; }
@@ -1512,6 +1544,7 @@ export function installHargassnerThermostatCard(environment = window) {
       _render() {
         if (!this.isConnected || !this._config || !this._hass) return;
         if (!this._ui) this._build();
+        this._rendered = this._renderSnapshot(this._hass);
         if (!sameHaSession(this._haSession, this._hass)) {
           // Retire the old callbacks permanently, including A -> B -> A, while
           // retaining the native DOM and separately available mode selector.

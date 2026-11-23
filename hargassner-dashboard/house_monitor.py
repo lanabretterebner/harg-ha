@@ -240,7 +240,7 @@ class HouseMonitor:
         self.zones = {}
         self.last_report = None
         self.last_report_wall = None
-        self.last_identities = None
+        self.last_identities = self.published_identities = None
         self.seq = 0
         self.publish_state = None
         self.ack = None
@@ -362,7 +362,7 @@ class HouseMonitor:
             self.started = now
             self.next_sample = now
             self.next_labels = now
-            self.last_identities = None
+            self.last_identities = self.published_identities = None
         if not options.valid:
             self._log('config_invalid')
         done.set()
@@ -561,8 +561,14 @@ class HouseMonitor:
         try:
             api.publish(topic, payload)
             self.publish_state, self.last_report_wall = 'ok', self.clock()
+            self.published_identities = current
         except ApiError:
             self.publish_state = 'failed'
+            # A changed finding set that did not go out is due again after the
+            # 10 s spacing; an unchanged one waits for the 120 s period. Before
+            # any report went out (a publish failing from app start) there is
+            # no change to deliver yet, so it waits for the period too.
+            self.last_identities = current if self.published_identities is None else self.published_identities
             self._log('publish_failed')
         return True
 
@@ -572,14 +578,19 @@ class HouseMonitor:
         with self.lock:
             state, context = self.fresh_context(now)
             parts = self.current_report(now)
-            ack = self.ack if self.ack is not None and self.ack['instance'] == self.instance else None
+            # The last acknowledgement counts only while the VM's context is
+            # current: an old "accepted" next to "Keine aktuellen Daten der VM"
+            # would be a stale state shown as current.
+            stale = self.ack is not None and state != 'ok'
+            ack = self.ack if self.ack is not None and not stale and self.ack['instance'] == self.instance else None
             return {
                 'valid': self.options.valid, 'mode': self.options.mode, 'configured': self.options.configured,
                 'monitor': parts['monitor'], 'reason': parts['reason'], 'circuits': parts['circuits'],
                 'sensors': parts['sensors'], 'findings': len(parts['findings']),
                 'context': state, 'base_pinned': self.base is not None, 'websocket': self.socket_state,
                 'last_report_wall': self.last_report_wall, 'publish': self.publish_state,
-                'ack': ack['result'] if ack else None, 'ack_other_instance': self.ack is not None and ack is None,
+                'ack': ack['result'] if ack else None, 'ack_stale': stale,
+                'ack_other_instance': self.ack is not None and not stale and ack is None,
                 'basis_unknown': self.engine.basis_unknown_minutes(now) if self.engine else None,
                 'counters': dict(self.counters),
             }
@@ -683,8 +694,10 @@ def _time(wall, zone_name, zones):
     if wall is None:
         return 'noch keine'
     try:
-        if isinstance(zone_name, str) and zone_name in zones:
-            return datetime.fromtimestamp(wall, zones[zone_name]).strftime('%d.%m.%Y %H:%M')
+        # One read: the worker thread may clear the cache between a check and a read.
+        zone = zones.get(zone_name) if isinstance(zone_name, str) else None
+        if zone is not None:
+            return datetime.fromtimestamp(wall, zone).strftime('%d.%m.%Y %H:%M')
         return datetime.fromtimestamp(wall, timezone.utc).strftime('%d.%m.%Y %H:%M UTC')
     except (OverflowError, OSError, ValueError):
         return 'unbekannt'
@@ -716,6 +729,10 @@ def status_html(status, zone=None, zones=None):
                  + (' (Senden fehlgeschlagen)' if status['publish'] == 'failed' else '') + '</li>')
     if not status['base_pinned']:
         ack = 'Noch keine Daten von der VM empfangen. Die VM nimmt die Raummeldungen nicht an.'
+    elif status.get('ack_stale') and status.get('context') == 'unsupported':
+        ack = 'Keine gültige Bestätigung der VM: ihre Version passt nicht zu dieser App.'
+    elif status.get('ack_stale'):
+        ack = 'Keine aktuelle Bestätigung der VM, weil gerade keine aktuellen Daten der VM vorliegen.'
     elif status['ack'] is None and status['ack_other_instance']:
         ack = 'Die VM nimmt die Raummeldungen nicht an: sie bestätigt eine andere App.'
     elif status['ack'] is None:

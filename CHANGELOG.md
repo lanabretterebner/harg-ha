@@ -1,8 +1,15 @@
 # Changelog
 
+## 1.4.17
+
+- The dashboard card no longer re-renders on every state change in the house: Home Assistant hands every card a new state object whenever any entity changes, and both thermostat cards redid their whole update each time (on a phone, with two cards, several times a second). A card now updates only when its own climate entity, its room-correction number, the connection, the user, the configuration, the language or the entity registry changed. Gestures and commands still check the live state every time; a pending request always renders. Popup, dial and command behaviour unchanged.
+- The room-correction dial confirms a request from Home Assistant's own timestamps only (a readback of the requested value newer than the state seen at the request). Before, Home Assistant's time was compared with the phone's clock, so a phone a few seconds ahead of or behind Home Assistant left every request on "Bestätigung unklar" and never offered "±0" again. An older echo still confirms nothing.
+- Include the independently versioned app 1.6.12 (see `hargassner-dashboard/CHANGELOG.md`). Update the app separately through Supervisor.
+
 ## 1.4.16
 
 - Works with HA 2026.11: the dial follows the confirmed value after a dropped tap. HA 2026.11 (frontend 20261028) copies a new state into its native target dial only while no tap is waiting to be sent. When the card or popup drops a +/− tap unsent (target, phase or basis changed inside the 250 ms send window, connection or session lost, the popup closed, a refused request, or + and − back on the confirmed value), the dial stayed on that never-sent number and ignored every later update until the popup was reopened. The shared control lease now releases that native hold and shows the displayed value again. No new service call; correction-only and target contracts unchanged; earlier HA frontends are unaffected. Tests run HA 20261028.6's own native dial code (Apache-2.0) against card and popup for both circuits.
+- Keep the independently versioned app 1.6.11 unchanged.
 
 ## 1.4.15
 
@@ -54,28 +61,28 @@
 - Collapse the unavailable native target region only while the independent room-correction fallback is shown; restore native spacing when the configured target is available.
 - Show popup correction controls before Modus and status; stack card Modus and status vertically with centered spacing.
 - Keep native controls mounted, preserve command/readback behavior and retain separately rounded minus/plus buttons.
-- Keep the independently versioned ingress/monitor app1.5.2 byte-identical.
+- Keep the independently versioned ingress/monitor app 1.5.2 byte-identical.
 
 ## 1.4.7
 
 - Give minus and plus separate rounded, filled, subtly bordered buttons with a visible gap and 44-pixel touch targets.
 - Preserve compact card spacing, correction bounds, six-mode selection and existing command/readback behavior.
-- Include the independently versioned optional ingress/monitor app1.5.2 with notification-outbox, bounded configuration and incomplete-response fixes; update it separately through Supervisor.
+- Include the independently versioned optional ingress/monitor app 1.5.2 with notification-outbox, bounded configuration and incomplete-response fixes; update it separately through Supervisor.
 
 ## 1.4.6
 
 - Compact thermostat cards with aligned mode/status rows and Mushroom-style filled adjustment controls.
 - Remove visible step/range captions and redundant explanatory text; preserve enforced limits and accessible labels.
 - Preserve target/correction authority, unknown-value presentation, six-mode selection and native control behavior.
-- Keep the separately versioned ingress/monitor app1.5.1 unchanged.
+- Keep the separately versioned ingress/monitor app 1.5.1 unchanged.
 
 ## 1.4.5
 
 - Keep a separately qualified room-correction control available in the card and popup when Auto has no qualified configured target basis.
 - Preserve unknown configured targets, missing room readings, independent mode availability and backend command qualification.
-- Keep the separately versioned Supervisor ingress/monitor app1.5.1 unchanged.
+- Keep the separately versioned Supervisor ingress/monitor app 1.5.1 unchanged.
 
-## App1.5.1 checkpoint (frontend1.4.4 unchanged)
+## App 1.5.1 checkpoint (frontend 1.4.4 unchanged)
 
 Preserve the Supervisor environment through S6's with-contenv wrapper so enabled
 health monitoring starts alongside ingress. Startup errors log only fixed stage
@@ -90,28 +97,28 @@ Existing frontend tags and release assets are preserved.
 - Retire popup temperature API and debounce leases synchronously for coalesced connection/user and connectivity changes before Lit renders.
 - Subscribe only to owned native connection/config contexts; preserve existing hass setters and clean up on stop/reparent. Keep native nodes mounted and repeated-session drafts intact.
 - Add portable lifecycle regressions and eight real-DOM/context checks; extend maintained bounded installed-native probes.
-- Keep the separately versioned Supervisor ingress/monitor app1.5.0 byte-identical.
+- Keep the separately versioned Supervisor ingress/monitor app 1.5.0 byte-identical.
 
 ## 1.4.3
 
 - Preserve connection/user-scoped temperature API and debounce leases across reconnect and ABA, retaining uncertain requests without false rejection.
 - Keep submitted target stable and inert until qualified reconciliation; serialize burst adjustments and preserve independent six-mode controls.
 - Ship maintained bounded installed-native probes and automated local-only browser fixtures.
-- Include separately versioned Supervisor app1.5.0 with optional disabled-by-default independent health monitoring, durable notification outbox and authenticated read-only status.
+- Include separately versioned Supervisor app 1.5.0 with optional disabled-by-default independent health monitoring, durable notification outbox and authenticated read-only status.
 
 ## 1.4.2
 
 - Keep existing native card/control nodes during target changes; rotate only guarded callback/API leases.
 - Capture desired targets before debounce and retain them through pending or uncertain readback, with explicit status. Revert only on a bound rejection; never retry automatically.
 - Share memory-only ordered intent between card/popup surfaces; reconcile genuine mode/base changes and keep independent mode controls usable.
-- Preserve last confirmed inert targets for other-circuit/source gaps without an eight-second unmount. The ingress app remains1.4.0 unchanged.
+- Preserve last confirmed inert targets for other-circuit/source gaps without an eight-second unmount. The ingress app remains 1.4.0 unchanged.
 
 ## 1.4.1
 
 - Keep the last confirmed target visibly inert during qualified mode, base, offset and phase readback, with a fixed eight-second limit.
 - Cover both the custom thermostat card and native more-info popup; keep current reported mode/status truthful.
 - Permanently retire callbacks from earlier target contexts, including fully-qualified updates without a missing-target stage.
-- Leave the optional Supervisor ingress app at1.4.0 with identical source and configuration.
+- Leave the optional Supervisor ingress app at 1.4.0 with identical source and configuration.
 
 ## 1.4.0
 
@@ -133,7 +140,7 @@ Add offline native mode icons and a read-only Heizkreisstatus line to the
 single Modus popup. Include the existing dashboard Ingress proxy as a Supervisor
 app repository, status-aware native tiles, entity-naming reference and separate
 installation instructions. Native preset forwarding and temperature behavior
-remain unchanged. The intermediate1.1.1 icon draft was not published.
+remain unchanged. The intermediate 1.1.1 icon draft was not published.
 
 ## 1.1.0
 

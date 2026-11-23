@@ -406,6 +406,64 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(world.monitor.status()['publish'], 'failed')
         self.assertIn('Senden fehlgeschlagen', world.monitor.page().decode())
 
+    def test_old_ack_is_not_shown_once_the_vm_context_is_stale(self):
+        # Review 2026-11-23: a VM down for hours showed "Keine aktuellen Daten
+        # der VM" next to "Die VM nimmt die Raummeldungen an."
+        world = World()
+        world.run(200)
+        world.context(report_ack={'instance': world.monitor.instance, 'seq': 1, 'result': 'accepted'})
+        world.cycle()
+        self.assertEqual(world.monitor.status()['ack'], 'accepted')
+        world.clock.advance(r.CONTEXT_VALID_S + 1)
+        status = world.monitor.status()
+        self.assertEqual((status['ack'], status['ack_stale'], status['ack_other_instance']), (None, True, False))
+        page = world.monitor.page().decode()
+        self.assertNotIn('Die VM nimmt die Raummeldungen an.', page)
+        self.assertIn('Keine aktuelle Bestätigung der VM', page)
+        world.context(report_ack={'instance': world.monitor.instance, 'seq': 2, 'result': 'accepted'})
+        world.cycle()
+        self.assertEqual((world.monitor.status()['ack'], world.monitor.status()['ack_stale']), ('accepted', False))
+
+    def test_failed_report_of_changed_findings_is_retried_after_the_spacing(self):
+        # Review 2026-11-23: a failed publish of a changed finding set waited for
+        # the 120 s period; it is due again after the 10 s spacing.
+        world = World()
+        world.run(200)
+        before = len(world.calls)
+        world.publish_fails = True
+        # The last published finding set differs from the current one: a change is due now.
+        world.monitor.last_identities = world.monitor.published_identities = ('older',)
+        world.monitor.last_report = world.clock.mono - hm.REPORT_MIN_SPACING_S
+        self.assertTrue(world.monitor.maybe_report())
+        self.assertEqual(world.monitor.status()['publish'], 'failed')
+        world.publish_fails = False
+        world.clock.advance(hm.REPORT_MIN_SPACING_S)
+        self.assertTrue(world.monitor.maybe_report())
+        self.assertEqual(world.monitor.status()['publish'], 'ok')
+        self.assertEqual(sum(1 for call in world.calls[before:] if call[0] == 'publish'), 2)
+        # An unchanged set that fails is not retried every 10 s: it waits for the period.
+        world.publish_fails = True
+        world.clock.advance(hm.REPORT_PERIOD_S)
+        self.assertTrue(world.monitor.maybe_report())
+        world.clock.advance(hm.REPORT_MIN_SPACING_S)
+        self.assertFalse(world.monitor.maybe_report())
+
+    def test_publish_failing_from_app_start_waits_for_the_period(self):
+        # Review 2026-11-23: with no report out yet every failure counted as a
+        # change and was retried every 10 s instead of every 120 s.
+        world = World()
+        world.publish_fails = True
+        world.run(130)
+        attempts = sum(1 for call in world.calls if call[0] == 'publish')
+        self.assertTrue(1 <= attempts <= 2, attempts)
+        self.assertEqual(world.monitor.status()['publish'], 'failed')
+
+    def test_page_time_survives_a_concurrent_zone_cache_clear(self):
+        class Vanishing(dict):
+            def __contains__(self, key):
+                return True                  # the check saw it; the read finds it cleared
+        self.assertIn('UTC', hm._time(2_000_000_000, 'Europe/Vienna', Vanishing()))
+
     def test_websocket_refusal_backs_off(self):
         world = World()
         world.refuse_socket = True

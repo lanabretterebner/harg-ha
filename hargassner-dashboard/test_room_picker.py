@@ -145,6 +145,14 @@ def row(entity, gruppe, kuehler=False, ofen=False, frost=False, hk1=DEFAULT, hk2
 
 
 class RenderTests(unittest.TestCase):
+    def test_search_normalises_each_sensor_once_not_per_keystroke(self):
+        # Review 2026-11-23: every keystroke re-normalised every row (up to a
+        # thousand on a phone); the texts are folded once when the page loads.
+        script = rp.SCRIPT
+        body = script[script.index('function filter()'):script.index('function show(')]
+        self.assertNotIn("getAttribute('data-suche')", body)
+        self.assertIn("var texts = rows.map(function (row) { return norm(row.getAttribute('data-suche') || ''); });", script)
+
     def test_lists_candidates_with_name_value_area_and_search_markup(self):
         world = PickerWorld()
         page = world.page()
@@ -195,8 +203,8 @@ class RenderTests(unittest.TestCase):
         self.assertIn('<input type="checkbox" name="ofen" checked>', block('sensor.wohnzimmer'))
         # A 1.6.7/1.6.8 kuehlere_raeume entry shows as 2 °C, 100 % on its own circuit.
         self.assertIn('name="kuehler" min="0" max="10" step="0.5" inputmode="decimal" value="2"', block('sensor.bad'))
-        self.assertIn('name="einfluss_hk2" min="0" max="100" step="5" inputmode="numeric" value="100"', block('sensor.bad'))
-        self.assertIn('name="einfluss_hk1" min="0" max="100" step="5" inputmode="numeric" value="0"', block('sensor.bad'))
+        self.assertIn('name="einfluss_hk2" min="0" max="100" step="1" inputmode="numeric" value="100"', block('sensor.bad'))
+        self.assertIn('name="einfluss_hk1" min="0" max="100" step="1" inputmode="numeric" value="0"', block('sensor.bad'))
         self.assertIn('<label data-gilt="weitere" hidden>', block('sensor.bad'))
         self.assertIn('<input type="checkbox" name="frost" checked>', block('sensor.keller'))
         self.assertIn('<label data-gilt="kreis" hidden>', block('sensor.keller'))

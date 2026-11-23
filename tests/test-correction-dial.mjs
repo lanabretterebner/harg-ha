@@ -43,7 +43,7 @@ function world(value, failure = null) {
     const tap = point => { slider.dispatch('pointerdown', point); slider.dispatch('pointerup', point); flush() };
     return { control, slider, minus, plus, zero, note: control.node.children.at(-1), tap, text: () => slider.getAttribute('aria-valuetext') };
   };
-  const readback = next => { hass.states[NUMBER] = { ...number(next), last_updated: new Date(Date.now() + 1000).toISOString() } };
+  const readback = (next, offset = 1000) => { hass.states[NUMBER] = { ...number(next), last_updated: new Date(Date.now() + offset).toISOString() } };
   return { calls, flush, at, polar, surface, readback, sent: () => calls.map(call => call[2].value) };
 }
 function dial(value = '-2.5') { const w = world(value); return { ...w, ...w.surface() } }
@@ -155,6 +155,23 @@ await test("a second surface's pending request discards this surface's unsent dr
   a.plus.dispatch('click', {}); w.flush();
   assert.deepEqual(w.sent(), [.5, 1]);
 });
+for (const [skew, offset] of [['ahead of', -3000], ['behind', 60000]])
+  await test(`a readback confirms with the phone clock ${skew} Home Assistant`, () => {
+    // Review 2026-11-23: HA's last_updated was compared with the phone clock, so
+    // a phone a few seconds ahead or behind left every request "unklar". Only
+    // HA's own timestamps decide now: a newer state than at the request.
+    const w = world('0'), a = w.surface();
+    a.plus.dispatch('click', {}); w.flush();
+    assert.deepEqual(w.sent(), [.5]); assert.equal(a.note.textContent, 'Angefragt · Bestätigung ausstehend');
+    w.readback('0.5', offset); a.control.render();
+    assert.equal(a.note.textContent, ''); assert.equal(a.text(), '+0,5 °C'); assert.equal(a.plus.disabled, false);
+  });
+await test('a readback not newer than the state seen at the request confirms nothing', () => {
+  const w = world('0'), a = w.surface();
+  a.plus.dispatch('click', {}); w.flush();
+  w.readback('0.5', -60000); a.control.render();                     // older than the state at the request
+  assert.equal(a.note.textContent, 'Angefragt · Bestätigung ausstehend');
+});
 await test('a release that cannot be sent discards its draft instead of leaving it displayed', () => {
   const d = dial('0'); d.slider.dispatch('pointerdown', d.polar(0)); assert.equal(d.text(), '+2 °C');
   d.control.node.connected = false; d.slider.dispatch('pointerup', d.polar(0)); d.flush();
@@ -236,5 +253,35 @@ await test('a stale call cannot clear the lock of a newer in-flight call after r
   f.card._busy = false; const second = make(); f.card._binding = second; const two = select(second, 'Absenken'); // models _dispose/rebuild reset
   pending[0](); await one; assert.ok(f.card._busy, 'old call released newer lock');
   pending[1](); await two; assert.equal(!!f.card._busy, false);
+});
+await test('an unrelated entity update does not re-render the card; its own entity and an in-place change do', () => {
+  // Review 2026-11-23: every state change anywhere in the house re-rendered
+  // both cards on a phone (state scans, native card updates).
+  const f = fixture(); let renders = 0; const render = f.card._render;
+  f.card._render = function () { renders++; return render.call(this) };
+  const base = f.card._hass;
+  f.card.hass = { ...base, states: { ...base.states, 'sensor.unrelated': { entity_id: 'sensor.unrelated', state: '1', attributes: {} } } };
+  assert.equal(renders, 0);
+  f.card.hass = { ...f.card._hass, states: { ...f.card._hass.states, [ENTITY]: state(19.5) } };
+  assert.equal(renders, 1);
+  f.card.hass = f.card._hass; assert.equal(renders, 2);                           // same object: always rendered
+  f.card.hass = { ...f.card._hass }; assert.equal(renders, 3);                    // same states object: always rendered
+  f.card.hass = { ...f.card._hass, states: { ...f.card._hass.states }, connected: false }; assert.equal(renders, 4);
+  // A correction link is followed: its number's change renders, an unrelated one does not.
+  const linked = { ...state(19.5), attributes: { ...state(19.5).attributes, hargassner_correction_id: 'synthetic_correction_1' } };
+  const rk = (key, value) => ({ entity_id: key, state: value, attributes: { hargassner_control_schema: 'room_correction_v1',
+    hargassner_correction_id: 'synthetic_correction_1', min: -3, max: 3, step: .5, unit_of_measurement: '°C' } });
+  f.card._correctionControl = { link: () => 'number.synthetic_rk', render() {}, dispose() {}, node: { hidden: true } };
+  f.card.hass = { ...f.card._hass, states: { ...f.card._hass.states, [ENTITY]: linked, 'number.synthetic_rk': rk('number.synthetic_rk', '0') } };
+  const before = renders;
+  f.card.hass = { ...f.card._hass, states: { ...f.card._hass.states, 'sensor.unrelated': { entity_id: 'sensor.unrelated', state: '2' } } };
+  assert.equal(renders, before);
+  f.card.hass = { ...f.card._hass, states: { ...f.card._hass.states, 'number.synthetic_rk': rk('number.synthetic_rk', '0.5') } };
+  assert.equal(renders, before + 1);
+  // A second number claiming the same identity renders (the dial is hidden), as does a language change.
+  f.card.hass = { ...f.card._hass, states: { ...f.card._hass.states, 'number.duplicate_rk': rk('number.duplicate_rk', '0') } };
+  assert.equal(renders, before + 2);
+  f.card.hass = { ...f.card._hass, states: { ...f.card._hass.states }, localize: () => 'x' };
+  assert.equal(renders, before + 3);
 });
 console.log(JSON.stringify({ scope: 'synthetic stub DOM correction dial pointer/format and card mode lock; no service or network', tests: count, passed: true }));

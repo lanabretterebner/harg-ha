@@ -187,18 +187,18 @@ def one_header(headers, name, required=False):
         return None
     if (len(values) != 1 or len(values[0]) > 8192
             or re.search(r"[^\x20-\x7e]", values[0])):
-        raise Rejected(400, "Invalid request headers.")
+        raise Rejected(400, "Ungültige Anfrage-Kopfzeilen.")
     return values[0]
 
 
 def trusted_identity(peer, headers):
     # Use the TCP peer, never X-Forwarded-For or a user-controlled source header.
     if peer != SUPERVISOR_IP:
-        raise Rejected(403, "Home Assistant Ingress is required.")
+        raise Rejected(403, "Nur über Home Assistant erreichbar.")
     user = one_header(headers, "X-Remote-User-Id", required=True)
     path = one_header(headers, "X-Ingress-Path", required=True)
     if not USER_PATTERN.fullmatch(user) or not PATH_PATTERN.fullmatch(path):
-        raise Rejected(403, "An authenticated Home Assistant user is required.")
+        raise Rejected(403, "Bitte in Home Assistant anmelden.")
     return user, path.rstrip("/")
 
 
@@ -276,15 +276,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if (not target.startswith("/") or target.startswith("//")
                     or parsed.scheme or parsed.netloc or parsed.fragment
                     or re.search(r"[^\x21-\x5b\x5d-\x7e]", target)):
-                raise Rejected(400, "Invalid request path.")
+                raise Rejected(400, "Ungültiger Anfragepfad.")
             if self.headers.get_all("Transfer-Encoding") or self.headers.get_all("Expect"):
-                raise Rejected(400, "An explicit bounded request body is required.")
+                raise Rejected(400, "Die Anfrage braucht eine feste Länge.")
             length = one_header(self.headers, "Content-Length")
             if length is not None and not re.fullmatch(r"[0-9]{1,9}", length):
-                raise Rejected(400, "Invalid request body length.")
+                raise Rejected(400, "Ungültige Länge der Anfrage.")
             size = int(length or 0)
             if size > MAX_BODY:
-                raise Rejected(413, "Request body is too large.")
+                raise Rejected(413, "Die Anfrage ist zu groß.")
             headers = {}
             for name in REQUEST_HEADERS:
                 value = one_header(self.headers, name)
@@ -292,7 +292,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     headers[name] = value
             body = self.rfile.read(size)
             if len(body) != size:
-                raise Rejected(400, "Incomplete request body.")
+                raise Rejected(400, "Unvollständige Anfrage.")
             settings = self.server.settings
             # A fresh allowlist discards Cookie, Authorization, Forwarded and
             # every supplied ingress/authentication header before adding ours.
@@ -331,14 +331,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 # may escape the authenticated Home Assistant frame.
                 if (response.status not in (301, 302, 303, 307, 308)
                         or redirect != prefix + "/"):
-                    raise Rejected(502, "The dashboard returned an unexpected redirect.")
+                    raise Rejected(502, "Das Dashboard der VM hat unerwartet weitergeleitet.")
             if response.status < 200:
-                raise Rejected(502, "The dashboard returned an unsupported response.")
+                raise Rejected(502, "Das Dashboard der VM hat unerwartet geantwortet.")
             content = response.read(MAX_RESPONSE + 1)
             if len(content) > MAX_RESPONSE:
-                raise Rejected(502, "The dashboard response is too large.")
+                raise Rejected(502, "Die Antwort des Dashboards der VM ist zu groß.")
             if response.length not in (None, 0):
-                raise Rejected(502, "The dashboard response is incomplete.")
+                raise Rejected(502, "Die Antwort des Dashboards der VM ist unvollständig.")
             response_headers = [
                 (name, value) for name, value in response.getheaders()
                 if name.lower() in RESPONSE_HEADERS
@@ -352,7 +352,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.error(exc.status, exc.message)
         except (OSError, http.client.HTTPException, ValueError) as exc:
             self.server.diagnostics.emit(failure_category(exc))
-            self.error(502, "Cannot reach the local dashboard securely.")
+            self.error(502, "Keine sichere Verbindung zum Dashboard der VM. "
+                       "Bitte prüfen, ob die VM läuft und erreichbar ist.")
         finally:
             if upstream is not None:
                 upstream.close()

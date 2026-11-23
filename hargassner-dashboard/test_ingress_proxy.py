@@ -8,6 +8,7 @@ import http.client
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
+import re
 import ssl
 import socket
 import subprocess
@@ -78,7 +79,7 @@ class ValidationTests(unittest.TestCase):
 
     def test_panel_access_and_version_metadata(self):
         config = Path(__file__).with_name("config.yaml").read_text()
-        self.assertIn('version: "1.6.11"', config)
+        self.assertIn('version: "1.6.12"', config)
         self.assertIn("panel_admin: false", config)
         self.assertIn('upstream_connect_host: "str?"', config)
         self.assertNotIn("ports:", config)
@@ -268,7 +269,7 @@ class HTTPSProxyTests(unittest.TestCase):
                 response.begin()
                 body = response.read()
                 client.close()
-                self.assertEqual((response.status, body), (400, b"Invalid request path.\n"))
+                self.assertEqual((response.status, body), (400, "Ungültiger Anfragepfad.\n".encode()))
         self.assertEqual(self.upstream.requests, [])
 
     def test_upstream_redirect_is_not_followed_or_sent_to_browser(self):
@@ -302,6 +303,22 @@ class HTTPSProxyTests(unittest.TestCase):
         self.server.tls = ssl.create_default_context()
         self.assertEqual(self.request()[0], 502)
         self.assertEqual(self.upstream.requests, [])
+
+    def test_panel_error_texts_are_german(self):
+        # Review 2026-11-23: the panel showed "Cannot reach the local dashboard
+        # securely." whenever the VM was down; every refusal text is German.
+        self.server.tls = ssl.create_default_context()
+        with redirect_stderr(io.StringIO()):
+            status, headers, body = self.request()
+        self.assertEqual(status, 502)
+        self.assertEqual(headers["Content-Type"], "text/plain; charset=utf-8")
+        self.assertEqual(body.decode("utf-8"), "Keine sichere Verbindung zum Dashboard der VM. "
+                                               "Bitte prüfen, ob die VM läuft und erreichbar ist.\n")
+        status, _headers, body = self.request(identity=False, extra=(("X-Remote-User-Id", "bad.user"), ("X-Ingress-Path", PREFIX)))
+        self.assertEqual((status, body.decode("utf-8")), (403, "Bitte in Home Assistant anmelden.\n"))
+        source = Path(proxy.__file__).read_text(encoding="utf-8")
+        for message in re.findall(r'Rejected\(\d+, "([^"]+)"\)', source):
+            self.assertNotRegex(message, r"\b(?:the|is|required|request|response|invalid)\b", message)
 
     def test_upstream_hostname_is_verified(self):
         port = self.upstream.server_address[1]

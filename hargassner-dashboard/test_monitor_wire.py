@@ -136,8 +136,11 @@ class WireTests(unittest.TestCase):
             self.assertTrue(all(r['status'] == 'unknown' for r in h.read_json(monitor.state_path, private=True)['conditions'].values()))
             self.tls.status = 200; self.tls.body = json.dumps({'schema_version': 1, 'sent_at': now, 'checks': {kind: {'checked_at': now, 'status': 'healthy'} for kind in ('certificate', 'telnet')}}).encode()
             for _ in range(5): monitor.poll_once()
-            self.assertEqual([e['transition'] for e in delivered], ['alert'] * 3 + ['recovery'] * 3)
-            self.assertTrue(all(e['status'] == 'unknown' and e['reason'] == 'endpoint_unavailable' for e in delivered[:3]))
+            # Newest state wins (1.6.12): the two alerts still queued at the
+            # recovery are superseded and never delivered.
+            self.assertEqual([(e['component'], e['transition']) for e in delivered],
+                             [('heartbeat', 'alert'), ('heartbeat', 'recovery'), ('certificate', 'recovery'), ('telnet', 'recovery')])
+            self.assertTrue(delivered[0]['status'] == 'unknown' and delivered[0]['reason'] == 'endpoint_unavailable')
     def test_notification_redirect_is_not_followed(self):
         original = http.client.HTTPConnection; self.http.status = 302
         with patch.object(m.http.client, 'HTTPConnection', side_effect=lambda _host, _port, **kw: original('127.0.0.1', self.http.server_address[1], **kw)):

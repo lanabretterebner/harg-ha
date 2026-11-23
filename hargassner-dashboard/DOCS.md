@@ -75,7 +75,7 @@ Find **Hargassner Dashboard**, choose **Install**, and wait for the local image
 build. This needs Home Assistant OS or a Supervisor installation, `amd64` or
 `aarch64`, and registry network access during installation. A HACS installation
 of the popup does not install this app; the two stores use the same repository
-URL independently. App1.5.0 build, upgrade and monitor commissioning remain
+URL independently. Container build, upgrade and monitor commissioning are
 separate acceptance steps.
 
 For an offline source transfer, copy this entire folder to the HA local apps
@@ -125,7 +125,7 @@ No DNS fallback to a different server is attempted.
 your dashboard password and not a Home Assistant API token. It is stored in
 the app's private options, never in browser URLs or frontend JavaScript. Protect
 Home Assistant backups and administrator access, which can include app options.
-Options are read once per load, limited to64KiB and rejected on duplicate keys
+Options are read once per load, limited to 64 KiB and rejected on duplicate keys
 or nonfinite numbers. Ingress and monitoring use the same configuration snapshot.
 
 Start the app, choose **Open Web UI**, and enable **Show in sidebar** if desired.
@@ -135,9 +135,11 @@ Use that sidebar entry or Open Web UI for access; do not hardcode the temporary
 
 `panel_admin: false` makes the sidebar panel available to all authenticated
 Home Assistant users, including nonadministrators. Ingress authentication is
-still required; this does not expose an anonymous or LAN port. The backend applies the same existing dashboard control
-permissions to every admitted Home Assistant user. The app does not map Home
-Assistant entity permissions onto individual boiler controls.
+still required; this does not expose an anonymous or LAN port. The backend
+gives every admitted Home Assistant user, administrators included, an ordinary
+dashboard session; the dashboard administrator functions need the direct
+dashboard login. The app does not map Home Assistant entity permissions onto
+individual boiler controls.
 
 ## 3. Verify after installation
 
@@ -153,7 +155,7 @@ Assistant entity permissions onto individual boiler controls.
    this candidate remain separate acceptance steps.
 
 A `502` can indicate DNS, routing, certificate verification, or an unreachable
-backend. The app now logs a fixed diagnostic category such as `dns`, `timeout`,
+backend. The app logs a fixed diagnostic category such as `dns`, `timeout`,
 `connection_refused`, `connection_reset`, `tls_verification`, `tls_handshake`,
 `transport`, `http_protocol`, `response_policy` or `configuration_or_response`.
 Each failure/retry category is limited to one line per 30 seconds. Logs contain
@@ -189,14 +191,14 @@ token for deliberate reuse. Direct password login remains configured.
 ## Implementation and local tests
 
 The app publishes no LAN ports or Supervisor-management/host/Docker privileges.
-App 1.5.0 requested the HA API permission solely for its optional VM-health
-monitor. From app 1.6.0 the same permission also serves the room monitoring
-described below: it reads the selected sensors, opens one Home Assistant Core
-WebSocket and publishes through Core's `mqtt.publish` service. From app 1.6.1
-the room page also checks whether its viewer is an administrator
-(`config/auth/list`), reads sensor areas through one fixed template and reads
-and saves the app's own options at the Supervisor; no permission was added for
-this. The room page's save is the app's only write; it is accepted only from a
+The HA API permission serves the optional VM-health monitor, the
+Betriebsüberwachung and the room monitoring described below (it reads the
+selected sensors, opens one Home Assistant Core WebSocket and publishes through
+Core's `mqtt.publish` service), and the room page: it checks whether its viewer
+is an administrator (`config/auth/list`), reads sensor areas through one fixed
+template, reads history for **Raum anlernen** and reads and saves the app's own
+options at the Supervisor. The room page's actions (saving the selection and
+**Raum anlernen**) are the app's only writes; they are accepted only from a
 Home Assistant administrator, same-origin from that page, with the page's
 token and a JSON body. Ordinary
 ingress accepts requests only from the actual TCP peer `172.30.32.2`.
@@ -236,7 +238,7 @@ a particular HA ingress session or backend setting is commissioned.
 
 The app uses the official `base-python:3.14-alpine3.24` image, which supports
 the two declared architectures. Its OCI multi-architecture index was verified
-on2026-10-14 and is pinned by digest in the Dockerfile; see
+on 2026-10-14 and is pinned by digest in the Dockerfile; see
 [base-image verification](../validation/base-image.json). Packaging and security decisions follow the
 official [base image list](https://github.com/home-assistant/docker-base),
 [app configuration](https://developers.home-assistant.io/docs/apps/configuration/),
@@ -245,14 +247,13 @@ and [authenticated user headers](https://developers.home-assistant.io/docs/apps/
 checked on 2026-10-14.
 
 
-## Optional independent HA-host monitor (app1.5.0)
+## Optional independent HA-host monitor
 
 The monitor runs on the HA host while the observed dashboard VM is separate.
 This VM-health monitor never connects to the controller or MQTT. (The separate
-room monitoring of app 1.6.0 uses MQTT only through Home Assistant Core; see
-below.) Existing ingress origin, token,
-connect-host and non-admin access options remain unchanged. Monitoring is
-**disabled by default**; updating the app alone does not send a notification.
+room monitoring uses MQTT only through Home Assistant Core; see below.)
+Monitoring is **disabled by default**; updating the app alone does not send a
+notification.
 
 **Coverage limit: a controller that has left the broker.** Not connecting to the
 controller or MQTT is also a limit on what the monitor can report, not only a
@@ -265,8 +266,8 @@ independent of the MQTT session, so it keeps reporting `fresh` while the broker
 path is dead. Offline firmware analysis of V14.1HAR.q1 establishes that this
 state is reachable without any fault on the VM: a cloud `switch_broker` command
 stores a volatile broker override whose only local symptom is an unexpected
-will followed by silence, and the 2026-11-12 cloud write of `Z1w` = 0 alone took
-the controller off the relay, with no controller restart restoring it. In that
+will followed by silence, and a cloud write of `Z1w` = 0 alone can take the
+controller off the relay, which a controller restart does not undo. In that
 state every HA entity goes unavailable while all three monitor components can
 still report healthy. Unavailable entities are the symptom to investigate
 directly; the monitor is not a detector for it, and a silent monitor is not
@@ -274,7 +275,7 @@ evidence that the controller is connected.
 
 Set `monitor_enabled: true`, a separately generated random URL-safe
 `monitor_token` matching the VM's dedicated health-token configuration, and
-`monitor_poll_interval` between15 and60 seconds (default30). The monitor token
+`monitor_poll_interval` between 15 and 60 seconds (default 30). The monitor token
 must differ from `ingress_token`; it is not a general dashboard credential.
 Do not enter a long-lived HA user token. `homeassistant_api:true` supplies the
 Supervisor-owned `SUPERVISOR_TOKEN` to the app. It stays in process memory and
@@ -287,14 +288,16 @@ The VM read is exactly `GET /api/dashboard/v1/monitor-health` with the separate
 verification stays enabled; the optional TCP connect-IP preserves the original
 origin hostname for SNI, certificate checks and Host. There are no redirects,
 plaintext VM reads or retries within an individual poll. Response JSON is
-strict, limited to64KiB and rejected on duplicate keys/nonfinite numbers or a
+strict, limited to 64 KiB and rejected on duplicate keys/nonfinite numbers or a
 body shorter than its declared content length.
-A child-process deadline bounds DNS, TLS, headers and body reads to5s.
+A child-process deadline bounds DNS, TLS, headers and body reads to 5 s.
 
 The accepted sanitized health schema keeps original certificate/Telnet checker
-timestamps. Fresh API reads cannot renew stale runs. Defaults distinguish120s
-heartbeat,90000s certificate execution,45s Telnet execution and5s future clock
-tolerance. Missing/invalid/stale or failed heartbeat evidence is **unknown**;
+timestamps. Fresh API reads cannot renew stale runs. Defaults distinguish 120 s
+heartbeat, 90000 s certificate execution, 45 s Telnet execution and 5 s future
+clock tolerance. A Telnet `fresh` report is accepted with a frame up to 50 s
+old (app 1.6.11; older apps refuse such reports from a newer VM monitor).
+Missing/invalid/stale or failed heartbeat evidence is **unknown**;
 it does not prove the heater is down. Normal maintenance is a suppression state.
 A healthy first observation establishes a silent baseline. Fault and unknown
 conditions create readable German problem notifications with a next step. Healthy
@@ -302,9 +305,12 @@ recovery and maintenance silently dismiss the corresponding warning. A missing
 common connection produces one Status warning. The fixed persistent IDs are
 `harg_health_heartbeat`, `harg_health_certificate`, `harg_health_telnet`.
 
-From app1.5.4 a VM clock up to 5 s ahead of the HA host counts as current. A
-larger lead is unknown `run_future` until the clocks agree. The tolerance never
-shortens an age, so it delays a stale verdict by at most 5 s. When the HA
+A VM clock up to 5 s ahead of the HA host counts as current. A larger lead is
+unknown `run_future`. Once raised, it stays until the stamp is no more than
+2.5 s (half the tolerance) ahead, or has stayed within the 5 s tolerance for 5
+minutes, so a VM clock hovering at the limit (5.1 s, then 4.9 s ahead) gives one
+notification and one recovery instead of one of each per poll. The tolerance
+never shortens an age, so it delays a stale verdict by at most 5 s. When the HA
 host's own clock steps backward by more than 5 s, the next poll reports
 `clock_invalid` for components that would otherwise be healthy or in
 maintenance, and the poll after it evaluates normally again. Alerts that hold
@@ -312,51 +318,44 @@ under either clock, such as an unreachable VM, a stale or failed check or a
 reported fault, keep their own reason throughout. Within a running app the
 step is measured against monotonic time. After an app restart only the saved
 wall-clock stamp can show it, and a stamp that lies in the future is replaced
-at the first poll instead of being waited out. The state format and reason
-codes are unchanged, so the state survives both an update and a downgrade.
-Earlier versions held every component at `clock_invalid` until the old stamp
-had passed and could not report a VM outage during that time.
+at the first poll instead of being waited out. The hold time is kept in the
+saved condition; the state format and reason codes are unchanged, so the state
+survives both an update and a downgrade.
 
-From app 1.6.7 a raised `run_future` stays until the stamp is no more than
-2.5 s (half the tolerance) ahead, or has stayed within the 5 s tolerance for
-5 minutes. A VM clock hovering at the limit (5.1 s, then 4.9 s ahead) gives one
-notification and one recovery instead of one of each per poll, and a clock
-settling just inside the tolerance is judged normally again after 5 minutes.
-The hold time is kept in the saved condition, so the state format and reason
-codes are unchanged and the state survives both an update and a downgrade.
-
-From app1.5.5 a check kind the evaluator does not know is ignored instead of
-invalidating the whole report. Both known checks, `certificate` and `telnet`,
-are still required, and a report missing either one stays `report_invalid` for
-all three components. An additional key that a later relay version may send is
-neither evaluated nor reported, so one unknown kind can no longer turn all three
-components into a blanket unknown with a notification for each. This is forward
-compatibility only: no current report changes its verdict, and the status
-schema, reason codes and state format are unchanged.
+A check kind the evaluator does not know is ignored. Both known checks,
+`certificate` and `telnet`, are required, and a report missing either one stays
+`report_invalid` for all three components. An additional key that a later
+relay version may send is neither evaluated nor reported.
 
 Delivery is ONLY local `POST` to the Supervisor proxy at `172.30.32.2`, using
 `/core/api/services/persistent_notification/create` for problems and
 `/core/api/services/persistent_notification/dismiss` for silent recovery, with the
 Supervisor token. This explicit fixed private-transport policy applies only to
 the internal Supervisor proxy; the VM path is always verified HTTPS. The app
-cannot select arbitrary HA services or remote notification URLs. A2xx response
+cannot select arbitrary HA services or remote notification URLs. A 2xx response
 accepts the queued delivery; response bodies are not read. Notification text contains the problem and a suggested check, never internal
 status codes, event hashes, credentials, hostnames, controller identifiers, raw
 measurements or upstream exceptions. Event IDs remain transport metadata.
-App 1.5.6 also clears legacy healthy banners after startup when current checks
+After startup the app also clears legacy healthy banners when current checks
 confirm recovery. Only the three fixed monitor IDs can be dismissed. Unknown or
-failed checks stay visible. Obsolete queued alerts/recoveries are accepted
-without changing the current notification; the original durable outbox and
-clock/freshness guards remain intact.
+failed checks stay visible. The newest state of each check wins (app 1.6.12):
+a queued event followed by a later event of the same check is superseded and
+never sent; it leaves the outbox together with the next delivered event, only
+after that delivery succeeded. Each check's newest state is therefore shown
+within three polls even when the VM keeps dropping out. An event that no longer
+matches the current condition is accepted without changing the notification;
+the durable outbox and clock/freshness guards remain intact.
 
-State is separate from all controller/charge journals: evaluator-owned0700
-`/data/health-monitor`,600 atomic/fsynced state and lock files. Keep it across
+State is separate from all controller/charge journals: the evaluator-owned
+directory `/data/health-monitor` (mode 0700) holds atomic, fsynced state and
+lock files (mode 0600). Keep it across
 app restarts and normal upgrades. Events are durable before sending, with a
 stable retry ID and component notification ID. One event at most is delivered
-per poll; failed/ambiguous delivery retains that event. The bounded64-event
+per poll; failed/ambiguous delivery retains that event. The bounded 64-event
 outbox refuses corruption or unsafe ownership without sending or deleting events.
-When full, it continues delivering the existing queue one event per poll; current
-condition changes are recorded once enough space is available. Failed delivery
+When full, the next delivery also removes every superseded event before it, so
+current condition changes are usually recorded in the same poll; otherwise once
+enough space is available. Failed delivery
 keeps the original events and IDs. Do not erase active state to clear a warning;
 corrupt state requires explicit operator inspection/backup recovery.
 This is at-least-once delivery,
@@ -372,12 +371,12 @@ Status cannot perform recovery, trigger alerts or reveal options/token/HA user.
 The proxy and optional worker stop together on normal app shutdown; no new
 notification is started after shutdown is observed.
 
-Root commissioning must first verify the normal heartbeat/healthy baseline and
-zero new notifications. A controlled **monitor-only** wrong-token401 followed
-by restoration can then verify genuine endpoint-unverified and recovery
-notifications, stable IDs/outbox dedup and status readback without stopping the
-VM or changing ingress/controller state. It does not establish a heater outage.
-Only the release owner performs that explicit notification test. Synthetic
+When commissioning, first verify the normal heartbeat/healthy baseline and that
+no new notification appears. A deliberate **monitor-only** wrong token (HTTP 401)
+followed by restoring it can then verify genuine endpoint-unverified and
+recovery notifications, stable IDs/outbox dedup and status readback without
+stopping the VM or changing ingress/controller state. It does not establish a
+heater outage. Run that notification test only deliberately. Synthetic
 loopback tests do not prove that the actual Supervisor permission/token/API or
 receiver has been commissioned.
 
@@ -386,14 +385,14 @@ the VM does not mean independent from HA. A separate external watchdog is a
 future operator choice. Container build, real notification delivery, receiver
 permissions and actual app update remain unverified until separately recorded.
 
-The reused project `health_alerts.py` is byte-pinned to SHA-256
-`17e59fca9ad7ca3c3453f904ae17a4edd0aaea2456d5483633df73ec080ef137`.
-Its evaluator/outbox semantics are retained; this app adapter adds the fixed
+`health_alerts.py` is a byte-identical copy of the project's monitoring
+evaluator; `release.json` pins its SHA-256. Its evaluator/outbox semantics are
+retained; this app adapter adds the fixed
 health-token fetch, existing HTTPS connector, bounded one-event scheduler and
 Supervisor destination. No original producer observation time is rewritten.
 
 
-## Room monitoring with temperature sensors (app 1.6.0, sensor page 1.6.1)
+## Room monitoring with temperature sensors
 
 The app can watch temperature sensors that already exist in Home Assistant and
 check whether the heating does its job: rooms that stay too cold while heating
@@ -419,10 +418,10 @@ no room is judged and no room finding appears anywhere. Nothing has to be
 changed in the app when the VM is updated; the room checks start by themselves
 within a few minutes.
 
-### What the app accesses from 1.6.0
+### What the app accesses
 
-Earlier versions only created and dismissed notifications. From 1.6.0, with
-the Supervisor-provided token and nothing else, the app:
+For room monitoring, with the Supervisor-provided token and nothing else, the
+app:
 
 - reads `/core/api/config` (whether Home Assistant is running, its time zone)
   and the state of each selected sensor, once a minute;
@@ -433,7 +432,7 @@ the Supervisor-provided token and nothing else, the app:
   `mqtt.publish` service (QoS 0, not retained), every 2 minutes and shortly
   after a change.
 
-From 1.6.1 the room page adds, only while it is opened or saved:
+The room page adds, only while it is opened or saved:
 
 - one short Core WebSocket connection with the read-only command
   `config/auth/list`, to tell whether the person viewing the page is a Home
@@ -445,8 +444,8 @@ From 1.6.1 the room page adds, only while it is opened or saved:
   the app reads its own stored options and, when an administrator saves,
   writes them back with only the room settings changed.
 
-From 1.6.9 **Raum anlernen** (see below) adds, only when an administrator
-presses it for one room (sources from 1.6.10):
+**Raum anlernen** (see below) adds, only when an administrator presses it for
+one room:
 
 - `GET /core/api/states` once, to find the VM's two heating-circuit climate
   entities (by the attributes the VM publishes, not by their names);
@@ -467,12 +466,12 @@ Nothing is written to Home Assistant or the VM; the learning state is kept in
 the app's own `/data/room_learning.json` (readable only by the app).
 
 The Supervisor lets every app read and change its own options with the token
-it already has, so 1.6.1 needs no new permission: `hassio_api` stays off and
+it already has, so the room page needs no extra permission: `hassio_api` stays off and
 no `hassio_role` is requested. The app does not restart itself and cannot
 change any other app, Home Assistant setting or entity.
 
 It has no broker password, no controller connection and no call that can
-change a heating setting. From app 1.6.6 its rule timers and sensor
+change a heating setting. Its rule timers and sensor
 observations are saved in the app's own `/data` (see "Room checks after an app
 restart"); a new sensor selection starts again only the rooms it changes.
 Sensor selections persist in the app options; the separate VM-health monitor retains its durable outbox. Home Assistant's MQTT integration
@@ -484,9 +483,9 @@ sensor is selected, so that the VM learns that room monitoring is off.
 The room page lives inside the app's Ingress address, at the path
 `api/local-monitor/raumsensoren`. The app's panel (**Hargassner** in the
 sidebar or **Open Web UI**) opens the VM dashboard at the root of that
-address, so the room page can be opened by hand. A newer VM dashboard source also
-links it under Ereignisse and Info when opened through HA ingress; that link
-is not part of operation-monitor-20261117.
+address, so the room page can be opened by hand. VM dashboard releases newer
+than operation-monitor-20261117 also link it under Ereignisse and Info when
+opened through HA Ingress.
 
 The quickest way: the app writes the path to its log when it starts
 (**Settings → Apps**, this app, **Log**), in a line beginning with
@@ -520,7 +519,7 @@ name, area or entity ID. For each sensor choose:
   sensors away from radiators, windows, doors and direct sun. Weitere Räume
   are rooms without a heating circuit or with closed valves, for example
   cellar or garage; only the sensor itself is checked there.
-- For rooms on a heating circuit (app 1.6.9): **Darf kühler sein um**,
+- For rooms on a heating circuit: **Darf kühler sein um**,
   **Einfluss Heizkreis 1**, **Einfluss Heizkreis 2** and **Ofen oder viel
   Sonne** (no notice when the room is too warm).
   - **Darf kühler sein um** (0 to 10 °C in steps of 0.5 °C, default 0) says
@@ -543,7 +542,7 @@ name, area or entity ID. For each sensor choose:
   from its release room-allowance-20261119 on (it accepts 0.5 to 10 degrees);
   an older VM keeps the old text, and both versions work together in any
   order. Influence and learning stay inside the app; the VM needs no update
-  for 1.6.9.
+  for them (learning uses the VM's circuit history when the VM offers it).
 
   **What influence changes** (the same thresholds for both circuit types):
 
@@ -580,7 +579,7 @@ the rooms 7 hours after the day phase began is reported. A normal heat-up after
 setback never counts, a short morning phase (for example 06:00-09:00) is never
 judged, and nothing is judged during setback. Once reported, the Störung stays
 through the night and is cleared only when a later day phase is warm enough.
-Single rooms of an underfloor circuit are judged the same way from app 1.6.5:
+Single rooms of an underfloor circuit are judged the same way:
 only in a day phase, after its 4 hours of heat-up; setback and heat-up pause
 their 4-hour cold spell instead of restarting it, so it can add up over the
 evening phases. While the rooms are still getting warmer (for example after a
@@ -592,7 +591,7 @@ Saving writes the app's own options through the Supervisor and keeps every
 other option (dashboard address, tokens, VM-health monitor) unchanged. The
 running room monitoring takes the new selection over at once, without a
 restart. Rooms and circuits the new selection changes start their waiting
-times again; all other rooms continue (app 1.6.6). The page says whether the save
+times again; all other rooms continue. The page says whether the save
 worked. If Home Assistant refuses or does not answer, the page says so and
 nothing is assumed saved; reload the page to see the stored state. Sensors
 that are selected but no longer exist in Home Assistant stay listed under
@@ -663,7 +662,7 @@ notices count for the overall state.
 ### What is checked
 
 The room checks report a heating problem that lasts, not normal life in the
-house (app 1.6.5). Airing, an open door, cooking, showers, sun, guests, a valve
+house. Airing, an open door, cooking, showers, sun, guests, a valve
 turned down for an afternoon, slow underfloor heating and the first cold
 morning after the night setback stay quiet. The waiting times depend on the
 circuit type. Radiators react within an hour; underfloor heating needs many
@@ -671,11 +670,11 @@ hours.
 
 | Check | Radiators | Underfloor |
 | --- | --- | --- |
-| No cold check after a change of day/setback phase, target or mode | 2 h | 4 h, day phase only |
+| No cold check after a change of day/setback phase, target or mode (an existing "Heizkreis zu kalt" holds meanwhile and is judged again afterwards) | 2 h | 4 h, day phase only |
 | No warm check after a change of the day target or mode | 2 h | 8 h |
 | One cold spell: room 1.5 degrees below target and not getting warmer, for | 90 min | 4 h (adds up over day phases) |
 | Room too cold: after a cold spell the room has not come back within 1 degree of the day target for | 12 h | 12 h |
-| All rooms of a circuit clearly too cold (3 degrees) and none getting warmer, for | 3 h | 3 h in a day phase |
+| All rooms of a circuit clearly too cold (3 degrees) and none getting warmer, for (judged in a day phase only against the day target; during setback while the circuit keeps heating, an unknown phase, missing VM data or Home Assistant being away an existing "Heizkreis zu kalt" holds, up to 24 h; a circuit switched off in setback by its heating limit or inactive ends it that evening; radiators from app 1.6.12, owner decision 2026-11-23) | 3 h within one day phase, so a new finding needs a day phase of at least 5 h (2 h heat-up + 3 h) | 3 h within one day phase, so a new finding needs a day phase of at least 7 h (4 h heat-up + 3 h) |
 | Watching a room after a heating start | 60 min | 6 h |
 | Room does not get warmer: heating starts without effect on different days | 3 | 3 |
 | Circuit does not get warmer (fault): starts without effect on different days | 2 | 2 |
@@ -683,7 +682,7 @@ hours.
 | Room clearly too warm at night (21:00-06:00, 2 degrees) for | 2 h | 4 h |
 | All rooms of a circuit too warm for | 6 h | 12 h |
 | Room at 28 °C or more while heating, for | 1 h | 1 h |
-| Too cold although the heating limit switched off the circuit, for | 6 h | 12 h |
+| Too cold although the heating limit switched off the circuit, for (day phase only; during setback an existing notice holds, up to 24 h, from app 1.6.12) | 6 h | 12 h |
 | Airing: at least this long after a drop of 1 degree in 15 min, then until the room is back (at most 12 h) | 60 min | 3 h |
 | "Getting warmer": the last 15 min at least 0.3 degrees above the 15 min this long before | 1 h | 3 h |
 
@@ -716,8 +715,7 @@ house aired at once is not a fault. A failed pump or mixer is reported
 from the second morning; the circuit cold check (3 degrees, 3 h) usually comes
 first.
 
-**Rooms with an allowance and the circuit checks** (app 1.6.8, influence
-1.6.9). "All rooms of a circuit clearly too cold" (a fault) is judged over
+**Rooms with an allowance and the circuit checks**. "All rooms of a circuit clearly too cold" (a fault) is judged over
 the circuit's strong rooms (80 % or more) with at most 2 degrees allowance,
 each against its own limit, as in earlier versions. A room with more than 2
 degrees is one the owner keeps unusually cool, often warmed by sun or a
@@ -741,12 +739,12 @@ the circuit off) until the room is warm again, or 26 hours after the last cold
 spell, for example when the heating stays off for the summer. A room
 that is meant to stay cooler, or whose sensor sits at a cold spot such as a
 window, gets an allowance or a lower influence on the room page, or is set
-to "nicht überwachen". The app never learns a room's usual level by itself
-(owner decision, 2026-11-18): that would also hide a radiator that slowly
-fails. From 1.6.9 the owner can let it propose values for one room
+to "nicht überwachen". The app never learns a room's usual level by itself:
+that would also hide a radiator that slowly fails. The owner can let it
+propose values for one room
 (**Raum anlernen**, below); nothing changes until the owner accepts.
 
-### Raum anlernen (app 1.6.9, sources from 1.6.10)
+### Raum anlernen
 
 Every room saved on a heating circuit has a **Raum anlernen** part on the
 room page. Only a Home Assistant administrator can use it, and only for one
@@ -754,7 +752,7 @@ room at a time; it never starts by itself.
 
 1. Choose the **Zeitraum** (**alles Verfügbare**, up to one year, the
    default, or the last 3, 7, 14, 30 or 90 days) and press **Raum
-   anlernen**. The app reads (1.6.10):
+   anlernen**. The app reads:
    - the two **heating circuits** (phase Tag/Absenken, target, status) from
      the VM's own history: the state code every 5 minutes and the day and
      setback targets (configured target plus room correction) from the
@@ -860,8 +858,8 @@ The learning state (a running recording, a proposal, "angelernt am") is kept
 in `/data/room_learning.json` and survives an app restart; a room taken off a
 circuit forgets it. Deleting the file is harmless.
 
-**Latencies for a real fault** (accepted by the owner, 2026-11-18), measured from
-midnight in synthetic tests:
+**Latencies for a real fault** (as designed), measured from midnight in
+synthetic tests:
 
 | Fault | Day 06:00-22:00 | Day 06:00-09:00 and 15:00-23:00 |
 | --- | --- | --- |
@@ -912,18 +910,15 @@ target was unknown. The log shows only fixed lines such as
 
 ### Room checks after an app restart
 
-From app 1.6.6 a restart of the app (an update, a restart of the app, a
-reboot of the host) no longer starts the room checks over. A restart of Home
-Assistant Core alone never did: the checks pause while Core is unavailable. Before, they kept what they had
-seen in memory only: a problem that lasts, such as a room that does not get
-warmer (starts without effect on three days), had to be seen for days again, so
-the notification service sent "wieder in Ordnung" after a restart and, days
-later, the same problem as new.
+A restart of the app (an update, a restart of the app, a reboot of the host)
+does not start the room checks over, so a lasting problem is neither cleared
+by the restart nor reported again days later as new. A restart of Home
+Assistant Core alone only pauses the checks while Core is unavailable.
 
 The app saves what the checks have seen (waiting times, the starts without
 effect, cold spells, airing, the last hours of each sensor and the open
 notices with their start time) in `/data/house_state.json`, at most every 5
-minutes and when it stops (owner decision 2026-11-18). The file is written as a whole (temporary file, then
+minutes and when it stops. The file is written as a whole (temporary file, then
 renamed), is readable only by the app, holds no address or password and stays
 below 4 MB. After a restart the checks continue from it as if Home Assistant
 had been unavailable for the time the app was stopped: waiting times pause for
@@ -955,8 +950,7 @@ The saved state is used only when it fits:
 - the check rules of the installed version (an update that changes a waiting
   time or limit starts fresh).
 
-Without a file (first start) the checks start fresh, as before 1.6.6, without
-a log line. An unreadable or unsuitable file starts them fresh with one log
+Without a file (first start) the checks start fresh without a log line. An unreadable or unsuitable file starts them fresh with one log
 line such as `House monitor: state_unreadable.` (`state_incompatible`,
 `state_clock`, `state_too_old`); a restored state is
 logged as `House monitor: state_restored.` (`state_partly_restored` when some
@@ -966,24 +960,25 @@ the file is harmless: the checks then start fresh at the next start.
 ### Removing the app
 
 Raumsensoren leeren, dann App entfernen: set every sensor on the room page to
-**nicht überwachen** and save (or empty the three room lists in the
-Configuration tab, save and restart the app), then wait until the Betriebsüberwachung no longer shows room
+**nicht überwachen** and save (or, in the Configuration tab, empty every room
+list and `raum_einstellungen`, save and restart the app; a flag list or
+`raum_einstellungen` entry left for a removed sensor makes the configuration
+invalid), then wait until the Betriebsüberwachung no longer shows room
 monitoring (a few minutes). Only then uninstall the app. If the app is removed
 while sensors are selected, the VM keeps the checks **Räume** and
 **Raumsensoren** at **Unbekannt**.
 
-## Independent Betriebsüberwachung (app 1.6.3)
+## Independent Betriebsüberwachung
 
 The app maintains the existing MQTT entity identity and device. It subscribes through HA Core to the default `homeassistant` operation discovery topic and the VM operation reports, and redirects only this entity to its own checked state topic. No controller or settings command is possible. The VM report topic remains untouched. The app needs Home Assistant MQTT to be running; no broker credentials are stored in the app.
 
-A live report is required for Normal. Retained reports cannot start or renew that state. Without a live report for 90 seconds the state is Störung, with a message that the VM/monitoring is unreachable and the actual heating state is unknown. When the optional VM-health monitor is enabled, a failed or stale heartbeat also overrides a recent VM report. Its healthy heartbeat alone cannot clear a missing report. Recovery requires a new live report. The app publishes its checked state without retention every 15 seconds; if the app or HA connection fails, HA marks the entity unavailable after 90 seconds. No old Normal can be replayed from this topic. From app 1.6.4: after the app starts, and after a reconnect to Home Assistant (Core restart, integration reload) while the VM was reporting until then, the app waits the same 90 seconds (Unbekannt) before a missing report counts; a VM that was already silent stays Störung. When the last VM report said maintenance (a VM release restarts its services), a silence of up to 15 minutes is shown as Unbekannt ("Wartung der VM"). Freshness is measured on the app's own clock from the arrival of a report; the VM's timestamp only has to lie within 5 minutes of this host's clock and must not repeat a recent report, so clock differences or a VM clock that steps back no longer matter. A heartbeat that is still unknown in the first 90 seconds is no failure. The independently generated verdict requires installing app 1.6.3; source publication alone changes no installed entity.
+A live report is required for Normal. Retained reports cannot start or renew that state. Without a live report for 90 seconds the state is Störung, with a message that the VM/monitoring is unreachable and the actual heating state is unknown. When the optional VM-health monitor is enabled, a failed or stale heartbeat also overrides a recent VM report. Its healthy heartbeat alone cannot clear a missing report. Recovery requires a new live report. The app publishes its checked state without retention every 15 seconds; if the app or HA connection fails, HA marks the entity unavailable after 90 seconds. No old Normal can be replayed from this topic. After the app starts, and after a reconnect to Home Assistant (Core restart, integration reload) while the VM was reporting until then, the app waits the same 90 seconds (Unbekannt) before a missing report counts; a VM that was already silent stays Störung. When the last VM report said maintenance (a VM release restarts its services), a silence of up to 15 minutes is shown as Unbekannt ("Wartung der VM"). Freshness is measured on the app's own clock from the arrival of a report; the VM's timestamp only has to lie within 5 minutes of this host's clock and must not repeat a recent report, so clock differences or a VM clock that steps back no longer matter. A heartbeat that is still unknown in the first 90 seconds is no failure.
 
-After VM/app restart, room evaluation waits for fresh context and an accepted current app report. Room selections remain in app options; from app 1.6.6 the room checks continue from their saved state ("Room checks after an app restart"), on a first start or without a usable saved state they start fresh. Missing acknowledgement is not proof that the rooms are healthy.
+After VM/app restart, room evaluation waits for fresh context and an accepted current app report. Room selections remain in app options; the room checks continue from their saved state ("Room checks after an app restart"), on a first start or without a usable saved state they start fresh. Missing acknowledgement is not proof that the rooms are healthy.
 
-## Notification service check (app 1.6.4, optional)
+## Notification service check (optional)
 
-The harg-notify container (repository `notify/`, contract
-`proxy/NOTIFY-CONTRACT.md`) sends emails and calls and is the third
+The separate harg-notify container sends emails and calls and is the third
 participant in health monitoring. With the option `notify_watch: true` the app
 also subscribes through HA Core to `hargassner/+/notify/status` and adds the
 check **Benachrichtigungsdienst** to its checked verdict:

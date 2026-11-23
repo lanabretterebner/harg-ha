@@ -222,6 +222,19 @@ async function main() {
     const learned = fixture.saved[1].raum_einstellungen.find((row) => row.sensor === "sensor.wohnzimmer");
     check(learned && learned.kuehler >= 2 && learned.einfluss_hk1 <= 20, `learned values ${JSON.stringify(learned)}`);
     await page.waitForSelector('fieldset[data-entity="sensor.wohnzimmer"] .anlernen >> text=Angelernt am');
+    // Zurücksetzen needs a second tap (review 2026-11-23): one tap writes nothing.
+    const learnedPanel = page.locator('fieldset[data-entity="sensor.wohnzimmer"] .anlernen');
+    await learnedPanel.getByRole("button", { name: "Zurücksetzen" }).click();
+    await page.waitForFunction(() => document.getElementById("meldung").textContent.includes("noch einmal tippen"));
+    check(fixture.saved.length === 2, "one tap on Zurücksetzen writes nothing");
+    await learnedPanel.getByRole("button", { name: "Wirklich auf Standardwerte zurücksetzen?" }).click();
+    await page.waitForFunction(() => document.getElementById("meldung").textContent.startsWith("Zurückgesetzt auf die Standardwerte."));
+    check(fixture.saved.length === 3, "the confirming tap writes the options once");
+    const reset = fixture.saved[2].raum_einstellungen.find((row) => row.sensor === "sensor.wohnzimmer");
+    check(!reset || (reset.kuehler === 0 && reset.einfluss_hk1 === 100 && reset.einfluss_hk2 === 0),
+      `room back to its default settings ${JSON.stringify(reset)}`);
+    check([...fixture.saved[2].heizkreis_1_sensoren, ...fixture.saved[2].heizkreis_2_sensoren].includes("sensor.wohnzimmer"),
+      "the reset room stays on its circuit");
     const overflow = await page.evaluate(() => document.scrollingElement.scrollWidth - window.innerWidth);
     check(overflow <= 0, `no horizontal scroll with learning (${overflow})`);
     await context.close();
@@ -246,7 +259,7 @@ async function main() {
     await foreign.waitForFunction(() => window.results.length === 2);
     const results = await foreign.evaluate(() => window.results);
     check(results[0] === "json:blocked", `cross-site JSON blocked (${results[0]})`);
-    check(fixture.saved.length === 2, "cross-site requests saved nothing");
+    check(fixture.saved.length === 3, "cross-site requests saved nothing");
     await foreign.close();
     check(problems.length === 0, `no page errors or CSP violations: ${problems.join(" | ")}`);
   } finally {

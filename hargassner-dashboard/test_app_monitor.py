@@ -146,9 +146,27 @@ class MonitorTests(unittest.TestCase):
         self.fail_get = self.fail_post = False; self.now += 30; self.documents = report(self.now)
         for _ in range(6): self.monitor.poll_once()
         events = [r['event'] for r in self.posts()][1:]
-        self.assertEqual([r['transition'] for r in events], ['alert'] * 3 + ['recovery'] * 3)
-        self.assertEqual(len({r['event_id'] for r in events}), 6)
+        # Newest state wins: the undelivered alerts are superseded by the
+        # recoveries and never sent; each recovery goes out once, in order.
+        self.assertEqual([(r['component'], r['transition']) for r in events],
+                         [('heartbeat', 'recovery'), ('certificate', 'recovery'), ('telnet', 'recovery')])
+        self.assertEqual(len({r['event_id'] for r in events}), 3)
         self.assertEqual(self.state()['queue'], [])
+    def test_flapping_vm_notification_follows_the_newest_state(self):
+        # Review 2026-11-23: every outdated event used up one 30 s poll, so a VM
+        # that timed out every other poll left the notification up to 64 polls
+        # behind. Now each component's newest state is delivered within 3 polls.
+        self.monitor.poll_once()
+        for flip in range(20):
+            self.fail_get = flip % 2 == 0; self.advance(30); self.monitor.poll_once()
+            self.assertLessEqual(len(self.state()['queue']), 6, flip)
+        self.fail_get = False
+        for _ in range(3): self.advance(30); self.monitor.poll_once()
+        self.assertEqual(self.state()['queue'], [])
+        last = {}
+        for request in self.posts():
+            last[request['event']['component']] = request['event']['status']
+        self.assertEqual(last.get('heartbeat'), 'healthy')
     def test_fresh_heartbeat_does_not_renew_stale_checker_runs(self):
         self.documents['checks']['certificate']['checked_at'] = NOW - 90001
         self.documents['checks']['telnet']['checked_at'] = NOW - 46
@@ -205,7 +223,8 @@ class MonitorTests(unittest.TestCase):
         self.assertEqual(self.reasons(), {'clock_invalid'}); self.assertEqual(self.state()['last_evaluated_at'], self.now)
         self.advance(30); self.monitor.poll_once(); self.assertEqual(self.reasons(), {'ok'})
         for _ in range(6): self.advance(30); self.monitor.poll_once()
-        self.assertEqual([r['event']['transition'] for r in self.posts()], ['alert'] * 3 + ['recovery'] * 3)
+        # The two alerts still queued at the recovery are superseded, never sent.
+        self.assertEqual([r['event']['transition'] for r in self.posts()], ['alert'] + ['recovery'] * 3)
         self.assertEqual(self.state()['queue'], [])
     def test_report_hovering_at_the_future_tolerance_alerts_once_and_recovers_once(self):
         self.monitor.poll_once()  # healthy baseline
@@ -247,11 +266,13 @@ class MonitorTests(unittest.TestCase):
     def test_step_seen_with_a_full_outbox_is_still_withheld_when_the_evaluation_is_recorded(self):
         self.monitor.poll_once(); self.full_outbox()
         self.advance(10)  # 20 s lost; the stamp is behind the wall clock, so only monotonic time shows it
-        for _ in range(2):
-            self.assertEqual(self.monitor.poll_once()['error'], 'state_capacity'); self.assertEqual(self.reasons(), {'run_missing'}); self.advance(30)
-        self.monitor.poll_once(); self.assertEqual(self.reasons(), {'clock_invalid'})
-        for _ in range(3): self.advance(30); self.monitor.poll_once()  # room for the three recoveries
-        self.assertEqual(self.reasons(), {'ok'}); self.assertEqual(len(self.state()['queue']), 64)
+        # The 64 superseded copies leave with one delivery, so the evaluation is
+        # recorded in the same poll, and the step is still withheld there.
+        result = self.monitor.poll_once()
+        self.assertEqual((result['delivered'], result.get('error')), (1, None))
+        self.assertEqual(self.reasons(), {'clock_invalid'})
+        for _ in range(4): self.advance(30); self.monitor.poll_once()
+        self.assertEqual(self.reasons(), {'ok'}); self.assertEqual(self.state()['queue'], [])
     def test_shutdown_after_get_leaves_outbox_without_post(self):
         stop = threading.Event(); self.fail_get = True
         def network(request): stop.set(); return self.network(request)
@@ -276,20 +297,18 @@ class MonitorTests(unittest.TestCase):
         template = row['queue'][0]; row['queue'] = [{**template, 'event_id': f'{i:064x}'} for i in range(64)]
         h.atomic_json(self.monitor.state_path, row)
         return row
-    def test_full_outbox_drains_one_per_poll_and_then_records_current_conditions(self):
+    def test_full_outbox_coalesces_superseded_events_and_records_current_conditions(self):
+        # 64 events of one component: only the newest is delivered, the others
+        # are superseded (they took 64 polls, about 32 min, before 1.6.12).
         row = self.full_outbox()
-        for index in range(3):
-            result = self.monitor.poll_once()
-            self.assertEqual(result['delivered'], 1)
-            self.assertEqual(len(self.posts()), index + 1)
-            self.assertEqual(self.posts()[-1]['event'], row['queue'][index])
-            if index < 2:
-                self.assertTrue(all(item['status'] == 'unknown' for item in self.state()['conditions'].values()))
+        result = self.monitor.poll_once()
+        self.assertEqual(result['delivered'], 1)
+        self.assertEqual([item['event'] for item in self.posts()], [row['queue'][-1]])
         self.assertTrue(all(item['status'] == 'healthy' for item in self.state()['conditions'].values()))
-        self.assertEqual(len(self.state()['queue']), 64)
-        for _ in range(64): self.monitor.poll_once()
+        self.assertEqual([item['transition'] for item in self.state()['queue']], ['recovery'] * 3)
+        for _ in range(3): self.monitor.poll_once()
         self.assertEqual(self.state()['queue'], [])
-        self.assertEqual(len({item['event']['event_id'] for item in self.posts()}), 67)
+        self.assertEqual(len({item['event']['event_id'] for item in self.posts()}), 4)
     def test_full_outbox_failed_delivery_keeps_every_original_event(self):
         self.full_outbox(); before = self.monitor.state_path.read_bytes(); self.fail_post = True
         result = self.monitor.poll_once()

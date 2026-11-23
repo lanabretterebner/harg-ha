@@ -41,7 +41,7 @@ attribute list. They open the native more-info dialog and add no inline preset
 selector. [Official Tile configuration](https://www.home-assistant.io/dashboards/tile/).
 
 The thermostat target is the active configured day/setback base plus room
-correction. Its dial writes only the correction in−3…+3°C at0.5°C steps;
+correction. Its dial writes only the correction, -3 to +3 °C in 0.5 °C steps;
 separate day/setback number entities edit the base temperatures. Command
 availability remains the backend's decision and needs qualified fresh state.
 
@@ -61,11 +61,11 @@ also leaves one existing MQTT device and all registry/discovery identities intac
 
 `Sollwertbasis` identifies the currently qualified configured target context. The backend remains the only command authority. Legacy `Sollwertaktualisierung` markers are display hints; they never authorize a temperature command.
 
-Frontend 1.4.16 also understands additive `Temperaturauftrag` schemaVersion1: controller-unit `temperatureUnit: °C`, opaque `context`, monotonic operation `sequence` and full-envelope `revision`, bounded last8 `records`, plus same-snapshot `confirmedTarget`, `confirmedBasis` and `confirmedPreset` echoes. A record contains its sequence, original basis/requested target, status (`pending`, `confirmed`, `rejected`, `sent_unconfirmed`), safe reason/origin and timestamps. A confirmed correction record alone is insufficient: the displayed actual target/basis/preset must match the coherent echoes before settling. HA Fahrenheit display converts the Celsius metadata explicitly.
+The frontend also understands the additive `Temperaturauftrag` with `schemaVersion` 1: controller-unit `temperatureUnit: °C`, opaque `context`, monotonic operation `sequence` and full-envelope `revision`, at most the last 8 `records`, plus same-snapshot `confirmedTarget`, `confirmedBasis` and `confirmedPreset` echoes. A record contains its sequence, original basis/requested target, status (`pending`, `confirmed`, `rejected`, `sent_unconfirmed`), safe reason/origin and timestamps. A confirmed correction record alone is insufficient: the displayed actual target/basis/preset must match the coherent echoes before settling. HA Fahrenheit display converts the Celsius metadata explicitly.
 
 The client captures a local draft before native debounce, keeps it pending/uncertain without automatic retry, and rejects stale snapshots/outcomes. An older rejected request cannot undo newer input. Memory-only intent is scoped to the authenticated HA connection/user/entity; nothing changes shared HA states or persists an intent. Native card/control nodes remain mounted while callback/API leases rotate. Only bound definitive rejection allows rollback. Fresh genuine mode/base/day-night changes remain truthful; no cached target grants permission.
 
-During a source/readback gap, the last confirmed number remains a labelled inert private projection. The previous eight-second unmount is removed. Actual Off stays Off; offline/unqualified targets cannot send. The independently available six-mode path is not disabled by uncertain temperature presentation. Missing initial confirmed bounds never invents a dial range.
+During a source/readback gap, the last confirmed number remains a labelled inert private projection. Actual Off stays Off; offline/unqualified targets cannot send. The independently available six-mode path is not disabled by uncertain temperature presentation. Missing initial confirmed bounds never invents a dial range.
 
 Native +/- gestures update the private requested number immediately and coalesce
 into one send 250 ms after the last gesture. Continuous slider movement remains
@@ -79,10 +79,9 @@ qualified mode/base/day-night replacement settles it. A bound terminal backend
 uncertainty plus a new coherent qualified basis also permits a new explicit
 gesture, even when the actual target differs from the uncertain requested one. Old repeated state,
 service promise resolution/error, elapsed time and reconnect alone do not
-release this lock. Further gestures are not queued or retried. This deliberately
-replaces the earlier ability to supersede a submitted request using its still
-cached basis; unsubmitted gestures still coalesce. The six-mode selector remains
-independently available.
+release this lock. Further gestures are not queued or retried, and a submitted
+request cannot be superseded on its still cached basis; unsubmitted gestures
+still coalesce. The six-mode selector remains independently available.
 
 A terminal uncertain request with a new coherent qualified basis remains
 labelled with its uncertain requested number until another deliberate gesture
@@ -95,12 +94,12 @@ and uncertainty note remain visible; independently qualified mode control stays
 available.
 
 
-## Independent correction fallback (frontend 1.4.16)
+## Independent correction fallback
 
 When no active target basis is qualified, including Auto during summer shutdown,
 the card and popup offer a separately labelled Raumkorrektur dial instead of
 inventing a day/setback target. It writes only the commissioned number entity,
-−3…+3°C in0.5°C steps; day/setback targets remain separately editable.
+-3 to +3 °C in 0.5 °C steps; day/setback targets remain separately editable.
 
 The adapter passes an opaque `hargassner_correction_id` on both climate and its
 correction number. The number also advertises `hargassner_control_schema:
@@ -162,6 +161,6 @@ reads, so a cloud-sent value can change the cadence on a controller this client
 never wrote to. A longer resend age pushes state past the backend's availability
 timeout and makes entities flap or sit unavailable with nothing wrong locally;
 no local code in this repository sends either command. The HA-host monitor's own
-numbers are unaffected: its Telnet five-second sample contract and its 45 s,
-120 s and 90000 s limits are VM-local and independent of the MQTT cadence, so a
-changed cadence is not visible there either.
+numbers are unaffected: its Telnet sample contract (a `fresh` frame at most
+50 s old) and its 45 s, 120 s and 90000 s limits are VM-local and independent
+of the MQTT cadence, so a changed cadence is not visible there either.

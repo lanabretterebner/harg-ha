@@ -229,6 +229,77 @@ class RoomColdTests(unittest.TestCase):
         h = Harness(hc2(A, B), values={A: 17.5, B: 17.0})
         self.assertEqual(h.first('circuit_cold', 2000), 1 + 240 + 180)  # underfloor: 4 h heat-up, 3 h
 
+    def test_radiator_circuit_cold_is_judged_in_the_day_phase_only(self):
+        # Owner decision 2026-11-23: radiators as underfloor. A failed pump's
+        # Störung stays raised over a night whose setback target the rooms are
+        # within 2.5 K of, instead of ending and returning the next day.
+        h = Harness(hc1(A, B), values={A: 17.5, B: 17.8})
+        self.assertIsNotNone(h.first('circuit_cold', 600))
+        h.set_circuit('hc1', phase='setback', target=18.0, status=3)
+        for minute in range(10 * 60):
+            # Short gaps late in the night: HA away, Absenken-Rampe (status 2).
+            h.ha = 'unavailable' if minute in (180, 181) else 'running'
+            h.set_circuit('hc1', status=2 if minute in (240, 241) else 3)
+            h.step()
+            self.assertTrue(h.engine.circuits['hc1'].circuit_cold.active, minute)
+        h.ha = 'running'
+        h.step()
+        self.assertTrue(h.has('circuit_cold'))
+        # The day phase still judges: heat-up first, then the day target.
+        h.set_circuit('hc1', phase='day', target=21.0, status=1)
+        for minute in range(5 * 60):
+            h.step()
+            self.assertTrue(h.has('circuit_cold'), minute)      # still 3 K below the day target
+        h.values[A] = h.values[B] = 19.5
+        self.assertTrue(h.run(15, until=lambda x: not x.has('circuit_cold')))
+
+    def test_radiator_circuit_cold_never_fires_outside_a_day_phase(self):
+        # Setback: rooms 3.5 K below the setback target for 10 h raise nothing.
+        h = Harness(hc1(A, B), hc1=circuit(phase='setback', target=18.0, status=3), values={A: 14.5, B: 14.5})
+        h.run(10 * 60)
+        self.assertNotIn('circuit_cold', h.codes())
+        # No known phase: never judged, a basis is never invented.
+        h = Harness(hc1(A, B), hc1=circuit(phase=None), values={A: 17.5, B: 17.8})
+        h.run(10 * 60)
+        self.assertNotIn('circuit_cold', h.codes())
+        # An existing finding holds while the phase is unknown.
+        h = Harness(hc1(A, B), values={A: 17.5, B: 17.8})
+        self.assertIsNotNone(h.first('circuit_cold', 600))
+        h.set_circuit('hc1', phase=None)
+        h.run(5 * 60)
+        self.assertTrue(h.has('circuit_cold'))
+
+    def test_radiator_circuit_cold_holds_through_a_settle(self):
+        # A failed radiator circuit (review 2026-11-23): the Störung neither ends
+        # at the change to setback nor at a dial tap and then returns 5 h later;
+        # it holds through the settle and is judged again after it.
+        h = Harness(hc1(A, B), values={A: 17.5, B: 17.8})
+        self.assertIsNotNone(h.first('circuit_cold', 600))
+        h.set_circuit('hc1', phase='setback', target=20.5, status=3)   # still 2.7 K or more below
+        for minute in range(300):
+            h.step()
+            self.assertTrue(h.has('circuit_cold'), minute)
+        h.set_circuit('hc1', target=21.0)                              # a correction tap restarts settle
+        for minute in range(300):
+            h.step()
+            self.assertTrue(h.has('circuit_cold'), minute)
+        # A reference sensor that drops out across the end of the settle pauses
+        # the check; the settle's paused time does not end the finding at once.
+        h.set_circuit('hc1', target=20.5)
+        h.run(SETTLE['radiator'] - 5)
+        h.values[B] = 'unavailable'
+        h.run(30)
+        self.assertTrue(h.has('circuit_cold'))
+        h.values[B] = 17.8
+        h.run(2)
+        self.assertTrue(h.has('circuit_cold'))
+        # Rooms back within 2.5 K: it ends once the settle is over, not before.
+        h.set_circuit('hc1', phase='day', target=21.0, status=1)
+        h.values[A] = h.values[B] = 19.5
+        h.run(SETTLE['radiator'] - 5)
+        self.assertTrue(h.has('circuit_cold'))
+        self.assertTrue(h.run(30, until=lambda x: not x.has('circuit_cold')))
+
 
 class FloorDailyProgrammeTests(unittest.TestCase):
     """Underfloor circuit_cold with a split daily programme (owner decision 2026-11-18):
@@ -633,9 +704,20 @@ class LimitAndFrostTests(unittest.TestCase):
         self.assertEqual(h.first('limit_cold', 600), 1 + 360)
         row = h.rows('limit_cold')[0]
         self.assertEqual((row['room'], row['target']), (18.5, 21.0))
+        # Setback (review 2026-11-23): the notice holds through the night instead
+        # of ending every evening; the next day phase judges it again.
         h.set_circuit('hc1', phase='setback', target=18.0)
+        for minute in range(10 * 60):
+            h.step()
+            self.assertTrue(h.has('limit_cold'), minute)
+        h.set_circuit('hc1', phase='day', target=21.0, status=1)     # the circuit heats again
         h.step()
         self.assertFalse(h.has('limit_cold'))
+        # No new notice starts during setback.
+        h = Harness(hc1(A), values={A: 15.0})
+        h.set_circuit('hc1', status=4, phase='setback', target=18.0)
+        h.run(800)
+        self.assertNotIn('limit_cold', h.codes())
         for extra in ({'outdoor_avg': 12.0}, {'outdoor_avg': None}):
             h = Harness(hc1(A), values={A: 18.5}, **extra)
             h.set_circuit('hc1', status=5)

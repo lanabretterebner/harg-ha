@@ -676,6 +676,20 @@ class UnitTests(unittest.TestCase):
                 if field: self.assertIn(field, json.loads(body))
                 self.assertNotIn('example.invalid', body)
 
+    def test_webhook_text_is_german(self):
+        # Review 2026-11-23: the chat formats said "Hargassner health: telnet alert (...)".
+        faulted = h.transition(h.evaluate(heartbeat(telnet='fault'), now=NOW), h.initial_state(), NOW)
+        recovered = h.transition(h.evaluate(heartbeat(now=NOW + 30), now=NOW + 30), faulted, NOW + 30)
+        for event, expected in ((faulted['queue'][0], 'Heizung: Messwerte prüfen. '),
+                                (recovered['queue'][-1], 'Heizung: Messwerte wieder in Ordnung.')):
+            c = h.settings({'webhook': {'url': 'https://example.invalid/topic', 'format': 'slack'}})
+            with self.subTest(transition=event['transition']), patch.object(h, 'request_https') as send:
+                h.delivery(event, c)
+                text = json.loads(send.call_args.args[4])['text']
+                self.assertTrue(text.startswith(expected), text)
+                self.assertTrue(text.endswith('(Ereignis ' + event['event_id'] + ')'))
+                self.assertNotRegex(text, r'Hargassner health|alert|recovery|[\u2010-\u2015]')
+
     def test_malformed_container_status_values_are_refused(self):
         for value in ([], {}, None, True):
             for kind, row, field in [('certificate', certificate(), 'status'), ('telnet', telnet(), 'state')]:

@@ -147,12 +147,23 @@ class SaveTests(unittest.TestCase):
         living = block('sensor.wohnzimmer')
         self.assertIn('Darf kühler sein um <input type="number" name="kuehler" min="0" max="10" step="0.5" '
                       'inputmode="decimal" value="3.5"> °C', living)
-        self.assertIn('Einfluss Heizkreis 1 <input type="number" name="einfluss_hk1" min="0" max="100" step="5" '
+        self.assertIn('Einfluss Heizkreis 1 <input type="number" name="einfluss_hk1" min="0" max="100" step="1" '
                       'inputmode="numeric" value="80"> %', living)
-        self.assertIn('name="einfluss_hk2" min="0" max="100" step="5" inputmode="numeric" value="20"> %', living)
-        self.assertIn('name="einfluss_hk2" min="0" max="100" step="5" inputmode="numeric" value="100"', block('sensor.bad'))
+        self.assertIn('name="einfluss_hk2" min="0" max="100" step="1" inputmode="numeric" value="20"> %', living)
+        self.assertIn('name="einfluss_hk2" min="0" max="100" step="1" inputmode="numeric" value="100"', block('sensor.bad'))
         self.assertIn('Unter 30 % wird der Raum', page)
         self.assertNotRegex(page, '[‐-―]')
+
+    def test_any_whole_influence_can_be_saved_from_the_page(self):
+        # The option schema and the server take any whole 0..100 (review
+        # 2026-11-23); a browser step of 5 refused the whole form (silently for
+        # a row hidden by the search) when 33 came from the Configuration tab.
+        world = PickerWorld({'heizkreis_1_sensoren': ['sensor.wohnzimmer'], 'heizkreis_2_sensoren': ['sensor.bad'],
+                             'raum_einstellungen': [entry('sensor.wohnzimmer', 2, 67, 33)]})
+        page = world.page()
+        self.assertIn('name="einfluss_hk1" min="0" max="100" step="1" inputmode="numeric" value="67"', page)
+        self.assertIn('name="einfluss_hk2" min="0" max="100" step="1" inputmode="numeric" value="33"', page)
+        self.assertNotRegex(page, r'name="einfluss_hk[12]"[^>]* step="(?!1")')
 
 
 class AllowanceTests(unittest.TestCase):

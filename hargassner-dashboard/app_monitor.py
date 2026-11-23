@@ -233,7 +233,18 @@ class Monitor:
                 self.reading = (now, tick)
             self.update_status(queue_count=len(proposed['queue']))
             if proposed['queue'] and not (stop is not None and stop.is_set()):
-                event = proposed['queue'][0]
+                # Newest state wins (review 2026-11-23). A queued event with a
+                # later event of the same component behind it is superseded: the
+                # notification shows only a component's last state, so it is
+                # never delivered, and a flapping VM no longer leaves the visible
+                # notification minutes behind. Deliver the first event that is
+                # not superseded; every event before it is superseded and leaves
+                # the queue with it, only after a successful delivery (a failure
+                # keeps the outbox unchanged). Order across components is kept.
+                queue = proposed['queue']
+                index = next(i for i, item in enumerate(queue)
+                             if not any(later['component'] == item['component'] for later in queue[i + 1:]))
+                event = queue[index]
                 try:
                     self.network({'kind': 'notification', 'token': self.token, 'event': event, 'condition': rows[event['component']]})
                 except health.Refusal:
@@ -241,7 +252,7 @@ class Monitor:
                 if all(rows[event['component']][key] == event[key] for key in ('status', 'reason')):
                     self._notification_cleanup.discard(event['component'])
                 self.update_status(last_delivery_condition={key: event[key] for key in ('component', 'transition', 'status', 'reason')})
-                proposed['queue'].pop(0)
+                del queue[:index + 1]       # the delivered event and the superseded ones before it
                 health.atomic_json(self.state_path, proposed)
                 self.update_status(queue_count=len(proposed['queue']))
                 if deferred:

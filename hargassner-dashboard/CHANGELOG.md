@@ -1,5 +1,85 @@
 # Changelog
 
+## 1.6.12
+
+Review fixes (static review 2026-11-23) and an owner decision. Control
+behaviour, the saved room state (rule digest unchanged, a 1.6.11 state
+continues) and the content of the reports to the VM are unchanged apart from
+the version; a failed report is retried sooner (below).
+
+- **Heizkreis zu kalt is judged in the day phase only, for radiators too**
+  (owner decision 2026-11-23, as for underfloor since 1.6.5). A failed pump's
+  Störung now stays raised overnight while the circuit keeps heating during
+  setback: during setback, or while the phase, the VM's data or Home Assistant
+  is unavailable (also across an app restart), the check is not judged at all,
+  no new finding starts and an existing one holds (up to 24 hours; for
+  underfloor circuits such gaps were limited to 6 hours before). If setback
+  switches the circuit off (heating limit or inactive), the finding still ends
+  that evening and returns the next day, as for underfloor since 1.6.5. In the
+  day phase it is judged against the day target after the 2-hour heat-up and
+  ends when the rooms are back within 2.5 degrees. Before, it ended at night
+  once the rooms were within 2.5 degrees of the setback target, or at a dial
+  tap or mode change, and came back the next day. A new finding is raised only
+  in a day phase (before, also at night against the setback target): for
+  radiators it needs one day phase of at least 5 hours (2-hour heat-up plus
+  3 hours too cold), as underfloor needs 7 hours (4-hour heat-up plus 3 hours)
+  since 1.6.5. With shorter radiator day phases (for example 06:00-08:00 and 17:00-21:00) it is
+  not raised; "Raum zu kalt" and "Heizkreis wird nicht wärmer" still report a
+  failed pump, later. The detection times of the tested pump failures are
+  unchanged.
+- **The heating-limit notice holds through the night** ("... ist wegen
+  Heizgrenze oder Sommerbetrieb aus, aber ... ist zu kalt", `limit_cold`). It is
+  judged in the day phase only: during setback no new one starts and an
+  existing one holds (up to 24 hours, also while Home Assistant is away),
+  instead of ending every evening and needing another 6 hours (12 hours
+  underfloor) the next day.
+- **Raum anlernen settles after a target change too**, as the room checks do:
+  the hours a room needs to follow an evening raise of the day target no
+  longer count as a shortfall and inflate the proposed allowance.
+- **Room page search stays quick on a phone:** each sensor's search text is
+  prepared once when the page loads, not again on every keystroke.
+- **German chat texts in the off-host monitor** (`health_alerts.py` webhook
+  formats slack, discord and ntfy): the same wording as the Home Assistant
+  notification, for example "Heizung: Messwerte prüfen. ..." or "Heizung:
+  Messwerte wieder in Ordnung.", with the event id.
+- **Betriebsüberwachung follows the newest state.** Each poll delivered one
+  queued notification event, also outdated ones that only made way for a
+  newer state of the same check, so with a VM that kept dropping out the HA
+  notification could be up to about 30 minutes behind. An event superseded by
+  a later one of the same check is now never delivered; each check's newest
+  state follows within three polls. Order between the checks, one delivery per
+  poll and the unchanged outbox after a failed delivery are kept.
+- **Raum anlernen keeps the other rooms** when one entry of
+  `/data/room_learning.json` is damaged: only that entry is dropped (before,
+  every recording, proposal and learned date was lost).
+- **Zurücksetzen needs a second tap:** the first tap asks "Wirklich auf
+  Standardwerte zurücksetzen?" and changes nothing; the question lapses after
+  5 seconds. A mis-tap on a phone no longer resets a room's settings.
+- **Room page: any whole influence can be saved.** The influence fields
+  accepted only multiples of 5 in the browser, so a value such as 33 % set in
+  the Configuration tab blocked saving the whole page (silently when that room
+  was hidden by the search). They now take any whole number from 0 to 100, as
+  the app always did.
+- **No old VM confirmation shown as current.** While the VM sends no current
+  data, the room page says "Keine aktuelle Bestätigung der VM" instead of
+  repeating the last "Die VM nimmt die Raummeldungen an".
+- **A failed room report is retried after 10 s** when its findings differ from
+  the last report that went out, instead of after the 2-minute period; an
+  unchanged report, or one failing since the app started, still waits for the
+  period.
+- **The room page says when the VM's version does not fit** instead of an old
+  confirmation.
+- **No false reconnect after a slow cycle:** a pong that is already waiting
+  is read before the WebSocket's pong deadline is checked (house monitor and
+  Betriebsüberwachung).
+- **German panel texts:** the ingress messages (for example "Keine sichere
+  Verbindung zum Dashboard der VM. Bitte prüfen, ob die VM läuft und erreichbar
+  ist." instead of "Cannot reach the local dashboard securely." when the VM is
+  down) and the room page's error texts are German; "(3-mal)" in the learning
+  evidence.
+- The room page's time display no longer fails when Home Assistant's time zone
+  changes while the page is rendered.
+
 ## 1.6.11
 
 - **Telnet health no longer flaps on a slow VM disk** (incident 2026-11-22:
@@ -368,7 +448,7 @@
 
 - Treat an empty optional `upstream_connect_host` as unset instead of failing
   startup.
-- Reject raw non-ASCII request paths with HTTP400 instead of a 502
+- Reject raw non-ASCII request paths with HTTP 400 instead of a 502
   "Cannot reach" response; existing identity and path checks are unchanged.
 - Correct the documented `health_alerts.py` pin; the evaluator is unchanged.
 
@@ -414,4 +494,4 @@ permissions and digest-pinned base image remain unchanged.
 Publish the existing ingress proxy as an installable HA app-store repository
 component alongside the HACS popup. Pin the verified multi-architecture base
 image by digest and provide generic installation instructions. Proxy runtime
-behavior is unchanged from the earlier0.1.0 local-source package.
+behavior is unchanged from the earlier 0.1.0 local-source package.

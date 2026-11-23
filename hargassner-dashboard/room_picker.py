@@ -610,13 +610,15 @@ SCRIPT = r"""
     count.textContent = 'Ausgewählt: ' + n + ' von höchstens ' + max + ' Sensoren';
     count.classList.toggle('zuviel', n > max);
   }
+  // Normalised once (the server already folds the text); a keystroke only
+  // compares, which stays quick on a phone with many sensors (review 2026-11-23).
+  var texts = rows.map(function (row) { return norm(row.getAttribute('data-suche') || ''); });
   function filter() {
     var words = norm(search.value).split(/\s+/).filter(Boolean);
     var shown = 0;
-    rows.forEach(function (row) {
-      var text = norm(row.getAttribute('data-suche'));
-      var match = words.every(function (word) { return text.indexOf(word) >= 0; });
-      row.hidden = !match;
+    rows.forEach(function (row, index) {
+      var match = words.every(function (word) { return texts[index].indexOf(word) >= 0; });
+      if (row.hidden !== !match) { row.hidden = !match; }
       if (match) { shown += 1; }
     });
     hits.textContent = shown + ' von ' + rows.length + ' Sensoren angezeigt';
@@ -695,6 +697,20 @@ SCRIPT = r"""
     var record = panel.querySelector('select[name="aufzeichnung"]');
     var checked = panel.querySelector('input[name="geprueft"]');
     var action = target.getAttribute('data-aktion');
+    // Zurücksetzen writes the room options: a second tap confirms it, so a
+    // mis-tap on a phone changes nothing (review 2026-11-23).
+    if (action === 'zuruecksetzen' && target.getAttribute('data-bestaetigen') !== 'ja') {
+      target.setAttribute('data-bestaetigen', 'ja');
+      target.textContent = 'Wirklich auf Standardwerte zurücksetzen?';
+      show(true, 'Zum Zurücksetzen auf die Standardwerte innerhalb von 5 Sekunden noch einmal tippen. '
+        + 'Es wurde nichts geändert.');
+      window.setTimeout(function () {
+        target.removeAttribute('data-bestaetigen');
+        target.textContent = 'Zurücksetzen';
+      }, 5000);
+      return;
+    }
+    if (action === 'zuruecksetzen') { target.removeAttribute('data-bestaetigen'); }
     var days = action === 'aufzeichnen' ? (record ? parseInt(record.value, 10) : null)
       : (action === 'anlernen' && period ? parseInt(period.value, 10) : null);
     var body = { aktion: action, entity_id: panel.getAttribute('data-raum'), tage: days,
@@ -940,7 +956,7 @@ def render_picker(status, rows, areas, stored, viewer, nonce, *, zone=None, zone
                    f'value="{_number_text(current[0]).replace(",", ".")}"{disabled}> °C</label>')
         for number, name in enumerate(INFLUENCE_FIELDS, 1):
             out.append(f'<label data-gilt="kreis"{hidden}>{escape(INFLUENCE_LABEL.format(index=number))} '
-                       f'<input type="number" name="{name}" min="0" max="100" step="5" inputmode="numeric" '
+                       f'<input type="number" name="{name}" min="0" max="100" step="1" inputmode="numeric" '
                        f'value="{current[number]}"{disabled}> %</label>')
         for flag, _key, flag_scope, text in FLAGS:
             checked = ' checked' if entity in flags[flag] and flag_scope == scope else ''

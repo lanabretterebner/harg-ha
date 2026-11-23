@@ -292,6 +292,32 @@ class SubscriptionTests(unittest.TestCase):
         self.assertEqual(caught.exception.args, ('pong_timeout',))
         sub.close()
 
+    def test_buffered_pong_after_a_slow_cycle_is_not_a_timeout(self):
+        # Review 2026-11-23: the deadline was checked before reading, so a pong
+        # already in the socket after a cycle longer than the deadline raised.
+        now, pong_sent = [0.0], threading.Event()
+
+        def script(peer):
+            peer.handshake()
+            peer.send_json({'type': 'auth_required'})
+            peer.receive_json()
+            peer.send_json({'type': 'auth_ok'})
+            peer.receive_json()
+            peer.send_json({'id': 1, 'type': 'result', 'success': True})
+            ping = peer.receive_json()
+            peer.send_json({'id': ping['id'], 'type': 'pong'})
+            pong_sent.set()
+            peer.read(1)
+        server, sub = self.subscription(script, clock=lambda: now[0])
+        sub.open()
+        now[0] = ws.PING_INTERVAL_S
+        sub.poll(0)                              # sends the ping
+        self.assertTrue(pong_sent.wait(5))
+        now[0] += ws.PONG_DEADLINE_S + 1         # a slow cycle before the next poll
+        self.assertEqual(sub.poll(0.05), [])
+        self.assertIsNone(sub.pong_wait)
+        sub.close()
+
     def test_auth_failure_and_subscribe_error(self):
         def refused_auth(peer):
             peer.handshake()
