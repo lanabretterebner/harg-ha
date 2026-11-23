@@ -1,11 +1,11 @@
-/* Hargassner thermostat popup and dashboard card, v1.4.15.
+/* Hargassner thermostat popup and dashboard card, v1.4.16.
  * One native-styled Modus menu replaces both native HVAC/preset menus.
  * Only an explicit user selection forwards a manufacturer mode to HA's
  * existing preset handler. Qualified target gestures use guarded climate.set_temperature.
  * Unknown-target correction controls use the separately commissioned number.set_value.
  * See POPUP-INSTALL.md for the supported HA DOM contract and manual install.
  */
-const VERSION = "1.4.15";
+const VERSION = "1.4.16";
 // Coalesce rapid native +/- gestures while reducing the avoidable send delay.
 const TEMPERATURE_BUTTON_DEBOUNCE_MS = 250;
 const SCHEMA = "configured_room_setpoint_v1";
@@ -1145,9 +1145,9 @@ function temperatureLease(node, options) {
     if (!raw || typeof raw.callService !== "function") return raw;
     if (record.cache?.raw === raw && record.cache.epoch === epoch) return record.cache.proxy;
     const guarded = (...args) => {
-      if (!current(epoch) || api.get.call(node) !== raw || args[0] !== "climate" || args[1] !== "set_temperature" || !options.allowed(args[2])) return Promise.resolve();
+      if (!current(epoch) || api.get.call(node) !== raw || args[0] !== "climate" || args[1] !== "set_temperature" || !options.allowed(args[2])) { record.drop(epoch); return Promise.resolve(); }
       const intent = options.prepare(args[2].temperature, true);
-      if (!intent) return Promise.resolve();
+      if (!intent) { record.drop(epoch); return Promise.resolve(); }
       // Only this already-admitted synchronous dispatch may cross the lock
       // installed by prepare; later gestures and captured APIs remain closed.
       let result; record.dispatching = true;
@@ -1163,23 +1163,46 @@ function temperatureLease(node, options) {
     record.cache = { raw, epoch, proxy }; return proxy;
   };
   record.set = function (value) { api.set.call(this, value); record.cache = null; };
+  // HA 2026.11 (frontend 20261028) gates every stateObj-to-dial copy on its own
+  // PendingValueSync: a +/- press marks a send as scheduled and only the native
+  // _callService clears it. A gesture this lease drops unsent (refused, retired
+  // by a context/session change or disposal) would otherwise leave the native
+  // dial on that never-sent number and deaf to every later state until the
+  // popup is reopened. Release that native lock and copy the displayed state
+  // back. Older frontends have neither member; there it is a no-op.
+  record.release = function () {
+    const sync = node._pendingSync;
+    if (!sync || typeof sync.reset !== "function" || typeof node._syncTargetTemperature !== "function") return;
+    try { sync.reset(); node._syncTargetTemperature(); } catch { /* Optional UI only. */ }
+  };
+  // A captured function of an older epoch is retired silently: it must never
+  // touch a newer gesture's native draft.
+  // A refused service call never releases a newer gesture still waiting to send.
+  record.drop = epoch => { if (!record.closed && record.epoch === epoch && record.timer === undefined) record.release(); };
   record.rotate = function (context, freshApi) {
+    const dropped = record.timer !== undefined;
+    turn(context, freshApi);
+    if (dropped) record.release();
+  };
+  function turn(context, freshApi) {
     record.originalDebounce.cancel(); options.clearTimeout(record.timer); record.timer = undefined; record.context = context; const epoch = ++record.epoch; record.cache = null;
     record.call = function (type) {
-      if (this !== node || !current(epoch)) return;
+      if (this !== node) return;
+      if (!current(epoch)) { record.drop(epoch); return; }
       const ticket = type && typeof type === "object" ? record.tickets.get(type) : null;
-      if (ticket && (ticket.epoch !== epoch || !options.intentCurrent(ticket.intent))) return;
+      if (ticket && (ticket.epoch !== epoch || !options.intentCurrent(ticket.intent))) { record.drop(epoch); return; }
       if (typeof type !== "string" && !ticket) return;
       if (!ticket) {
         options.prepare(node._targetTemperature?.value, false);
-        record.rotate(options.context(), options.freshApi?.());
+        turn(options.context(), options.freshApi?.());
       }
       return record.originalCall.call(node, ticket ? ticket.type : type);
     };
     record.debounce = function (type) {
-      if (this !== node || !current(epoch) || typeof type !== "string") return;
+      if (this !== node) return;
+      if (!current(epoch) || typeof type !== "string") { record.drop(epoch); return; }
       const intent = options.prepare(node._targetTemperature?.value, false), ticket = {};
-      record.rotate(options.context(), options.freshApi?.());
+      turn(options.context(), options.freshApi?.());
       record.tickets.set(ticket, { type, epoch: record.epoch, intent });
       const invoke = record.call;
       record.timer = options.setTimeout(() => { record.timer = undefined; invoke.call(node, ticket); }, TEMPERATURE_BUTTON_DEBOUNCE_MS);
@@ -1188,10 +1211,12 @@ function temperatureLease(node, options) {
     Object.defineProperty(node, "_callService", { configurable: true, writable: true, value: record.call });
     Object.defineProperty(node, "_debouncedCallService", { configurable: true, writable: true, value: record.debounce });
     if (freshApi) record.set.call(node, freshApi);
-  };
+  }
   record.dispose = function () {
+    const dropped = record.timer !== undefined;
     record.closed = true; record.epoch++; record.originalDebounce.cancel();
     options.clearTimeout(record.timer); record.timer = undefined;
+    if (dropped) record.release();
     for (const [key, expected] of [["_api", record.get], ["_callService", record.call], ["_debouncedCallService", record.debounce]]) {
       const own = Object.getOwnPropertyDescriptor(node, key); if ((key === "_api" ? own?.get : own?.value) !== expected) continue;
       const original = record.originals[key];

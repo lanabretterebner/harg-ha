@@ -1,0 +1,29 @@
+{
+ "schema_version": 1,
+ "license": "Apache-2.0",
+ "upstream_project": "Home Assistant frontend",
+ "upstream_tag": "20261028.6",
+ "home_assistant_core": "2026.11.2 ships home-assistant-frontend 20261028.6; both files are byte-identical in 20261028.8",
+ "sources": [
+  {
+   "path": "src/state-control/climate/ha-state-control-climate-temperature.ts",
+   "url": "https://raw.githubusercontent.com/home-assistant/frontend/20261028.6/src/state-control/climate/ha-state-control-climate-temperature.ts",
+   "sha256": "121e8aab80d6ed9d026de4622c17b9db40f4a31a2f77930bcecd52b4319951cc"
+  },
+  {
+   "path": "src/common/util/pending-value-sync.ts",
+   "url": "https://raw.githubusercontent.com/home-assistant/frontend/20261028.6/src/common/util/pending-value-sync.ts",
+   "sha256": "18e65dbba58936ccd02e1a54eedd97cbfaacb9b51a408329eb87c6e89817d860"
+  }
+ ],
+ "extraction": "Verbatim method bodies of willUpdate, _syncTargetTemperature, _valueChanged, _valueChanging, _callService and _handleButton, and the verbatim PendingValueSync class; TypeScript erasure happens in the test harness. No source logic changed.",
+ "bodies": {
+  "willUpdate": "\n    super.willUpdate(changedProp);\n    if (!changedProp.has(\"stateObj\")) {\n      return;\n    }\n    if (changedProp.get(\"stateObj\")?.entity_id !== this.stateObj.entity_id) {\n      this._debouncedCallService.cancel();\n      this._pendingSync.reset();\n      this._syncTargetTemperature();\n    } else if (this._pendingSync.shouldSync()) {\n      this._syncTargetTemperature();\n    }\n  ",
+  "_syncTargetTemperature": "\n    this._targetTemperature = {\n      value: this.stateObj.attributes.temperature,\n      low: this.stateObj.attributes.target_temp_low,\n      high: this.stateObj.attributes.target_temp_high,\n    };\n  ",
+  "_valueChanged": "\n    const { value } = ev.detail;\n    if (typeof value !== \"number\" || isNaN(value)) return;\n    const target = ev.type.replace(\"-changed\", \"\");\n    this._targetTemperature = {\n      ...this._targetTemperature,\n      [target]: value,\n    };\n    this._selectTargetTemperature = target as Target;\n    this._debouncedCallService.cancel();\n    this._callService(target);\n  ",
+  "_valueChanging": "\n    const { value } = ev.detail;\n    if (typeof value !== \"number\" || isNaN(value)) return;\n    const target = ev.type.replace(\"-changing\", \"\");\n    this._targetTemperature = {\n      ...this._targetTemperature,\n      [target]: value,\n    };\n    this._selectTargetTemperature = target as Target;\n  ",
+  "_callService": "\n    const data =\n      type === \"high\" || type === \"low\"\n        ? {\n            entity_id: this.stateObj!.entity_id,\n            target_temp_low: this._targetTemperature.low,\n            target_temp_high: this._targetTemperature.high,\n          }\n        : {\n            entity_id: this.stateObj!.entity_id,\n            temperature: this._targetTemperature.value,\n          };\n    return this._pendingSync.run(\n      () => this._api.callService(\"climate\", \"set_temperature\", data),\n      () => this._syncTargetTemperature()\n    );\n  ",
+  "_handleButton": "\n    const target = ev.currentTarget.dataset.target as Target;\n    const step = ev.currentTarget.step as number;\n\n    const defaultValue = target === \"high\" ? this._max : this._min;\n\n    let temp = this._targetTemperature[target] ?? defaultValue;\n    temp += step;\n    temp = clamp(temp, this._min, this._max);\n    if (target === \"high\" && this._targetTemperature.low != null) {\n      temp = clamp(temp, this._targetTemperature.low, this._max);\n    }\n    if (target === \"low\" && this._targetTemperature.high != null) {\n      temp = clamp(temp, this._min, this._targetTemperature.high);\n    }\n\n    this._targetTemperature = {\n      ...this._targetTemperature,\n      [target]: temp,\n    };\n    this._pendingSync.schedule();\n    this._debouncedCallService(target);\n  "
+ },
+ "pending_value_sync_class": "export class PendingValueSync {\n  private _scheduled = false;\n\n  private _latestCall?: symbol;\n\n  public get pending(): boolean {\n    return this._scheduled || this._latestCall !== undefined;\n  }\n\n  /** Mark that a service call has been scheduled for a local change. */\n  public schedule(): void {\n    this._scheduled = true;\n  }\n\n  /**\n   * Start over, e.g. when switching entities, so a pending change is not\n   * shown for (or sent to) a different entity. Calls already in flight are\n   * not aborted, but no longer block state updates or trigger `resync`.\n   */\n  public reset(): void {\n    this._scheduled = false;\n    this._latestCall = undefined;\n  }\n\n  /** Whether an entity state update may be copied into the local value. */\n  public shouldSync(): boolean {\n    return !this.pending;\n  }\n\n  /**\n   * Run the service call for the scheduled change. If the latest call fails\n   * and no new change is scheduled, `resync` is called. Errors are not\n   * rethrown, as `callService` already notifies the user when the call fails.\n   */\n  public async run(\n    call: () => Promise<unknown>,\n    resync: () => void\n  ): Promise<void> {\n    const thisCall = Symbol(\"call\");\n    this._scheduled = false;\n    this._latestCall = thisCall;\n    let failed = false;\n    try {\n      await call();\n    } catch (_err) {\n      failed = true;\n    }\n    if (this._latestCall !== thisCall) {\n      return;\n    }\n    this._latestCall = undefined;\n    if (failed && !this._scheduled) {\n      resync();\n    }\n  }\n}\n"
+}

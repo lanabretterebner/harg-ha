@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.16
+
+- Works with HA 2026.11: the dial follows the confirmed value after a dropped tap. HA 2026.11 (frontend 20261028) copies a new state into its native target dial only while no tap is waiting to be sent. When the card or popup drops a +/− tap unsent (target, phase or basis changed inside the 250 ms send window, connection or session lost, the popup closed, a refused request, or + and − back on the confirmed value), the dial stayed on that never-sent number and ignored every later update until the popup was reopened. The shared control lease now releases that native hold and shows the displayed value again. No new service call; correction-only and target contracts unchanged; earlier HA frontends are unaffected. Tests run HA 20261028.6's own native dial code (Apache-2.0) against card and popup for both circuits.
+
 ## 1.4.15
 
 - Add "Korrektur ±0" to the card and the popup (owner, 2026-11-18). It is offered only for a confirmed non-zero room correction with nothing collected or requested, in °C. With a qualified target it requests the configured base (target minus the current correction) through the same shared intent and guarded `climate.set_temperature` path as a native gesture, so the native control stays inert until the coherent readback; with an unknown target the correction dial shows a "±0" step that sends 0 through its existing `number.set_value` path. A transport error leaves the request shown as unconfirmed, never as done; a definitive rejection shows the confirmed value again.

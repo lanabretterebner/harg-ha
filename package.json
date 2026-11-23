@@ -6,9 +6,9 @@
   "private": true,
   "scripts": {
     "check": "node --check dist/hargassner-thermostat-popup.js && node --check tests/installed-native-probe.js",
-    "test": "node tests/test-card-continuity.mjs && node tests/test-popup-continuity.mjs && node tests/test-installed-native-probe.mjs && node tests/test-correction-resolver.mjs && node tests/test-correction-dial.mjs && node tests/test-correction-reset.mjs",
+    "test": "node tests/test-card-continuity.mjs && node tests/test-popup-continuity.mjs && node tests/test-installed-native-probe.mjs && node tests/test-correction-resolver.mjs && node tests/test-correction-dial.mjs && node tests/test-correction-reset.mjs && node tests/test-native-202611.mjs",
     "test:browser": "node --test tests/test-browser-runner.mjs && node tools/test_browser.mjs && node tools/test_popup_scope_browser.mjs && node tools/test_card_layout.mjs && node tools/test_room_picker_browser.mjs"
   },
   "type": "module",
-  "version": "1.4.15"
+  "version": "1.4.16"
 }

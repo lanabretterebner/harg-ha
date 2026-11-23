@@ -20,3 +20,13 @@ actual integration acceptance remain separate.
 component's `_handleButton`, `_valueChanging`, and `_valueChanged` bodies under
 the same Apache License 2.0. These tests mechanically remove TypeScript casts
 and exercise the unchanged native gesture logic with a deterministic clock.
+
+`ha-native-202611-bodies.json` redistributes, under the same Apache License 2.0,
+the `willUpdate`, `_syncTargetTemperature`, `_valueChanged`, `_valueChanging`,
+`_callService` and `_handleButton` bodies of the same climate component and the
+complete `PendingValueSync` class (`src/common/util/pending-value-sync.ts`) from
+Home Assistant frontend tag `20261028.6` (shipped with Home Assistant 2026.11.2;
+both files are byte-identical in `20261028.8`). Copyright Home Assistant
+contributors. Source paths, URLs and full-file SHA-256 digests are in that JSON.
+`test-native-202611.mjs` removes TypeScript annotations mechanically and changes
+no logic.

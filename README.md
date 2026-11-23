@@ -1,6 +1,6 @@
 # Hargassner for Home Assistant
 
-Frontend 1.4.15 and the optional ingress/monitor app 1.6.6 include the HA clients for an existing Hargassner local-control
+Frontend 1.4.16 and the optional ingress/monitor app 1.6.6 include the HA clients for an existing Hargassner local-control
 backend: a discoverable thermostat dashboard card, the matching native popup,
 one-device page grouping, the optional dashboard Ingress app and reference examples.
 
@@ -16,7 +16,15 @@ both stores independently. HACS downloads the browser module; Supervisor
 builds the included app. Installing either does not install the other or the
 MQTT/backend services. No live backend identity, configuration or token is included.
 
-Frontend 1.4.15 adds **Korrektur ±0** to the card and the popup: offered only
+Frontend 1.4.16 works with HA 2026.11: the dial follows the confirmed value
+after a dropped tap. HA 2026.11 holds its native target dial while a tap is
+waiting to be sent; when the card or popup drops such a tap unsent (the target
+or phase changed, the connection dropped, the popup closed, or + and − ended
+back on the confirmed value), 1.4.15 left the dial on that never-sent number
+and deaf to later updates until the popup was reopened. Nothing else changes;
+no command is added. Earlier HA versions behave as before.
+
+Frontend 1.4.15 added **Korrektur ±0** to the card and the popup: offered only
 for a confirmed non-zero room correction, it returns the correction to 0 through
 the same guarded paths as a native gesture and shows the request as unconfirmed
 until the readback confirms it. The device page also groups the five energy
@@ -45,7 +53,7 @@ Existing tags and release assets remain immutable.
    this URL as a **JavaScript module**:
 
    ```text
-   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.4.15
+   /hacsfiles/harg-ha/hargassner-thermostat-popup.js?v=1.4.16
    ```
 
 3. Remove older manual resource URLs, fully reload each browser/Companion App,
@@ -60,7 +68,7 @@ loading before a dashboard is visited.
 
 For manual installation, copy `dist/hargassner-thermostat-popup.js` to
 `/config/www/hargassner-thermostat-popup.js` and use
-`/local/hargassner-thermostat-popup.js?v=1.4.15` instead. Remove that manual
+`/local/hargassner-thermostat-popup.js?v=1.4.16` instead. Remove that manual
 registration when switching to HACS.
 
 The single **Modus** menu offers **Aus · Auto · Heizen · Absenken · 1x Heizen ·
@@ -181,7 +189,7 @@ entity. MQTT discovery, freshness and correction-only dial writes remain backend
 
 The popup contract was researched against HA frontend20260930.3. The preceding
 1.2.0 release was downloaded in HA2026.9.3/HACS2.0.5, with both matching native
-popups showing one Modus menu, icons and status. Current 1.4.15 installation and native-component acceptance must be recorded separately from this source package. Release-specific fixture checks are in
+popups showing one Modus menu, icons and status. 1.4.16 was also rendered and operated in a throwaway HA Core 2026.11.2 (frontend 20261028.6) with synthetic data. Current 1.4.16 installation and native-component acceptance must be recorded separately from this source package. Release-specific fixture checks are in
 [validation.json](validation.json). Unsupported layouts and unknown current
 presets retain native controls. Future HA DOM changes may require an update.
 
@@ -228,7 +236,7 @@ assertions plus page/console/request errors. It emits a structured result.
 open the HTML fixtures manually. These synthetic checks contact no live HA or
 controller and do not establish installed-native rendering or physical heating
 response. See [browser checks](tests/README.md).
-Frontend 1.4.15 and app 1.6.11 are published as independent components. Installation and
+Frontend 1.4.16 and app 1.6.11 are published as independent components. Installation and
 served-byte acceptance are separate from source checks; consult the installed
 version in HACS and Supervisor. Existing tags and assets remain immutable.
 The app is updated through Supervisor; HACS updates only the browser resource.
