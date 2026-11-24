@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.14
+
+No behaviour change. `health_alerts.py` is again a byte-identical copy of the
+project's monitoring evaluator (as DOCS.md says): it gains the raw-capture
+projection the project copy got with the boot-resilience work (a Telnet
+monitor result `unqualified` with the only reason `controller_offline` counts
+as healthy, like the VM's health route). The app never runs that path; it
+reads the health document the VM has already projected. Notifications, the
+room page and reports to the VM are unchanged apart from the version.
+
 ## 1.6.13
 
 Two owner decisions (2026-11-23) for **Heizkreis zu kalt** (radiator and

@@ -17,19 +17,19 @@ def load(relative):
 
 
 class PackageTests(unittest.TestCase):
-    def test_frontend_1417_versions_and_independent_app_1613(self):
+    def test_frontend_1417_versions_and_independent_app_1614(self):
         package = json.loads((ROOT / "package.json").read_text())
         lock = json.loads((ROOT / "package-lock.json").read_text())
         release = json.loads((ROOT / "release.json").read_text())
         validation = json.loads((ROOT / "validation.json").read_text())
         self.assertEqual({package["version"], lock["version"], lock["packages"][""]["version"], release["version"], validation["version"]}, {"1.4.17"})
-        self.assertEqual(release["supervisor_app_version"], "1.6.13")
-        self.assertEqual(validation["supervisor_app_version"], "1.6.13")
+        self.assertEqual(release["supervisor_app_version"], "1.6.14")
+        self.assertEqual(validation["supervisor_app_version"], "1.6.14")
         self.assertEqual(release["component_checkpoint"], validation["component_checkpoint"])
-        self.assertEqual(release["component_checkpoint"], "frontend-1.4.17-app-1.6.13")
-        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.6.13")
-        self.assertIn("ARG BUILD_VERSION=1.6.13\n", (ROOT / "hargassner-dashboard/Dockerfile").read_text())
-        self.assertIn("APP_VERSION = '1.6.13'", (ROOT / "hargassner-dashboard/house_rules.py").read_text())
+        self.assertEqual(release["component_checkpoint"], "frontend-1.4.17-app-1.6.14")
+        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.6.14")
+        self.assertIn("ARG BUILD_VERSION=1.6.14\n", (ROOT / "hargassner-dashboard/Dockerfile").read_text())
+        self.assertIn("APP_VERSION = '1.6.14'", (ROOT / "hargassner-dashboard/house_rules.py").read_text())
         self.assertIn('const VERSION = "1.4.17";', (ROOT / "dist/hargassner-thermostat-popup.js").read_text())
 
     def test_repository_and_app_are_discoverable_independently_of_hacs(self):

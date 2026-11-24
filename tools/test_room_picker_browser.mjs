@@ -228,7 +228,7 @@ async function main() {
     await page.waitForFunction(() => document.getElementById("meldung").textContent.includes("noch einmal tippen"));
     check(fixture.saved.length === 2, "one tap on Zurücksetzen writes nothing");
     await learnedPanel.getByRole("button", { name: "Wirklich auf Standardwerte zurücksetzen?" }).click();
-    await page.waitForFunction(() => document.getElementById("meldung").textContent.startsWith("Zurückgesetzt auf die Standardwerte."));
+    await page.waitForFunction(() => document.getElementById("meldung").textContent.startsWith("Der Raum ist auf die Standardwerte zurückgesetzt."));
     check(fixture.saved.length === 3, "the confirming tap writes the options once");
     const reset = fixture.saved[2].raum_einstellungen.find((row) => row.sensor === "sensor.wohnzimmer");
     check(!reset || (reset.kuehler === 0 && reset.einfluss_hk1 === 100 && reset.einfluss_hk2 === 0),

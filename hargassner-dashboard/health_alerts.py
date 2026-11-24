@@ -241,6 +241,11 @@ def normalize(kind, document):
                 raise Refusal('result_invalid')
         elif not reasons or available != 0:
             raise Refusal('result_invalid')
+        if state == 'unqualified' and reasons == ['controller_offline']:
+            # Same projection as the VM's health route (proxy/monitor_health.py,
+            # BOOT-RESILIENCE.md): the frames are current, the missing controller
+            # connection is the verdict's Verbindung finding.
+            return {'checked_at': checked, 'status': 'healthy'}
         return {'checked_at': checked,
                 'status': 'healthy' if state == 'fresh' else 'maintenance' if state == 'maintenance' else 'fault'}
     raise Refusal('result_invalid')
