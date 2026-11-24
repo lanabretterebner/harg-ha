@@ -11,7 +11,7 @@ import json
 import math
 import re
 
-APP_VERSION = '1.6.14'
+APP_VERSION = '1.6.15'
 REPORT_SCHEMA = 'harg-house-report/1'
 CONTEXT_SCHEMA_PREFIX = 'harg-house-context/'
 # Context major 2 has the keys of 1; an adapter sends it only to an app that
@@ -1508,11 +1508,18 @@ class HouseEngine:
         cold_limit = limit
         phase_known = bool(source) and source['phase'] is not None
         day_phase = phase_known and source['phase'] == 'day'
+        # The VM qualifies a phase only for states 1-4: an Auto circuit the
+        # controller switches off after its setback (heating limit 5, inactive
+        # 0, frost protection 6) arrives without one. It is still that setback,
+        # so a finding holds as in setback (owner decision 2026-11-24;
+        # review-monitor-5). Mode Aus or an earlier day phase: the rule ends.
+        off_after_setback = (base is False and not phase_known and bool(source)
+                             and source.get('mode') == 'auto' and circuit.last_phase == 'setback')
         if base is None:
             fire = hold = None
             if circuit.circuit_cold.active:
                 cold_limit = big
-        elif phase_known and not day_phase:
+        elif (phase_known and not day_phase) or off_after_setback:
             fire = hold = None              # setback, heating or switched off: not judged, a finding holds
             cold_limit = big
         elif base is False:

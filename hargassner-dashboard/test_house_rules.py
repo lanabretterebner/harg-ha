@@ -447,6 +447,37 @@ class DayPhaseDwellTests(unittest.TestCase):
         h.step()
         self.assertFalse(h.has('circuit_cold'))
 
+    def test_fault_holds_when_auto_switches_the_circuit_off_without_a_phase(self):
+        # What the VM really sends (review-monitor-5): a qualified phase exists
+        # only for states 1-4, so in Auto a circuit the controller switches off
+        # after its setback phase (heating limit 5, inactive 0, frost protection
+        # 6) arrives without a phase. It is still that setback: the Störung holds
+        # (owner decision 2026-11-24) instead of ending at night and returning.
+        for name, harness in (('hc1', lambda: Harness(hc1(A, B), values={A: 17.5, B: 17.8})),
+                              ('hc2', lambda: Harness(hc2(A, B), values={A: 17.5, B: 17.0}))):
+            for status in (5, 0, 6):
+                h = harness()
+                self.assertIsNotNone(h.first('circuit_cold', 2000), (name, status))
+                h.set_circuit(name, phase='setback', target=18.0, status=3)
+                h.run(30)
+                h.set_circuit(name, phase=None, target=18.0, status=status)
+                for minute in range(8 * 60):
+                    h.step()
+                    self.assertTrue(h.has('circuit_cold'), (name, status, minute))
+                # The day phase decides again.
+                h.set_circuit(name, phase='day', target=21.0, status=1)
+                h.values[A] = h.values[B] = 20.5
+                self.assertTrue(h.run(10 * 60, until=lambda x: not x.has('circuit_cold')), (name, status))
+        # Switched off by the owner (mode Aus) or after a day phase: it ends.
+        for mode, last in (('off', 'setback'), ('auto', 'day')):
+            h = Harness(hc1(A, B), values={A: 17.5, B: 17.8})
+            self.assertIsNotNone(h.first('circuit_cold', 600))
+            h.set_circuit('hc1', phase=last, target=18.0 if last == 'setback' else 21.0, status=3 if last == 'setback' else 1)
+            h.run(30)
+            h.set_circuit('hc1', phase=None, status=0, mode=mode)
+            h.step()
+            self.assertFalse(h.has('circuit_cold'), (mode, last))
+
 
 WINDOW = {'radiator': 60, 'floor': 360}
 

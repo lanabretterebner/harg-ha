@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.6.15
+
+One fix to the 1.6.13 owner decision for **Heizkreis zu kalt** (radiator and
+underfloor alike). The saved room state continues (rule constants and
+fingerprint unchanged); notifications, the room page and reports to the VM are
+unchanged apart from the version.
+
+- **The fault also holds overnight when the controller switches an Auto
+  circuit off without a phase.** The VM names the day or setback phase only for
+  the circuit states it has qualified (1-4). In Auto, a circuit the controller
+  switches off after its setback phase by its heating limit (state 5), as
+  inactive (0) or for frost protection (6) arrived without a phase and counted
+  as "switched off in a day phase": the Störung ended that night and came back
+  the next day. It now holds as in setback, at most 24 hours, until a later day
+  phase decides. Switched off in mode Aus, or after a day phase, it still ends.
+
 ## 1.6.14
 
 No behaviour change. `health_alerts.py` is again a byte-identical copy of the
