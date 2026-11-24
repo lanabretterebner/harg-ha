@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.16
+
+One more fix to **Heizkreis zu kalt** (radiator and underfloor alike). The
+saved room state continues (rule constants and fingerprint unchanged);
+notifications, the room page and reports to the VM are unchanged apart from
+the version.
+
+- **The fault also holds overnight in manual Absenken, 1x Absenken and an
+  unknown mode** (review-monitor-6, as 1.6.15 did for Auto): there too the controller may switch the circuit off
+  after its setback without a phase; the Störung holds instead of ending at
+  night. In mode Aus, Heizen or 1x Heizen a circuit switched off still ends it.
+
 ## 1.6.15
 
 One fix to the 1.6.13 owner decision for **Heizkreis zu kalt** (radiator and

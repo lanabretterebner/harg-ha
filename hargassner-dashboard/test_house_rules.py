@@ -479,6 +479,35 @@ class DayPhaseDwellTests(unittest.TestCase):
             self.assertFalse(h.has('circuit_cold'), (mode, last))
 
 
+    def test_fault_holds_in_every_setback_mode_when_the_circuit_is_switched_off_without_a_phase(self):
+        # review-monitor-6: not only Auto has a setback that the controller may
+        # end by switching the circuit off (heating limit 5, inactive 0, frost
+        # protection 6, no qualified phase): manual Absenken, 1x Absenken and an
+        # unknown mode too. The Störung holds as in setback instead of ending
+        # at night and returning the next day.
+        for name, harness in (('hc1', lambda: Harness(hc1(A, B), values={A: 17.5, B: 17.8})),
+                              ('hc2', lambda: Harness(hc2(A, B), values={A: 17.5, B: 17.0}))):
+            for mode in ('setback', 'once_setback', None):
+                for status in (5, 0, 6):
+                    h = harness()
+                    self.assertIsNotNone(h.first('circuit_cold', 2000), (name, mode, status))
+                    h.set_circuit(name, phase='setback', target=18.0, status=3, mode=mode or 'auto')
+                    h.run(30)
+                    h.set_circuit(name, phase=None, target=18.0, status=status, mode=mode)
+                    for minute in range(8 * 60):
+                        h.step()
+                        self.assertTrue(h.has('circuit_cold'), (name, mode, status, minute))
+        # The owner's day modes after a setback: switched off in a day phase, it ends.
+        for mode in ('day', 'once_day'):
+            h = Harness(hc1(A, B), values={A: 17.5, B: 17.8})
+            self.assertIsNotNone(h.first('circuit_cold', 600))
+            h.set_circuit('hc1', phase='setback', target=18.0, status=3)
+            h.run(30)
+            h.set_circuit('hc1', phase=None, status=5, mode=mode)
+            h.step()
+            self.assertFalse(h.has('circuit_cold'), mode)
+
+
 WINDOW = {'radiator': 60, 'floor': 360}
 
 
