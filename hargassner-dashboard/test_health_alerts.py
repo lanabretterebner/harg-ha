@@ -764,6 +764,56 @@ class UnitTests(unittest.TestCase):
         for status in ('healthy', 'maintenance'):
             self.assertEqual(h.ha_notification({**event, 'status': status}), ('dismiss', {'notification_id': 'harg_health_telnet'}))
 
+    def capped(self, since=NOW - 7300, **extra):
+        document = heartbeat(telnet='unknown')
+        document['checks']['telnet_maintenance'] = {'capped': True, 'since': since, **extra}
+        return document
+
+    def test_capped_maintenance_has_its_own_text(self):
+        # review-ha-6-2 (owner 2026-11-25): the VM's maintenance past its 2 h cap
+        # says so, since when and what to do, instead of "Messwerte prüfen".
+        rows = h.evaluate(self.capped(), now=NOW)
+        self.assertEqual((rows['telnet']['status'], rows['telnet']['reason']), ('unknown', 'maintenance'))
+        self.assertEqual(rows['telnet']['observed_at'], NOW - 7300)
+        event = h.transition(rows, h.initial_state(), NOW)['queue'][0]
+        action, payload = h.ha_notification(event, 'Europe/Vienna')
+        self.assertEqual(action, 'create')
+        self.assertEqual(payload['notification_id'], 'harg_health_telnet')
+        self.assertEqual(payload['title'], 'Heizung: Wartung seit über 2 Stunden aktiv')
+        # NOW - 7300 s is 2033-05-18 01:31:40 UTC = 03:31 in Vienna (summer time).
+        self.assertEqual(payload['message'], 'Wartung seit über 2 Stunden aktiv (seit 03:31) - Messwerte werden '
+                                             'wieder geprüft. Wartung prüfen.')
+        # Another day: with its date. Without a zone: UTC, said so.
+        self.assertIn('(seit 18.05. 03:31)', h.ha_notification({**event, 'evaluated_at': NOW + 86400}, 'Europe/Vienna')[1]['message'])
+        self.assertIn('(seit 01:31 UTC)', h.ha_notification(event)[1]['message'])
+        self.assertIn('(seit 01:31 UTC)', h.ha_notification(event, 'Not/AZone')[1]['message'])
+        self.assertNotIn('seit', h.ha_notification({**event, 'observed_at': None})[1]['message'].split('aktiv', 1)[1])
+        self.assertIn('Wartung seit über 2 Stunden aktiv', h.webhook_text(event))
+        # The state stays readable by app 1.6.16 (status and reason it knows).
+        self.assertEqual(h.validate_state(h.transition(rows, h.initial_state(), NOW))['conditions']['telnet']['reason'],
+                         'maintenance')
+
+    def test_capped_marker_is_additive_and_strict(self):
+        # Without the marker (today's VM) the generic text stays.
+        self.assertEqual(h.evaluate(heartbeat(telnet='unknown'), now=NOW)['telnet']['reason'], 'result_failed')
+        # Anything but an exact marker is ignored, never a report_invalid.
+        for marker in ({'capped': False, 'since': NOW}, {'capped': 'yes', 'since': NOW}, {'capped': True},
+                       {'capped': True, 'since': 'x'}, {'capped': True, 'since': NOW, 'x': 1}, [], None,
+                       {'capped': True, 'since': -1}, {'capped': True, 'since': NOW + 3600}):
+            with self.subTest(marker=marker):
+                document = heartbeat(telnet='unknown'); document['checks']['telnet_maintenance'] = marker
+                rows = h.evaluate(document, now=NOW)
+                self.assertEqual(rows['telnet']['reason'], 'result_failed')
+                self.assertEqual(rows['certificate']['status'], 'healthy')
+        # A null since is a capped maintenance without a time.
+        rows = h.evaluate(self.capped(since=None), now=NOW)
+        self.assertEqual((rows['telnet']['reason'], rows['telnet']['observed_at']), ('maintenance', NOW))
+        # It names only an unknown Telnet check: a fresh or faulty one wins.
+        for status, reason in (('healthy', 'ok'), ('fault', 'telemetry_unhealthy'), ('maintenance', 'maintenance')):
+            document = self.capped(); document['checks']['telnet']['status'] = status
+            row = h.evaluate(document, now=NOW)['telnet']
+            self.assertEqual((row['status'], row['reason']), (status, reason))
+
     def test_common_endpoint_outage_is_one_ha_problem_but_checker_faults_remain_visible(self):
         events = h.transition(h.evaluate(None, now=NOW, endpoint_failed=True), h.initial_state(), NOW)['queue']
         self.assertEqual([h.ha_notification(event)[0] for event in events], ['create', None, None])

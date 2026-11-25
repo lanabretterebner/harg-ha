@@ -498,7 +498,8 @@ class ReviewRegressionTests(unittest.TestCase):
             sensor.stale_active, sensor.last_key, sensor.last_update = True, '2026-11-18T00:00:00+00:00', now - 60
         for entity in ('sensor.a', 'sensor.b', 'sensor.k'):
             engine.latches[('room_frost', entity)] = latch(True, now - 3000, {'room': 4.5})
-        engine.latches[('room_cold', 'sensor.a')] = latch(True, now - 3000, {'room': 18.0, 'target': 21.0})
+        # An active room_cold never pauses (_room_cold, and _pause_all from review-ha-6).
+        engine.latches[('room_cold', 'sensor.a')] = latch(True, now - 3000, {'room': 18.0, 'target': 21.0}, paused=0.0)
         engine.frost = (now - 2000, {'room': 4.5, 'count': 3})
         hc1 = engine.circuits['hc1']
         hc1.last_phase, hc1.last_target, hc1.last_mode, hc1.seen = 'day', 21.0, 'auto', True
@@ -860,6 +861,47 @@ class SizeTests(unittest.TestCase):
             # The step size and the update count survive the compact form.
             self.assertEqual(restored.sensors[entity].step_size(), sensor.step_size())
             self.assertEqual(restored.sensors[entity].updates, sensor.updates)
+
+
+# The rule constants of the published 1.6.13, 1.6.14, 1.6.15 and 1.6.16 (and
+# this source): one digest, so an update from any of them and a rollback to
+# 1.6.15 continue the saved room state (review-ha-6). A change here means
+# every installation starts its room rules fresh once: raise it on purpose,
+# with a changelog line, never by accident.
+PUBLISHED_RULES_DIGEST = 'a844965c1e50f0dffc0f23ab0aa6bdf61e6b87e16d273aa275e353cf9df41086'
+
+
+class VersionContinuityTests(unittest.TestCase):
+    def test_the_rule_constants_are_those_of_the_published_versions(self):
+        self.assertEqual(hs.STATE_SCHEMA, 'harg-house-state/1')
+        self.assertEqual(hs.rules_digest(), PUBLISHED_RULES_DIGEST)
+
+    def test_a_fault_held_overnight_survives_an_update_restart(self):
+        # 1.6.15/1.6.16: Heizkreis zu kalt holds while the controller switches
+        # the circuit off after its setback without a phase. An app update in
+        # that night restores it with its onset: no "behoben", no new Störung.
+        A, B = 'sensor.wohnzimmer', 'sensor.kueche'
+        # (1x Absenken: manual Absenken is judged from 1.6.17 and ends when switched off.)
+        for mode in ('auto', 'once_setback'):
+            with self.subTest(mode=mode):
+                h = Harness({'heizkreis_1_sensoren': [A, B]}, values={A: 17.5, B: 17.8})
+                self.assertTrue(h.run(2000, until=lambda x: x.has('circuit_cold')))
+                h.set_circuit('hc1', phase='setback', target=18.0, status=3, mode=mode)
+                h.run(30)
+                h.set_circuit('hc1', phase=None, status=5, mode=mode)
+                h.run(60)
+                onset = h.wall - h.rows('circuit_cold')[0]['held_s']
+                document = json.loads(json.dumps(hs.export(h.engine, mono=h.now, wall=h.wall, boot=BOOT)))
+                h.stopped = True
+                h.run(20)
+                h.engine, outcome = hs.restore(h.options, document, mono=h.now, wall=h.wall, boot=BOOT)
+                h.stopped = False
+                self.assertEqual(outcome, 'state_restored')
+                for minute in range(6 * 60):
+                    h.step()
+                    rows = h.rows('circuit_cold')
+                    self.assertTrue(rows, (mode, minute))
+                    self.assertLessEqual(abs(h.wall - rows[0]['held_s'] - onset), 1, (mode, minute))
 
 
 class HarnessTests(unittest.TestCase):

@@ -213,6 +213,45 @@ class WatchdogTests(unittest.TestCase):
         self.advance(MAINTENANCE_GRACE)  # far too long: now it is a failure
         self.assertEqual(self.v.document()['state'], 'Störung')
 
+    def maintenance_report(self, **extra):
+        payload = dict(state='Normal', summary='synthetic', problems=[], checks={}, maintenance=True,
+                       published_at=self.wall, **extra)
+        return self.v.ingest(self.config['state_topic'], json.dumps(payload))
+
+    def test_capped_maintenance_gets_no_grace(self):
+        """review-monitor-6-3 open Low: maintenance past the VM's 2 h cap
+        silences nothing more; a silent VM is a failure after the lease."""
+        since = self.wall - 7300
+        iso = __import__('operation_watchdog').iso
+        self.assertTrue(self.maintenance_report(maintenance_since=iso(since), maintenance_capped=True))
+        self.advance(LEASE + 1)
+        document = self.v.document()
+        self.assertEqual(document['state'], 'Störung')
+        self.assertNotIn('gewartet', document['summary'])
+
+    def test_maintenance_grace_ends_at_the_cap(self):
+        """A run that is 10 min short of its 2 h cap is excused for 10 min, not 15."""
+        iso = __import__('operation_watchdog').iso
+        self.assertTrue(self.maintenance_report(maintenance_since=iso(self.wall - 6600), maintenance_capped=False))
+        self.advance(599)
+        self.assertEqual(self.v.document()['state'], 'Unbekannt')
+        self.advance(1)
+        self.assertEqual(self.v.document()['state'], 'Störung')
+
+    def test_maintenance_grace_without_since_or_with_a_bad_one_stays_900(self):
+        """An older adapter sends no maintenance_since: the 900 s grace as before."""
+        iso = __import__('operation_watchdog').iso
+        for extra in ({}, {'maintenance_since': None}, {'maintenance_since': 'garbage'},
+                      {'maintenance_since': iso(self.wall + 600)}, {'maintenance_capped': 'yes'}):
+            with self.subTest(extra=extra):
+                self.setUp()
+                self.advance(3600)
+                self.assertTrue(self.maintenance_report(**extra))
+                self.advance(MAINTENANCE_GRACE - 1)
+                self.assertEqual(self.v.document()['state'], 'Unbekannt')
+                self.advance(1)
+                self.assertEqual(self.v.document()['state'], 'Störung')
+
     def test_discovery_preserves_identity_and_owns_distinct_nonretained_output(self):
         for key in ('unique_id', 'default_entity_id', 'device', 'name'):
             self.assertEqual(self.v.config[key], self.config[key])

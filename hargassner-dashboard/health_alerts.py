@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 import fcntl
 import hashlib
 import http.client
@@ -389,9 +389,30 @@ def evaluate(document, config=None, now=None, endpoint_failed=False, saved=None)
             # Certificate maintenance and Telnet warning have no producer contract.
             if kind == 'certificate' and state == 'maintenance' or kind == 'telnet' and state == 'warning':
                 rows[kind] = result('unknown', 'report_invalid')
+            elif kind == 'telnet' and state == 'unknown' and (since := capped_since(document['checks'], now)) is not False:
+                # The VM's maintenance has outlasted its 2 h cap (review-ha-6-2):
+                # status and reason any older evaluator knows, so its saved
+                # state stays valid; observed_at is the run's start.
+                rows[kind] = result('unknown', 'maintenance', check['checked_at'] if since is None else since)
             else:
                 rows[kind] = result(state, reason, check['checked_at'])
     return rows
+
+
+def capped_since(checks, now):
+    """The optional `telnet_maintenance` marker of the VM's health report
+    (proxy/monitor_health.py): the run's start (or None) when it says the
+    maintenance is capped, else False. Anything but the exact marker is
+    ignored, so an older VM or a malformed marker keeps the generic text."""
+    marker = checks.get('telnet_maintenance')
+    if not isinstance(marker, dict) or set(marker) != {'capped', 'since'} or marker['capped'] is not True:
+        return False
+    since = marker['since']
+    if since is None:
+        return None
+    if not number(since) or since < 0 or since > now + FUTURE_TOLERANCE:
+        return False
+    return float(since)
 
 
 def initial_state():
@@ -568,12 +589,36 @@ def request_https(method, url, timeout=5, headers=None, body=None, ca_file=None,
         raise Refusal('delivery_failed') from None
 
 
-def ha_notification(event):
-    """Fixed human-facing HA copy; event identities remain transport metadata."""
+def local_clock(wall, zone=None, day_of=None):
+    """HH:MM in the zone (with the date when not on the day of `day_of`), or
+    in UTC, said so, without a usable zone."""
+    try:
+        from zoneinfo import ZoneInfo
+        tz, suffix = (ZoneInfo(zone), '') if isinstance(zone, str) and zone else (timezone.utc, ' UTC')
+    except Exception:
+        tz, suffix = timezone.utc, ' UTC'
+    try:
+        moment = datetime.fromtimestamp(wall, tz)
+        reference = datetime.fromtimestamp(day_of, tz) if number(day_of) else moment
+    except (OverflowError, OSError, ValueError, TypeError):
+        return None
+    return moment.strftime('%H:%M' if reference.date() == moment.date() else '%d.%m. %H:%M') + suffix
+
+
+def ha_notification(event, zone=None):
+    """Fixed human-facing HA copy; event identities remain transport metadata.
+    zone: Home Assistant's time zone for a time in the text (else UTC)."""
     component, status, reason = event['component'], event['status'], event['reason']
     identity = {'notification_id': 'harg_health_' + component}
     if status in ('healthy', 'maintenance'):
         return 'dismiss', identity
+    if component == 'telnet' and reason == 'maintenance':
+        # Maintenance past the VM's 2 h cap (owner decision 2026-11-25).
+        observed = event.get('observed_at')
+        since = local_clock(observed, zone, event.get('evaluated_at')) if number(observed) else None
+        return 'create', {**identity, 'title': 'Heizung: Wartung seit über 2 Stunden aktiv',
+                          'message': 'Wartung seit über 2 Stunden aktiv' + (' (seit ' + since + ')' if since else '')
+                                     + ' - Messwerte werden wieder geprüft. Wartung prüfen.'}
     # A missing common report is one problem, not three independent failures.
     if component != 'heartbeat' and reason in ('endpoint_unavailable', 'report_missing', 'heartbeat_stale', 'clock_invalid'):
         return None, None

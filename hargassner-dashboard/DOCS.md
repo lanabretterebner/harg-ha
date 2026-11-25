@@ -304,6 +304,11 @@ conditions create readable German problem notifications with a next step. Health
 recovery and maintenance silently dismiss the corresponding warning. A missing
 common connection produces one Status warning. The fixed persistent IDs are
 `harg_health_heartbeat`, `harg_health_certificate`, `harg_health_telnet`.
+A VM maintenance silences the Messwerte warning for at most 2 hours of its
+run (the VM's cap). After that, from app 1.6.17 with a VM that reports it, the
+warning says "Wartung seit über 2 Stunden aktiv (seit HH:MM) - Messwerte werden
+wieder geprüft. Wartung prüfen." (the time in Home Assistant's time zone);
+with an older VM it is the general Messwerte text.
 
 A VM clock up to 5 s ahead of the HA host counts as current. A larger lead is
 unknown `run_future`. Once raised, it stays until the stamp is no more than
@@ -578,10 +583,17 @@ start of that phase; it then needs 3 hours. 4 + 3 = 7 hours fit into an 8-hour
 evening phase (for example 15:00-23:00), so a circuit that still has not warmed
 the rooms 7 hours after the day phase began is reported. A normal heat-up after
 setback never counts, a short morning phase (for example 06:00-09:00) is never
-judged, and nothing is judged during setback. Once reported, the Störung stays
-through the night and is cleared only when a later day phase is warm enough.
+judged, and nothing is judged during the night setback of Auto. Once reported,
+the Störung stays through the night and is cleared only when a later day phase
+is warm enough. When the controller keeps the circuit off after the setback
+without a phase (heating limit, frost protection), the Störung ends when the
+time program's next day phase begins, because the controller then decided it
+is warm enough (from app 1.6.17 with a VM that sends the program's phase;
+otherwise it holds up to 24 hours). A circuit kept in mode **Absenken** is
+judged the same way against its setback target (app 1.6.17); if the controller
+switches it off there, the Störung ends.
 Single rooms of an underfloor circuit are judged the same way:
-only in a day phase, after its 4 hours of heat-up; setback and heat-up pause
+only in a day phase (or in mode Absenken), after its 4 hours of heat-up; setback and heat-up pause
 their 4-hour cold spell instead of restarting it, so it can add up over the
 evening phases. While the rooms are still getting warmer (for example after a
 holiday) the circuit check waits. Single rooms that stay too cold are reported
@@ -675,7 +687,7 @@ hours.
 | No warm check after a change of the day target or mode | 2 h | 8 h |
 | One cold spell: room 1.5 degrees below target and not getting warmer, for | 90 min | 4 h (adds up over day phases) |
 | Room too cold: after a cold spell the room has not come back within 1 degree of the day target for | 12 h | 12 h |
-| All rooms of a circuit clearly too cold (3 degrees) and none getting warmer, for (judged in a day phase only against the day target, after that phase's heat-up; during setback (heating, heating limit or inactive), an unknown phase, missing VM data or Home Assistant being away an existing "Heizkreis zu kalt" holds until a later day phase decides, up to 24 h; switched off in a day phase it ends; radiators from app 1.6.12, both from app 1.6.13: the 3 h add up over the day phases of one local day, reset at local midnight, owner decisions 2026-11-23) | 3 h judged in the day phases of one day, each after its 2 h heat-up | 3 h judged in the day phases of one day, each after its 4 h heat-up |
+| All rooms of a circuit clearly too cold (3 degrees) and none getting warmer, for (judged in a day phase only against the day target, after that phase's heat-up; during setback (heating, heating limit or inactive), an unknown phase, missing VM data or Home Assistant being away an existing "Heizkreis zu kalt" holds until a later day phase decides, up to 24 h; switched off in a day phase it ends; switched off after a setback without a phase it ends when the program's next day phase begins (app 1.6.17, VM house context 3); mode Absenken is judged against the setback target (app 1.6.17); radiators from app 1.6.12, both from app 1.6.13: the 3 h add up over the day phases of one local day, reset at local midnight, owner decisions 2026-11-23) | 3 h judged in the day phases of one day, each after its 2 h heat-up | 3 h judged in the day phases of one day, each after its 4 h heat-up |
 | Watching a room after a heating start | 60 min | 6 h |
 | Room does not get warmer: heating starts without effect on different days | 3 | 3 |
 | Circuit does not get warmer (fault): starts without effect on different days | 2 | 2 |
@@ -737,7 +749,9 @@ underfloor heating caught up, is back by evening and is forgotten. A room whose
 radiator stays cold is reported the same evening or the next morning, and the
 notice stays through the night setback (or a night the heating limit switches
 the circuit off) until the room is warm again, or 26 hours after the last cold
-spell, for example when the heating stays off for the summer. A room
+spell, for example when the heating stays off for the summer. Home Assistant
+or the app being away meanwhile (a restart, an update, a longer outage) does
+not end it either. A room
 that is meant to stay cooler, or whose sensor sits at a cold spot such as a
 window, gets an allowance or a lower influence on the room page, or is set
 to "nicht überwachen". The app never learns a room's usual level by itself:
@@ -974,7 +988,7 @@ while sensors are selected, the VM keeps the checks **Räume** and
 
 The app maintains the existing MQTT entity identity and device. It subscribes through HA Core to the default `homeassistant` operation discovery topic and the VM operation reports, and redirects only this entity to its own checked state topic. No controller or settings command is possible. The VM report topic remains untouched. The app needs Home Assistant MQTT to be running; no broker credentials are stored in the app.
 
-A live report is required for Normal. Retained reports cannot start or renew that state. Without a live report for 90 seconds the state is Störung, with a message that the VM/monitoring is unreachable and the actual heating state is unknown. When the optional VM-health monitor is enabled, a failed or stale heartbeat also overrides a recent VM report. Its healthy heartbeat alone cannot clear a missing report. Recovery requires a new live report. The app publishes its checked state without retention every 15 seconds; if the app or HA connection fails, HA marks the entity unavailable after 90 seconds. No old Normal can be replayed from this topic. After the app starts, and after a reconnect to Home Assistant (Core restart, integration reload) while the VM was reporting until then, the app waits the same 90 seconds (Unbekannt) before a missing report counts; a VM that was already silent stays Störung. When the last VM report said maintenance (a VM release restarts its services), a silence of up to 15 minutes is shown as Unbekannt ("Die VM wird gerade gewartet und sendet nach dem Neustart wieder Betriebsdaten."). Freshness is measured on the app's own clock from the arrival of a report; the VM's timestamp only has to lie within 5 minutes of this host's clock and must not repeat a recent report, so clock differences or a VM clock that steps back no longer matter. A heartbeat that is still unknown in the first 90 seconds is no failure.
+A live report is required for Normal. Retained reports cannot start or renew that state. Without a live report for 90 seconds the state is Störung, with a message that the VM/monitoring is unreachable and the actual heating state is unknown. When the optional VM-health monitor is enabled, a failed or stale heartbeat also overrides a recent VM report. Its healthy heartbeat alone cannot clear a missing report. Recovery requires a new live report. The app publishes its checked state without retention every 15 seconds; if the app or HA connection fails, HA marks the entity unavailable after 90 seconds. No old Normal can be replayed from this topic. After the app starts, and after a reconnect to Home Assistant (Core restart, integration reload) while the VM was reporting until then, the app waits the same 90 seconds (Unbekannt) before a missing report counts; a VM that was already silent stays Störung. When the last VM report said maintenance (a VM release restarts its services), a silence of up to 15 minutes is shown as Unbekannt ("Die VM wird gerade gewartet und sendet nach dem Neustart wieder Betriebsdaten."), never beyond the 2-hour cap on maintenance that the VM counts: once the report says the maintenance has lasted 2 hours (`maintenance_capped`), a silent VM is a Störung after the 90 seconds, and a maintenance that began 1 h 55 min ago is excused for its last 5 minutes only. Freshness is measured on the app's own clock from the arrival of a report; the VM's timestamp only has to lie within 5 minutes of this host's clock and must not repeat a recent report, so clock differences or a VM clock that steps back no longer matter. A heartbeat that is still unknown in the first 90 seconds is no failure.
 
 After VM/app restart, room evaluation waits for fresh context and an accepted current app report. Room selections remain in app options; the room checks continue from their saved state ("Room checks after an app restart"), on a first start or without a usable saved state they start fresh. Missing acknowledgement is not proof that the rooms are healthy.
 

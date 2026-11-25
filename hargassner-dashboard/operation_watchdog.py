@@ -27,8 +27,12 @@ PERIOD = 15
 SKEW = 300
 RECENT = 32
 # A VM that last reported maintenance (a release restarts the adapter) is given
-# this long without reports before it counts as failed.
+# this long without reports before it counts as failed, never beyond the VM's
+# one cap on maintenance (operation_monitor.MAINTENANCE_CAP_SECONDS, owner
+# decision 2026-11-24): a report with `maintenance_capped` gets no grace, one
+# with `maintenance_since` at most what is left of the 2 h (review-ha-6).
 MAINTENANCE_GRACE = 900
+MAINTENANCE_CAP = 7200
 STATES = ('Normal', 'Hinweis', 'Störung', 'Unbekannt')
 # Optional third participant (proxy/NOTIFY-CONTRACT.md): the harg-notify
 # container's live status, shown as its own check when `notify_watch` is on.
@@ -60,6 +64,33 @@ def finite(value):
     return type(value) in (int, float) and math.isfinite(value)
 
 
+def parse_iso(text):
+    """Epoch seconds of the VM's `YYYY-MM-DDTHH:MM:SSZ`, else None."""
+    if not isinstance(text, str) or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z', text):
+        return None
+    try:
+        return datetime.strptime(text, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc).timestamp()
+    except (ValueError, OverflowError):
+        return None
+
+
+def maintenance_grace(report):
+    """Seconds a VM silent after this maintenance report stays excused.
+
+    Both stamps are the VM's own clock, so their difference needs no skew
+    allowance. Without a readable `maintenance_since` (an older adapter) the
+    full grace applies; a start ahead of `published_at` counts as now."""
+    if report.get('maintenance') is not True:
+        return 0
+    if report.get('maintenance_capped') is True:
+        return 0
+    since = parse_iso(report.get('maintenance_since'))
+    if since is None:
+        return MAINTENANCE_GRACE
+    left = MAINTENANCE_CAP - max(0.0, report['published_at'] - since)
+    return max(0.0, min(MAINTENANCE_GRACE, left))
+
+
 class Verdict:
     def __init__(self, monotonic=time.monotonic, clock=time.time, notify_watch=False):
         self.monotonic, self.clock = monotonic, clock
@@ -69,6 +100,7 @@ class Verdict:
         self.epoch = self.started
         self.recent_reports, self.recent_notify = [], []
         self.maintenance_at = None  # monotonic time of the last report in maintenance
+        self.maintenance_grace = MAINTENANCE_GRACE  # its grace, bounded by the cap
         self.config_topic = self.output_topic = self.source_topic = None
         self.config = None
         self.report = self.received = None
@@ -149,6 +181,7 @@ class Verdict:
         # Only the last report counts (DOCS.md): a VM that left maintenance and
         # then falls silent is a failure after the lease, not "Wartung der VM".
         self.maintenance_at = self.received if report.get('maintenance') is True else None
+        self.maintenance_grace = maintenance_grace(report)
         return True
 
     def notify_ingest(self, topic, payload, retained=False):
@@ -228,7 +261,7 @@ class Verdict:
             result.pop('authorization', None)
             result['ha_watchdog'] = {'source': 'live_vm_report', 'age_seconds': round(age)}
             return result
-        maintenance = self.maintenance_at is not None and 0 <= now - self.maintenance_at < MAINTENANCE_GRACE
+        maintenance = self.maintenance_at is not None and 0 <= now - self.maintenance_at < self.maintenance_grace
         failed = not maintenance and (heartbeat_failed or (self.received is not None and not fresh)
                                       or now - self.epoch >= LEASE)
         text = ('Die VM ist nicht erreichbar oder sendet keine aktuellen Betriebsdaten, deshalb ist der '

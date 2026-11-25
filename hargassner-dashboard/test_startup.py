@@ -20,8 +20,8 @@ class StartupTests(unittest.TestCase):
                 def shutdown(self):stopped.set()
                 def server_close(self):created.append('closed')
             real_monitor=m.Monitor
-            def construct(settings, credential):
-                self.assertEqual(credential,'synthetic-only')
+            def construct(settings, credential, zone):
+                self.assertEqual(credential,'synthetic-only'); self.assertIsNone(zone())   # no house monitor
                 if failure=='monitor_state':raise ValueError('SECRET private directory token')
                 obj=real_monitor(settings,credential,root/'health-monitor',network=lambda _:self.fail('Network forbidden'))
                 self.assertEqual((obj.directory.stat().st_mode & 0o777),0o700)

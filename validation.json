@@ -10,7 +10,7 @@
   "card_height_px": 400,
   "card_layout_transition_cases": 75,
   "card_layout_transition_cases_per_viewport": 15,
-  "component_checkpoint": "frontend-1.4.17-app-1.6.16",
+  "component_checkpoint": "frontend-1.4.17-app-1.6.17",
   "container_build_performed": false,
   "control_behavior_unchanged": true,
   "frontend_bytes_unchanged": true,
@@ -39,9 +39,9 @@
   "real_notification_deliveries": 0,
   "room_page_browser_checks": 70,
   "schema_version": 2,
-  "scope": "App 1.6.16 (published) with frontend 1.4.17 (published, bytes unchanged): circuit_cold also holds overnight in manual Absenken, 1x Absenken and an unknown mode when the controller switches the circuit off without a qualified phase (as 1.6.15 for Auto); mode Aus, Heizen or 1x Heizen still ends it (review-monitor-6). No rule constant changed: saved room state continues. Base: app 1.6.15 (published). No container build, HA/Supervisor installation, real HA service call or physical acceptance is claimed.",
+  "scope": "App 1.6.17 (published) with frontend 1.4.17 (published, bytes unchanged): owner decisions 2026-11-25 - a Heizkreis zu kalt held after a setback while the controller keeps the circuit off without a phase ends when the Auto program's next day phase begins (house context major 3 'schedule' from the adapter; older adapters: the 24 h bound as before); manual Absenken is judged for Heizkreis zu kalt against the setback target (underfloor rooms for Raum zu kalt too); maintenance past the VM's 2 h cap gets its own Messwerte notification text (additive telnet_maintenance marker of the VM health report). With the review-ha-6 fixes (watchdog grace ends at the cap; Raum zu kalt held across long HA/app outages). No rule constant changed: saved room state continues, also after a rollback to 1.6.16. Base: app 1.6.16 (published). No container build, HA/Supervisor installation, real HA service call or physical acceptance is claimed.",
   "source_only": false,
   "supervisor_app_installation_verified": false,
-  "supervisor_app_version": "1.6.16",
+  "supervisor_app_version": "1.6.17",
   "version": "1.4.17"
 }

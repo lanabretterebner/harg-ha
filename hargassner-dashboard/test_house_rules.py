@@ -129,6 +129,72 @@ class RoomColdTests(unittest.TestCase):
             h.run(4 * 60)
             self.assertEqual(h.rows('room_cold')[0]['held_s'], held + 4 * 3600)
 
+    def test_room_cold_lasts_across_an_outage_longer_than_the_pause(self):
+        # review-ha-6: a room still cold after Home Assistant (or the app) was
+        # away for longer than the type's pause limit (2 h radiator, 6 h
+        # underfloor) kept "Raum zu kalt" when the VM context was missing for
+        # that long, but ended it after an HA outage and raised it again after
+        # a new cold dwell (1.5 h radiator, 4 h underfloor in a day phase). Only the room (back at its day level) or COLD_FORGET_S
+        # without a cold spell ends it, whatever is away.
+        for outage in ('ha', 'context'):
+            for hours in (3, 8):
+                with self.subTest(outage=outage, hours=hours):
+                    h = Harness(hc1(A), values={A: 17.0})
+                    self.assertIsNotNone(h.first('room_cold', 211 + PERSIST))
+                    onset = h.wall - h.rows('room_cold')[0]['held_s']
+                    if outage == 'ha':
+                        h.ha = 'unavailable'
+                    else:
+                        h.context_state = 'none'
+                    h.run(hours * 60)
+                    h.ha, h.context_state = 'running', 'ok'
+                    for minute in range(6 * 60):
+                        h.step()
+                        rows = h.rows('room_cold')
+                        self.assertTrue(rows, (outage, hours, minute))
+                        self.assertEqual(h.wall - rows[0]['held_s'], onset, (outage, hours, minute))
+        # It still ends once the room is back at its day level.
+        h = Harness(hc1(A), values={A: 17.0})
+        self.assertIsNotNone(h.first('room_cold', 211 + PERSIST))
+        h.ha = 'unavailable'
+        h.run(3 * 60)
+        h.ha = 'running'
+        h.values[A] = 20.5
+        self.assertTrue(h.run(60, until=lambda x: not x.has('room_cold')))
+
+    def test_an_outage_pauses_every_room_cold_timer_as_a_missing_context_does(self):
+        # review-ha-6, same class: an underfloor cold spell in progress pauses
+        # up to cold_pause (24 h) while the context is missing, so an HA or app
+        # outage of the same length must not restart it after 6 h.
+        results = {}
+        for outage in ('ha', 'context'):
+            h = Harness(hc2(A), values={A: 17.0})
+            h.run(COLD_SETTLE['floor'] + 120)     # 2 h of the 4 h spell counted
+            self.assertFalse(h.engine.cold_dwell[A].active)
+            if outage == 'ha':
+                h.ha = 'unavailable'
+            else:
+                h.context_state = 'none'
+            h.run(10 * 60)
+            h.ha, h.context_state = 'running', 'ok'
+            results[outage] = first_dwell(h, A, 600)
+        self.assertEqual(results['ha'], results['context'])
+        self.assertLessEqual(results['ha'], 121)
+
+    def test_room_cold_after_an_outage_ends_without_a_cold_spell_for_cold_forget(self):
+        # The other end: no cold spell for COLD_FORGET_S ends it, also while
+        # HA is away (it held through the outage until then).
+        h = Harness(hc1(A), values={A: 17.0})
+        self.assertIsNotNone(h.first('room_cold', 211 + PERSIST))
+        seen = h.engine.cold_seen[A]
+        h.ha = 'unavailable'
+        while h.now - seen <= r.COLD_FORGET_S - 60:
+            h.step()
+            self.assertTrue(h.has('room_cold'))
+        h.run(2)
+        self.assertFalse(h.has('room_cold'))
+        self.assertNotIn(A, h.engine.cold_since)
+
     def test_room_cold_lasts_across_the_settle_of_a_phase_change(self):
         # A dead radiator: the finding stays through the 22:00 setback and the
         # next morning's settle (no new notice every day).
@@ -487,7 +553,7 @@ class DayPhaseDwellTests(unittest.TestCase):
         # at night and returning the next day.
         for name, harness in (('hc1', lambda: Harness(hc1(A, B), values={A: 17.5, B: 17.8})),
                               ('hc2', lambda: Harness(hc2(A, B), values={A: 17.5, B: 17.0}))):
-            for mode in ('setback', 'once_setback', None):
+            for mode in ('once_setback', None):
                 for status in (5, 0, 6):
                     h = harness()
                     self.assertIsNotNone(h.first('circuit_cold', 2000), (name, mode, status))
@@ -498,7 +564,10 @@ class DayPhaseDwellTests(unittest.TestCase):
                         h.step()
                         self.assertTrue(h.has('circuit_cold'), (name, mode, status, minute))
         # The owner's day modes after a setback: switched off in a day phase, it ends.
-        for mode in ('day', 'once_day'):
+        # Manual Absenken too from 1.6.17 (owner 2026-11-25): it is judged like a
+        # day phase against the setback target, so the controller switching it
+        # off (warm enough) ends it as in a day phase.
+        for mode in ('day', 'once_day', 'setback'):
             h = Harness(hc1(A, B), values={A: 17.5, B: 17.8})
             self.assertIsNotNone(h.first('circuit_cold', 600))
             h.set_circuit('hc1', phase='setback', target=18.0, status=3)
@@ -507,6 +576,139 @@ class DayPhaseDwellTests(unittest.TestCase):
             h.step()
             self.assertFalse(h.has('circuit_cold'), mode)
 
+
+def schedule_context(h, **schedules):
+    """Context major 3 (app 1.6.17): each circuit carries the Auto program's phase."""
+    h.context['schema'] = 'harg-house-context/3'
+    for name in ('hc1', 'hc2'):
+        h.context['circuits'][name]['schedule'] = schedules.get(name)
+
+
+class ScheduledDayTests(unittest.TestCase):
+    """Owner decision 2026-11-25 (a): a Störung held after a setback while the
+    controller keeps the circuit off without a phase ends when the program's
+    next day phase begins (the controller decided it is warm enough); the
+    overnight hold stays."""
+
+    def held_overnight(self, name, harness, status):
+        h = harness()
+        schedule_context(h, **{name: 'day'})
+        self.assertIsNotNone(h.first('circuit_cold', 2000), (name, status))
+        h.set_circuit(name, phase='setback', target=18.0, status=3, schedule='setback')
+        h.run(30)
+        h.set_circuit(name, phase=None, target=None, status=status)
+        for minute in range(8 * 60):
+            h.step()
+            self.assertTrue(h.has('circuit_cold'), (name, status, minute))
+        return h
+
+    def test_the_hold_ends_when_the_program_turns_day(self):
+        for name, harness in (('hc1', lambda: Harness(hc1(A, B), values={A: 17.5, B: 17.8})),
+                              ('hc2', lambda: Harness(hc2(A, B), values={A: 17.5, B: 17.0}))):
+            for status in (5, 0, 6):
+                with self.subTest(name=name, status=status):
+                    h = self.held_overnight(name, harness, status)
+                    h.set_circuit(name, schedule='day')        # 06:00: the day phase begins, still off
+                    h.step()
+                    self.assertFalse(h.has('circuit_cold'))
+                    # The next evening off again: nothing comes back by itself.
+                    h.set_circuit(name, schedule='setback')
+                    h.run(8 * 60)
+                    self.assertFalse(h.has('circuit_cold'))
+
+    def test_an_unknown_program_phase_keeps_the_hold(self):
+        # schedule null (D9/program unknown) or an older adapter (major 2, no key):
+        # the hold stays up to the 24 h bound, as in 1.6.16.
+        for major3 in (True, False):
+            with self.subTest(major3=major3):
+                h = Harness(hc1(A, B), values={A: 17.5, B: 17.8})
+                if major3:
+                    schedule_context(h)
+                self.assertIsNotNone(h.first('circuit_cold', 2000))
+                h.set_circuit('hc1', phase='setback', target=18.0, status=3)
+                h.run(30)
+                h.set_circuit('hc1', phase=None, target=None, status=5)
+                for minute in range(20 * 60):
+                    h.step()
+                    self.assertTrue(h.has('circuit_cold'), (major3, minute))
+                self.assertTrue(h.run(5 * 60, until=lambda x: not x.has('circuit_cold')))
+
+    def test_major_3_context_keys_are_exact(self):
+        h = Harness(hc1(A), values={A: 20.0})
+        schedule_context(h, hc1='day')
+        status, ctx = r.validate_context(json.dumps(h.context))
+        self.assertEqual(status, 'ok')
+        self.assertEqual((ctx['major'], ctx['circuits']['hc1']['schedule'], ctx['circuits']['hc2']['schedule']),
+                         (3, 'day', None))
+        for bad in ('night', 1, True):
+            h.context['circuits']['hc1']['schedule'] = bad
+            self.assertIsNone(r.validate_context(json.dumps(h.context))[1]['circuits']['hc1']['schedule'])
+        del h.context['circuits']['hc1']['schedule']
+        self.assertEqual(r.validate_context(json.dumps(h.context))[0], 'invalid')
+        # Major 1 or 2 with the key is another major: invalid.
+        h.context['circuits']['hc1']['schedule'] = 'day'
+        h.context['schema'] = 'harg-house-context/2'
+        self.assertEqual(r.validate_context(json.dumps(h.context))[0], 'invalid')
+        self.assertEqual(r.CONTEXT_MAJORS, (1, 2, 3))
+
+
+class SetbackModeTests(unittest.TestCase):
+    """Owner decision 2026-11-25 (b): a circuit in manual Absenken is judged for
+    Heizkreis zu kalt against its setback target, with the dwell and margins of
+    the day-phase rule (radiator 2 h settle, underfloor 4 h, then 3 h of every
+    reference room 3 K below, 2.5 K holds), and underfloor rooms for Raum zu
+    kalt as in a day phase."""
+
+    def harness(self, kind, values):
+        entities = list(values)
+        h = Harness(hc1(*entities) if kind == 'radiator' else hc2(*entities), values=values)
+        name = 'hc1' if kind == 'radiator' else 'hc2'
+        h.set_circuit(name, mode='setback', phase='setback', target=18.0, status=3)
+        return h, name
+
+    def test_a_cold_house_in_absenken_is_a_fault(self):
+        for kind in ('radiator', 'floor'):
+            with self.subTest(kind=kind):
+                h, name = self.harness(kind, {A: 14.5, B: 14.8})
+                minute = h.first('circuit_cold', 2000)
+                self.assertEqual(minute, COLD_SETTLE[kind] + 180 + 1)
+                row = h.rows('circuit_cold')[0]
+                self.assertEqual((row['target'], row['circuit'], row['level']), (18.0, name, 'Störung'))
+
+    def test_a_house_at_its_setback_level_is_not(self):
+        for kind in ('radiator', 'floor'):
+            with self.subTest(kind=kind):
+                h, _name = self.harness(kind, {A: 16.0, B: 15.6})     # 2 and 2.4 K below
+                self.assertIsNone(h.first('circuit_cold', 2000))
+
+    def test_absenken_switched_off_by_the_controller_ends_it(self):
+        h, name = self.harness('radiator', {A: 14.5, B: 14.8})
+        self.assertIsNotNone(h.first('circuit_cold', 2000))
+        h.set_circuit(name, status=5)
+        h.step()
+        self.assertFalse(h.has('circuit_cold'))
+
+    def test_the_night_setback_of_auto_is_still_never_judged(self):
+        h = Harness(hc1(A, B), values={A: 14.5, B: 14.8})
+        h.set_circuit('hc1', mode='auto', phase='setback', target=18.0, status=3)
+        self.assertIsNone(h.first('circuit_cold', 2000))
+
+    def test_raum_zu_kalt_in_absenken_ends_at_the_setback_level(self):
+        # Independent review: judged against the setback target, it must also end
+        # there (within 1 K), not only at the day level or after 26 h.
+        for kind in ('radiator', 'floor'):
+            with self.subTest(kind=kind):
+                h, _name = self.harness(kind, {A: 16.0})
+                self.assertIsNotNone(h.first('room_cold', 3000))
+                h.values[A] = 17.2
+                self.assertTrue(h.run(30, until=lambda x: not x.has('room_cold')))
+
+    def test_underfloor_rooms_are_judged_in_absenken(self):
+        h, _name = self.harness('floor', {A: 16.0})        # 2 K below the setback target
+        self.assertEqual(first_dwell(h, A, 2000), COLD_SETTLE['floor'] + 240 + 1)
+        h = Harness(hc2(A), values={A: 16.0})
+        h.set_circuit('hc2', mode='auto', phase='setback', target=18.0, status=3)
+        self.assertIsNone(first_dwell(h, A, 1000))
 
 WINDOW = {'radiator': 60, 'floor': 360}
 
@@ -1303,9 +1505,11 @@ class ReportTests(unittest.TestCase):
                        {'report_ack': {'instance': 'a' * 32, 'seq': 1}}):
             with self.subTest(broken=broken):
                 self.assertEqual(r.validate_context(json.dumps({**document, **broken}))[0], 'invalid')
-        # 2 is the allowance major of 1.6.8 (keys of 1); 3 is unknown.
+        # 2 is the allowance major of 1.6.8 (keys of 1); 3 adds `schedule` (1.6.17,
+        # so the keys of 1 are invalid there); 4 is unknown.
         self.assertEqual(r.validate_context(json.dumps({**document, 'schema': 'harg-house-context/2'}))[0], 'ok')
-        self.assertEqual(r.validate_context(json.dumps({**document, 'schema': 'harg-house-context/3'}))[0], 'unsupported')
+        self.assertEqual(r.validate_context(json.dumps({**document, 'schema': 'harg-house-context/3'}))[0], 'invalid')
+        self.assertEqual(r.validate_context(json.dumps({**document, 'schema': 'harg-house-context/4'}))[0], 'unsupported')
         self.assertEqual(r.validate_context('{"a":1,"a":2}')[0], 'invalid')
         missing = dict(document)
         del missing['outdoor']

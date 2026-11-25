@@ -22,6 +22,7 @@ NOTIFY_PATH = '/core/api/services/persistent_notification/create'
 DISMISS_PATH = '/core/api/services/persistent_notification/dismiss'
 REQUEST_TIMEOUT = 5
 MAX_RESPONSE = 65536
+ZONE_PATTERN = re.compile(r'[A-Za-z][A-Za-z0-9_+-]{0,30}(?:/[A-Za-z0-9_+-]{1,30}){0,2}')
 
 
 @dataclass(frozen=True)
@@ -121,7 +122,9 @@ def request_worker(request):
                     # or clear a newer problem while an outage backlog drains.
                     if any(condition[key] != event[key] for key in ('status', 'reason')):
                         return {'ok': True}
-                action, payload = health.ha_notification(event)
+                zone = request.get('zone')
+                action, payload = health.ha_notification(
+                    event, zone if isinstance(zone, str) and ZONE_PATTERN.fullmatch(zone) else None)
                 if action is None:
                     return {'ok': True}
                 path = NOTIFY_PATH if action == 'create' else DISMISS_PATH
@@ -162,8 +165,11 @@ def bounded_request(request):
 class Monitor:
     """One poller, durable bounded outbox, at most one send per interval."""
     def __init__(self, settings, token, state_directory='/data/health-monitor',
-                 *, network=bounded_request, clock=time.time, monotonic=time.monotonic):
+                 *, network=bounded_request, clock=time.time, monotonic=time.monotonic, zone=lambda: None):
         self.settings, self.token, self.network, self.clock = settings, token, network, clock
+        # Home Assistant's time zone (the house monitor reads it): a time in a
+        # notification's text is given in it, else in UTC.
+        self.zone = zone
         # (wall, monotonic) of the last recorded evaluation. It lives only in this
         # process; after a restart the persisted wall stamp is the only reference.
         self.monotonic, self.reading = monotonic, None
@@ -176,6 +182,13 @@ class Monitor:
         self._status = {'schema_version': 1, 'enabled': True, 'running': False,
                         'last_check_at': None, 'queue_count': None,
                         'last_delivery_condition': None, 'last_error': None}
+
+    def zone_name(self):
+        try:
+            zone = self.zone()
+        except Exception:
+            return None
+        return zone if isinstance(zone, str) and ZONE_PATTERN.fullmatch(zone) else None
 
     def status(self):
         with self._status_lock:
@@ -246,7 +259,8 @@ class Monitor:
                              if not any(later['component'] == item['component'] for later in queue[i + 1:]))
                 event = queue[index]
                 try:
-                    self.network({'kind': 'notification', 'token': self.token, 'event': event, 'condition': rows[event['component']]})
+                    self.network({'kind': 'notification', 'token': self.token, 'event': event, 'condition': rows[event['component']],
+                                  'zone': self.zone_name()})
                 except health.Refusal:
                     return {'pending': len(proposed['queue']), 'delivered': 0, 'error': 'delivery_failed'}
                 if all(rows[event['component']][key] == event[key] for key in ('status', 'reason')):

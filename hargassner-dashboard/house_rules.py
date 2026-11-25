@@ -11,7 +11,7 @@ import json
 import math
 import re
 
-APP_VERSION = '1.6.16'
+APP_VERSION = '1.6.17'
 REPORT_SCHEMA = 'harg-house-report/1'
 CONTEXT_SCHEMA_PREFIX = 'harg-house-context/'
 # Context major 2 has the keys of 1; an adapter sends it only to an app that
@@ -20,7 +20,14 @@ CONTEXT_SCHEMA_PREFIX = 'harg-house-context/'
 # 1.6.7 finding keys, so an older adapter never refuses it.
 # (No new int constant here: rules_digest() hashes them and would make 1.6.8
 # discard the room state saved by 1.6.7.)
-CONTEXT_MAJORS = (1, 2)
+# Major 3 (app 1.6.17, owner decision 2026-11-25) adds per circuit `schedule`,
+# the Auto program's phase now ("day", "setback" or null): a Störung held after
+# a setback while the controller keeps the circuit off without a phase ends
+# when it turns "day". An adapter sends 3 only to an app that lists it.
+CONTEXT_MAJORS = (1, 2, 3)
+# A frozenset, not an int: rules_digest() hashes int/float constants, and a new
+# one would make every installation start its room state fresh.
+SCHEDULE_MAJORS = frozenset((3,))
 CIRCUITS = ('hc1', 'hc2')
 
 ENTITY_PATTERN = re.compile(r'sensor\.[a-z0-9_]{1,200}')
@@ -482,6 +489,7 @@ CONTEXT_KEYS = frozenset(('schema', 'context', 'online', 'maintenance', 'outdoor
                           'report_ack', 'circuits'))
 CONTEXT_CIRCUIT_KEYS = frozenset(('mode', 'phase', 'target', 'day_target', 'setback_target', 'status', 'pump',
                                   'flow', 'flow_target', 'type', 'type_source'))
+CONTEXT_CIRCUIT_KEYS_SCHEDULE = CONTEXT_CIRCUIT_KEYS | {'schedule'}
 
 
 def _bounded(value, low, high):
@@ -516,15 +524,17 @@ def validate_context(raw):
     if major not in CONTEXT_MAJORS:
         return 'unsupported', None
     # v1 has exact key sets (spec 9.1): a missing or added key is another major.
-    # v2 has the same keys (it only tells that the adapter reads `allowance`).
+    # v2 has the same keys (it only tells that the adapter reads `allowance`);
+    # v3 adds `schedule` to each circuit.
     if set(document) != CONTEXT_KEYS:
         return 'invalid', None
     context = document.get('context')
     if not isinstance(context, str) or not CONTEXT_ID_PATTERN.fullmatch(context):
         return 'invalid', None
     circuits = document.get('circuits')
+    keys = CONTEXT_CIRCUIT_KEYS_SCHEDULE if major in SCHEDULE_MAJORS else CONTEXT_CIRCUIT_KEYS
     if (not isinstance(circuits, dict) or set(circuits) != set(CIRCUITS)
-            or any(not isinstance(row, dict) or set(row) != CONTEXT_CIRCUIT_KEYS for row in circuits.values())):
+            or any(not isinstance(row, dict) or set(row) != keys for row in circuits.values())):
         return 'invalid', None
     for key in ('online', 'maintenance'):
         if type(document.get(key)) is not bool:
@@ -560,6 +570,7 @@ def validate_context(raw):
             'flow_target': _bounded(source.get('flow_target'), 0, 120),
             'type': circuit_type,
             'type_source': 'controller' if circuit_type is not None and source.get('type_source') == 'controller' else None,
+            'schedule': source.get('schedule') if source.get('schedule') in ('day', 'setback') else None,
         }
     return 'ok', result
 
@@ -1082,13 +1093,33 @@ class HouseEngine:
             for latch in (sensor.missing, sensor.unavailable, sensor.implausible_latch, sensor.battery_latch):
                 latch.update(None, None, now, elapsed, math.inf, CONTEXT_FREE_PAUSE_S)  # a pause never completes a dwell
         for (code, entity), latch in self.latches.items():
+            if code == 'room_cold' and latch.active:
+                # Only the room ends it (_room_cold: back at its day level, or
+                # COLD_FORGET_S without a cold spell), as while the context is
+                # missing (review-ha-6): an outage of HA or the app longer than
+                # the pause limit no longer ends it and raises it again as new.
+                # The forget runs during the outage too.
+                seen = self.cold_seen.get(entity)
+                if seen is None or now - seen > COLD_FORGET_S:
+                    latch.clear()
+                    self.cold_since.pop(entity, None)
+                    self.cold_seen.pop(entity, None)
+                else:
+                    latch.timer.paused = 0.0
+                continue
             circuit = self.sensors[entity].role
             limit = self._pause_limit(circuit, code)
             if code == 'limit_cold' and latch.active:
                 limit = TYPE_CONSTANTS['floor']['cold_pause']   # held through a night (see _circuit)
             latch.update(None, None, now, elapsed, math.inf, limit)
         for entity, latch in self.cold_dwell.items():
-            latch.update(None, None, now, elapsed, math.inf, self._pause_limit(self.sensors[entity].role, 'room_cold'))
+            # The same limit as _circuit (review-ha-6): an underfloor cold spell
+            # pauses up to cold_pause there, so it must here.
+            role = self.sensors[entity].role
+            kind = self._types.get(role)
+            limit = (TYPE_CONSTANTS['floor']['cold_pause'] if TYPE_CONSTANTS.get(kind, {}).get('cold_day_only')
+                     else self._pause_limit(role, 'room_cold'))
+            latch.update(None, None, now, elapsed, math.inf, limit)
         for circuit in self.circuits.values():
             limit = self._pause_limit(circuit.name, 'circuit')
             # circuit_cold holds through a night (see _circuit): HA or the app
@@ -1291,6 +1322,11 @@ class HouseEngine:
         day_only = bool(floor_rules.get('cold_day_only'))
         cold_settling = day_only and (circuit.settle_start is None
                                       or now - circuit.settle_start < floor_rules['cold_settle'])
+        # The phases the cold checks judge: a day phase, and manual Absenken
+        # against its setback target (owner decision 2026-11-25: a circuit kept
+        # in Absenken is judged too, with the same dwell and margins).
+        absenken = bool(source) and source['phase'] == 'setback' and source['mode'] == 'setback'
+        judged_phase = bool(source) and source['phase'] == 'day' or absenken
         # Per room this step: in an airing episode, warming, back at its day level.
         airing, warming, reached = {}, {}, {}
         for entity in entities:
@@ -1299,8 +1335,11 @@ class HouseEngine:
             airing[entity] = sensor.airing_episode(now, recovery, d is not None and d < 1.0)
             rise = sensor.trend(now, constants['trend']) if entity in values else None
             warming[entity] = rise is not None and rise >= sensor.min_rise() - 1e-9
-            reached[entity] = (usable_ctx and entity in values and upper is not None
-                               and values[entity] >= upper - self.options.allowance(entity) - 1.0 - 1e-9)
+            # Back at its level: the day level, or in manual Absenken (judged
+            # against the setback target, owner 2026-11-25) the setback level.
+            level = target if absenken else upper
+            reached[entity] = (usable_ctx and entity in values and level is not None
+                               and values[entity] >= level - self.options.allowance(entity) - 1.0 - 1e-9)
         for entity in cross:
             rise = self.sensors[entity].trend(now, constants['trend']) if entity in values else None
             warming[entity] = rise is not None and rise >= self.sensors[entity].min_rise() - 1e-9
@@ -1366,7 +1405,7 @@ class HouseEngine:
             # to cold_pause), so it can add up over the evening phases of a
             # programme like 06:00-09:00 and 15:00-23:00 instead of never
             # completing behind an 8 h settle.
-            if day_only and base is not None and source['phase'] != 'day':
+            if day_only and base is not None and not judged_phase:
                 fire = hold = None
             elif base is not True:
                 fire = hold = base
@@ -1507,7 +1546,7 @@ class HouseEngine:
         floor_branch = bool(constants.get('cold_day_only'))
         cold_limit = limit
         phase_known = bool(source) and source['phase'] is not None
-        day_phase = phase_known and source['phase'] == 'day'
+        day_phase = judged_phase
         # The VM qualifies a phase only for states 1-4: a circuit the
         # controller switches off after its setback (heating limit 5, inactive
         # 0, frost protection 6) arrives without one. It is still that setback,
@@ -1515,9 +1554,14 @@ class HouseEngine:
         # review-monitor-5), in every mode with a setback (Auto, Absenken,
         # 1x Absenken) or an unknown one (review-monitor-6). Mode Aus, a day
         # mode or an earlier day phase: the rule ends.
+        # It ends when the program's next day phase begins (context major 3,
+        # owner decision 2026-11-25): the controller then keeps the circuit off
+        # because it is warm enough. Without a known program phase it holds up
+        # to the 24 h bound as before. Manual Absenken is judged (above), so the
+        # controller switching it off ends it as in a day phase.
         off_after_setback = (base is False and not phase_known and bool(source)
-                             and source.get('mode') not in ('off', 'day', 'once_day')
-                             and circuit.last_phase == 'setback')
+                             and source.get('mode') not in ('off', 'day', 'once_day', 'setback')
+                             and circuit.last_phase == 'setback' and source.get('schedule') != 'day')
         if base is None:
             fire = hold = None
             if circuit.circuit_cold.active:
@@ -1537,11 +1581,12 @@ class HouseEngine:
         else:
             if floor_branch or circuit.circuit_cold.active:
                 cold_limit = big
-            if (len(judged) < 2 or target is None or source.get('day_target') is None
+            configured = source.get('day_target' if source['phase'] == 'day' else 'setback_target')
+            if (len(judged) < 2 or target is None or configured is None
                     or any(self.sensors[e].airing(now, recovery) for e in judged)):
                 fire = hold = None
             else:
-                fire, hold = cold(judged, 3.0, 2.5)   # target is the day target in the day phase
+                fire, hold = cold(judged, 3.0, 2.5)   # target: the day target, or the setback target in Absenken
                 if fire and any(warming[e] for e in judged):
                     fire = None  # still warming (after a holiday, a cold morning): wait, a working circuit
         if (local_minutes is not None and local_minutes * 60 < max(elapsed, 1)

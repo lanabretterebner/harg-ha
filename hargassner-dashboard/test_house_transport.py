@@ -329,14 +329,14 @@ class WorkerTests(unittest.TestCase):
         world.context()
         world.cycle()
         document = context_document(5)
-        document['schema'] = 'harg-house-context/3'     # 2 is the allowance major of 1.6.8
+        document['schema'] = 'harg-house-context/4'     # 2: allowance (1.6.8), 3: schedule (1.6.17)
         for second in range(300):
             if second % 60 == 0:
                 world.inbox.append((TOPIC, json.dumps(document), False))
             world.cycle()
         report = world.reports()[-1]
         self.assertEqual((report['monitor'], report['reason']), ('unknown', 'context_version_unsupported'))
-        self.assertEqual(report['context_majors'], [1, 2])
+        self.assertEqual(report['context_majors'], [1, 2, 3])
         self.assertIn('House monitor: context_version_unsupported.', world.logs)
         self.assertIn('Version der VM passt nicht', world.monitor.page().decode())
 

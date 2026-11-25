@@ -10,6 +10,7 @@ import tempfile
 import threading
 import unittest
 from unittest.mock import patch
+from unittest.mock import patch
 import app_monitor as m
 import health_alerts as h
 import run_app
@@ -116,6 +117,37 @@ class MonitorTests(unittest.TestCase):
         self.assertNotIn('telnet', cleanups)
         self.assertEqual(cleanups.count('heartbeat'), 2)
         self.assertEqual(cleanups.count('certificate'), 1)
+
+    def test_notification_carries_the_ha_time_zone(self):
+        # review-ha-6-2: the capped maintenance text names its start in HA's zone.
+        self.monitor = m.Monitor(self.settings, SUPERVISOR, self.root / 'state', network=self.network,
+                                 clock=lambda: self.now, monotonic=lambda: self.tick, zone=lambda: 'Europe/Vienna')
+        self.documents['checks']['telnet'] = {'checked_at': self.now, 'status': 'fault'}
+        self.monitor.poll_once()
+        sent = [call for call in self.calls if call['kind'] == 'notification']
+        self.assertEqual(sent[-1]['zone'], 'Europe/Vienna')
+        # A zone that is not a plain IANA name is not passed on; nor without a source.
+        for zone in (lambda: 'x;y', lambda: None, lambda: 1 / 0):
+            self.assertIsNone(m.Monitor(self.settings, SUPERVISOR, self.root / 'state', network=self.network,
+                                        zone=zone).zone_name())
+        self.assertIsNone(self.start().zone_name())
+
+    def test_request_worker_formats_with_the_zone(self):
+        event = {'schema_version': 1, 'event_id': 'a' * 64, 'component': 'telnet', 'transition': 'alert',
+                 'status': 'unknown', 'reason': 'maintenance', 'observed_at': 2000000000.0 - 7300,
+                 'evaluated_at': 2000000000.0}
+        bodies = []
+
+        class Connection:
+            def __init__(self, *args, **kwargs): pass
+            def request(self, method, path, body=None, headers=None): bodies.append(json.loads(body))
+            def getresponse(self): return type('R', (), {'status': 200})()
+            def close(self): pass
+        with patch.object(m.http.client, 'HTTPConnection', Connection):
+            reply = m.request_worker({'kind': 'notification', 'token': SUPERVISOR, 'event': event,
+                                      'condition': None, 'zone': 'Europe/Vienna'})
+        self.assertTrue(reply['ok'])
+        self.assertIn('(seit 03:31)', bodies[0]['message'])
 
     def test_clock_guard_is_also_used_for_notification_freshness_and_cleanup(self):
         self.monitor.poll_once(); self.advance(-600); self.monitor.poll_once()
@@ -357,8 +389,8 @@ class RunnerTests(unittest.TestCase):
             def shutdown(self): proxy_stop.set()
             def server_close(self): pass
         class Worker:
-            def __init__(self, settings, token):
-                if token != SUPERVISOR: raise AssertionError('Wrong synthetic token')
+            def __init__(self, settings, token, zone):
+                if token != SUPERVISOR or zone() is not None: raise AssertionError('Wrong synthetic token or zone')
             def status(self): return run_app.disabled_status()
             def operation_heartbeat(self): return {'status': 'healthy'}
             def run(self, stop): stop.wait(1); monitor_stopped.set()

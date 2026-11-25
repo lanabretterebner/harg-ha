@@ -17,20 +17,43 @@ def load(relative):
 
 
 class PackageTests(unittest.TestCase):
-    def test_frontend_1417_versions_and_independent_app_1616(self):
+    def test_frontend_1417_versions_and_independent_app_1617(self):
         package = json.loads((ROOT / "package.json").read_text())
         lock = json.loads((ROOT / "package-lock.json").read_text())
         release = json.loads((ROOT / "release.json").read_text())
         validation = json.loads((ROOT / "validation.json").read_text())
         self.assertEqual({package["version"], lock["version"], lock["packages"][""]["version"], release["version"], validation["version"]}, {"1.4.17"})
-        self.assertEqual(release["supervisor_app_version"], "1.6.16")
-        self.assertEqual(validation["supervisor_app_version"], "1.6.16")
+        self.assertEqual(release["supervisor_app_version"], "1.6.17")
+        self.assertEqual(validation["supervisor_app_version"], "1.6.17")
         self.assertEqual(release["component_checkpoint"], validation["component_checkpoint"])
-        self.assertEqual(release["component_checkpoint"], "frontend-1.4.17-app-1.6.16")
-        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.6.16")
-        self.assertIn("ARG BUILD_VERSION=1.6.16\n", (ROOT / "hargassner-dashboard/Dockerfile").read_text())
-        self.assertIn("APP_VERSION = '1.6.16'", (ROOT / "hargassner-dashboard/house_rules.py").read_text())
+        self.assertEqual(release["component_checkpoint"], "frontend-1.4.17-app-1.6.17")
+        self.assertEqual(load("hargassner-dashboard/config.yaml")["version"], "1.6.17")
+        self.assertIn("ARG BUILD_VERSION=1.6.17\n", (ROOT / "hargassner-dashboard/Dockerfile").read_text())
+        self.assertIn("APP_VERSION = '1.6.17'", (ROOT / "hargassner-dashboard/house_rules.py").read_text())
         self.assertIn('const VERSION = "1.4.17";', (ROOT / "dist/hargassner-thermostat-popup.js").read_text())
+
+    def test_frontend_calls_only_the_three_qualified_services(self):
+        # review-ha-6: the card and popup write only the climate target (the
+        # adapter turns it into the room correction), the six-mode preset and
+        # the commissioned correction number; nothing else (no D12, no other
+        # parameter, no WebSocket command) is called in the bundle's own text.
+        # A text scan: it does not see computed names, and the native HA
+        # dialog keeps its own hass functions (popup Proxy) for HA's code.
+        text = (ROOT / "dist/hargassner-thermostat-popup.js").read_text()
+        literal = re.findall(r'callService\(\s*"([a-z_]+)"\s*,\s*"([a-z_]+)"', text)
+        self.assertEqual(set(literal), {("climate", "set_temperature"), ("climate", "set_preset_mode"),
+                                        ("number", "set_value")})
+        calls = [m.start() for m in re.finditer(r'callService\(', text)]
+        spread = [i for i in calls if text.startswith('callService(...args)', i)]
+        self.assertEqual(len(calls), len(literal) + len(spread))
+        for index in spread:
+            # Each pass-through forwards a native gesture only after its own
+            # guard admitted exactly climate.set_temperature.
+            guard = text[text.rfind('const guarded = (...args) =>', 0, index):index]
+            self.assertIn('args[0] !== "climate" || args[1] !== "set_temperature"', guard)
+        for forbidden in ("callWS", "callApi", "sendMessage", "fetch(", "XMLHttpRequest", "WebSocket("):
+            self.assertNotIn(forbidden, text)
+        self.assertIn('const PRESETS = Object.freeze(["Aus", "Auto", "Heizen", "Absenken", "1x Heizen", "1x Absenken"]);', text)
 
     def test_repository_and_app_are_discoverable_independently_of_hacs(self):
         repository = load("repository.yaml")

@@ -2,7 +2,7 @@
 
 Home Assistant clients for an existing Hargassner local-control backend:
 thermostat frontend 1.4.17 (a dashboard card, the matching native popup and
-device-page grouping), the optional Supervisor app 1.6.16 (the dashboard
+device-page grouping), the optional Supervisor app 1.6.17 (the dashboard
 through HA Ingress, with optional monitoring) and reference examples.
 
 | Component | Installation | Result |
@@ -64,6 +64,12 @@ MQTT/backend services. No live backend identity, configuration or token is inclu
   and an unknown mode; in Aus, Heizen or 1x Heizen a circuit switched off
   still ends it. Saved room state continues. Update the Supervisor app; HACS
   frontend 1.4.17 is unchanged.
+
+- **App 1.6.17**: a Heizkreis zu kalt held
+  overnight ends when the program's next day phase begins (with a VM that sends
+  it); manual Absenken is judged against the setback target; maintenance past
+  the VM's 2 h cap gets its own notification text. Saved room state continues.
+  Update the Supervisor app; HACS frontend 1.4.17 is unchanged.
 
 The Marketplace (or HACS) updates only the browser resource; update the app through Supervisor.
 Existing tags and release assets remain immutable. History:

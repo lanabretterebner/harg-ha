@@ -163,12 +163,16 @@ def main():
         # Disabled VM-health monitoring never reads Supervisor credentials or
         # its state. The house monitor reads the token lazily in its own thread.
         monitor = None
+        started = []    # the house monitor, once started (below)
         if settings.enabled:
             stage = 'supervisor_token'
             token = supervisor_token()
             stage = 'monitor_state'
-            monitor = Monitor(settings, token)
+            # HA's time zone as the house monitor last read it (texts only).
+            monitor = Monitor(settings, token, zone=lambda: started[0].zone if started else None)
         house = start_house_monitor()
+        if house is not None:
+            started.append(house)
         picker = RoomPicker(house, learning=start_learning(house, settings.upstream)) if house is not None else None
         stage = 'ingress_listener'
         server = MonitorProxyServer(('0.0.0.0', 8099), settings.upstream, monitor.status if monitor else disabled_status,

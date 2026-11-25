@@ -346,7 +346,7 @@ class WireTests(unittest.TestCase):
     def test_against_an_older_adapter_the_report_keeps_the_167_keys(self):
         world, report = self.cold_report(1)
         check_report(self, world.published[-1][1])
-        self.assertEqual(report['context_majors'], [1, 2])
+        self.assertEqual(report['context_majors'], [1, 2, 3])
         for finding in report['findings']:
             self.assertEqual(set(finding), OLD_FINDING_KEYS)
 

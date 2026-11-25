@@ -1,5 +1,55 @@
 # Changelog
 
+## 1.6.17
+
+Three owner decisions (2026-11-25) and the review-ha-6 fixes. The saved room
+state continues (rule constants and fingerprints unchanged), also after a
+rollback to 1.6.16. Two of the changes need a VM that sends the new data; with
+an older VM this version behaves as 1.6.16 there.
+
+- **Heizkreis zu kalt held overnight ends when the next day phase begins.**
+  In Auto the controller may keep a circuit off after its setback without a
+  phase (heating limit, frost protection). The Störung held through the night
+  (1.6.15) now ends when the circuit's time program enters its next day phase:
+  the controller then decided it is warm enough. Before, it held through that
+  day up to 24 hours. The VM sends the program's phase from house context
+  version 3 (adapter of the same release); with an older VM, or while the
+  program is unknown, the 24-hour bound stays. As on the dashboard, a weekly
+  entry switched off at the controller (INAKT) counts as active and a clock
+  error measured only from one side is not corrected; then the fault can end
+  early.
+- **Manual Absenken is judged for Heizkreis zu kalt**, against the setback
+  target, with the times and margins of the day-phase check (radiators 2 h
+  settle, underfloor 4 h, then 3 h of every reference room 3 degrees below,
+  2.5 degrees hold it). Underfloor rooms are judged for Raum zu kalt in
+  Absenken too; before, a circuit kept in Absenken was checked only for frost.
+  The controller switching such a circuit off (warm enough) ends the Störung,
+  as in a day phase. A room reported there is back once within 1 degree of
+  the setback target. The night setback of Auto is still never judged.
+- **Maintenance past the 2-hour cap has its own notification text.** Instead
+  of "Heizung: Messwerte prüfen" the Messwerte notification says "Wartung seit
+  über 2 Stunden aktiv (seit HH:MM) - Messwerte werden wieder geprüft. Wartung
+  prüfen.", the time in Home Assistant's time zone. It needs the VM's health
+  report with the new `telnet_maintenance` marker; an older VM keeps the
+  general text, and app 1.6.16 ignores the marker.
+- **Betriebsüberwachung: a silent VM is excused as maintenance at most until
+  the VM's 2-hour cap** (review-ha-6, open Low of review-monitor-6-3). After a
+  report saying the maintenance has lasted 2 hours (`maintenance_capped`), a
+  silent VM is a Störung after 90 seconds instead of "wird gerade gewartet"
+  for another 15 minutes; a maintenance close to its cap is excused only for
+  what is left of the 2 hours. An adapter without `maintenance_since` keeps
+  the 15 minutes.
+- **Raum zu kalt stays through a longer outage of Home Assistant or the app**
+  (review-ha-6). An outage longer than 2 hours (radiators) or 6 hours
+  (underfloor), for example a host down overnight or a long update, ended the
+  notice and raised it again as a new one after a new cold spell (1.5 hours
+  for radiators, 4 hours in a day phase for underfloor), while a
+  missing VM context of the same length kept it. Now only the room ends it, as
+  before: back within 1 degree of its day target, or 26 hours without a cold
+  spell, which now also counts while Home Assistant is away.
+  An underfloor cold spell still being counted pauses up to 24 hours during
+  such an outage too, as while the VM context is missing (it restarted after 6).
+
 ## 1.6.16
 
 One more fix to **Heizkreis zu kalt** (radiator and underfloor alike). The
